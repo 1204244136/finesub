@@ -236,9 +236,9 @@ label 记的是**引入该 wheel 的那次 finesub 发布**（便于追溯是哪
 [`docs/manual/ct2-wheel.md`](docs/manual/ct2-wheel.md)，补丁与 CMake 构建标志见
 [`tools/wt_refine_port/ct2-patches/README.md`](tools/wt_refine_port/ct2-patches/README.md)。
 
-**当前状态**：发布着的是手工编的 Windows CUDA wheel（Release `ct2-4.8.1+finesub0.4.0`），`[runtime]` 与两份锁引用它；
-`cublas64_12.dll` 由 `speech/runtime/cuda_libs.py` 在建模型前主动找（`docs/ct2-distribution.md` 的 cuBLAS 条）。CI 编的五个变体
-（含替换手工版的 Windows CUDA，带 encoder 的 flash attention）已编、已验，随下次发版发布（owner 2026-10-10），
+**当前状态**：发布着的是 CI 编的五个变体（Release `ct2-4.8.1+finesub0.6.0`，随 0.6.0 发布；Windows CUDA 带 encoder 的
+flash attention），`[runtime]` 与两份锁引用其中的 Windows CUDA；`cublas64_12.dll` 由 `speech/runtime/cuda_libs.py` 在建模型前
+主动找（`docs/ct2-distribution.md` 的 cuBLAS 条）。手工编的 `ct2-4.8.1+finesub0.4.0` 留在 Release 里给旧版本用。
 见 `docs/ct2-distribution.md`「CI 构建」。
 
 ## 开发原则

@@ -150,7 +150,7 @@ runtime = [
   # managed runtime is win_amd64 / cp312 / cu128 and nothing else. Without it
   # the lock resolves stock 4.8.1 -- installs cleanly, then fails at ASR start,
   # since only the patched build emits the WT refine trace.
-  "ctranslate2 @ https://github.com/caca2331/finesub/releases/download/ct2-4.8.1%2Bfinesub0.4.0/ctranslate2-4.8.1+finesub0.4.0.cu128-cp312-cp312-win_amd64.whl",
+  "ctranslate2 @ https://github.com/caca2331/finesub/releases/download/ct2-4.8.1%2Bfinesub0.6.0/ctranslate2-4.8.1+finesub0.6.0.cu128-cp312-cp312-win_amd64.whl",
 ]
 # Offline probes under `tools/bench/` (today: P18's SBD model and its gate).
 # No runtime path imports these -- `tools/` is maintained on demand -- but the

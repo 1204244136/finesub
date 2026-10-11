@@ -301,15 +301,14 @@ auto_repair = false   # 对不上时只提示，不自动重建（包括升级 F
 | --- | --- | --- |
 | Windows + NVIDIA | 官方支持 | 托管 CLI 或源码 |
 | Windows + CPU | 官方支持 | 托管 CLI 或源码 |
-| Linux（WSL2）+ NVIDIA | 官方支持 | 源码 ⚠ |
-| Linux（原生）+ NVIDIA | 实验 | 源码 ⚠ |
-| Linux + AMD | 实验 | 源码 ⚠ |
-| Windows + AMD | 实验（识别在 CPU） | 源码，用 `[asr-win-rocm]`：分离与第二模型上卡，识别留 CPU（Windows 的 ROCm 版 CTranslate2 还没发布）。AMD 的这条线是预览版：限 RX 7000 / 9000 系与 Strix APU、Windows 11、驱动 26.2.2、Python 3.12——见 [`repo-install.md`](repo-install.md)「Windows 上的 A 卡」 |
-| macOS（Apple Silicon）+ CPU | 实验 | 源码 ⚠ |
+| Linux（WSL2）+ NVIDIA | 官方支持 | 源码 |
+| Linux（原生）+ NVIDIA | 实验 | 源码 |
+| Linux + AMD | 实验 | 源码 |
+| Windows + AMD | 实验 | 源码，用 `[asr-win-rocm]`。AMD 的这条线是预览版：限 RX 7000 / 9000 系与 Strix APU、Windows 11、驱动 26.2.2、Python 3.12——见 [`repo-install.md`](repo-install.md)「Windows 上的 A 卡」 |
+| macOS（Apple Silicon）+ CPU | 实验 | 源码 |
 
-⚠ **带标记的四行现在还跑不了识别**：它们要的 patched CTranslate2（manylinux / macosx）由 CI 编好但
-**尚未发布**，装到的是原版，识别阶段会在加载模型时报错（其余阶段照常）。Windows 的三行不受影响。
-等级说的是「验收到什么程度」，与 wheel 发没发布是两件事。
+每一行都有对应的 patched CTranslate2（[`ct2-wheel.md`](ct2-wheel.md)）。⚠ 两个 AMD 的 wheel 没有在任何一张 A 卡上跑过；
+识别出问题时的退路见 [`repo-install.md`](repo-install.md)「其他平台」。
 
 - **官方支持**：维护者在自己的机器上验收过。
 - **社区验收**：有贡献者按[社区验收套件](../../tools/hw_acceptance/README.md)交回过记录，维护者看过。

@@ -97,8 +97,8 @@ wheels = [
 
 [[packages]]
 name = "ctranslate2"
-version = "4.8.1+finesub0.4.0.cu128"
-archive = { url = "https://github.com/caca2331/finesub/releases/download/ct2-4.8.1%2Bfinesub0.4.0/ctranslate2-4.8.1+finesub0.4.0.cu128-cp312-cp312-win_amd64.whl", hashes = { sha256 = "636d69f33f55f1b63291f0ca38cb9c1b4a3729a93ede54c8e25f3bb1438af902" } }
+version = "4.8.1+finesub0.6.0.cu128"
+archive = { url = "https://github.com/caca2331/finesub/releases/download/ct2-4.8.1%2Bfinesub0.6.0/ctranslate2-4.8.1+finesub0.6.0.cu128-cp312-cp312-win_amd64.whl", hashes = { sha256 = "7567ef160cccea178c4b0accdb18ff35812b7a198b60419208ce8567b392c63b" } }
 
 [[packages]]
 name = "cython"

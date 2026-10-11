@@ -24,7 +24,7 @@ uv venv --python 3.12
 uv pip install --torch-backend cu128 -e ".[asr,harness]"
 
 # ASR 必需的 patched CTranslate2(原版装上也跑不了,详见 ct2-wheel.md)
-uv pip install --reinstall --no-deps "https://github.com/caca2331/finesub/releases/download/ct2-4.8.1%2Bfinesub0.4.0/ctranslate2-4.8.1+finesub0.4.0.cu128-cp312-cp312-win_amd64.whl"
+uv pip install --reinstall --no-deps "https://github.com/caca2331/finesub/releases/download/ct2-4.8.1%2Bfinesub0.6.0/ctranslate2-4.8.1+finesub0.6.0.cu128-cp312-cp312-win_amd64.whl"
 ```
 
 ## 用 pip 安装
@@ -48,7 +48,7 @@ pip install torch==2.11.0 torchaudio==2.11.0 torchvision==0.26.0 --index-url htt
 pip install -e ".[asr,harness]"
 
 # 4. patched CTranslate2(原版装上也跑不了 ASR,见 ct2-wheel.md)
-pip install --force-reinstall --no-deps "https://github.com/caca2331/finesub/releases/download/ct2-4.8.1%2Bfinesub0.4.0/ctranslate2-4.8.1+finesub0.4.0.cu128-cp312-cp312-win_amd64.whl"
+pip install --force-reinstall --no-deps "https://github.com/caca2331/finesub/releases/download/ct2-4.8.1%2Bfinesub0.6.0/ctranslate2-4.8.1+finesub0.6.0.cu128-cp312-cp312-win_amd64.whl"
 ```
 
 为何将第 2、3 步分开：`torch==2.11.0` 这一约束同时被 PyPI 的 CPU 构建与 `+cu128` 构建满足，在单条
@@ -66,12 +66,10 @@ Windows + AMD 只能按下面的 URL 装，没有 uv 捷径。虚拟环境在非
 | --- | --- | --- |
 | Linux（含 WSL2）+ NVIDIA | `--index-url https://download.pytorch.org/whl/cu128` | Release 里文件名带 `cu128` 与 `manylinux` 的 wheel |
 | Linux + AMD | `--index-url https://download.pytorch.org/whl/rocm7.1` | Release 里文件名带 `rocm` 与 `manylinux` 的 wheel；**系统需装 ROCm 7.2**（wheel 按 7.2 编，torch 自带的是 7.1 运行库） |
-| Windows + AMD | 先装 ROCm SDK 四件，再装 `2.9.1+rocm7.2.1` 三件套；第 3 步改用 `[asr-win-rocm]`（见下面「Windows 上的 A 卡」） | 照常装上面 Windows 那个 `cu128` wheel |
+| Windows + AMD | 先装 ROCm SDK 四件，再装 `2.9.1+rocm7.2.1` 三件套；第 3 步改用 `[asr-win-rocm]`（见下面「Windows 上的 A 卡」） | Release 里文件名带 `rocm` 与 `win_amd64` 的 wheel |
 | macOS（Apple Silicon） | 直接 `pip install torch==2.11.0 torchaudio==2.11.0 torchvision==0.26.0`（PyPI 的 macOS 构建） | Release 里文件名带 `cpu` 与 `macosx` 的 wheel |
 
-Release 地址与覆盖命令同 [`ct2-wheel.md`](ct2-wheel.md)。⚠ **Linux 与 macOS 的 wheel 由 CI 构建，发布到
-Release 之后才能下载**；在那之前，那几个平台上只能装到原版 CTranslate2，识别阶段会在加载模型时报错
-（其余阶段不受影响）。Windows + AMD 不在此列——它装的是已经发布的那个 `cu128` wheel，识别在 CPU 上照常跑。
+Release 地址与覆盖命令同 [`ct2-wheel.md`](ct2-wheel.md)：把命令里的文件名换成上表那一份。
 
 - **Linux + NVIDIA**：CTranslate2 按名字加载 cuBLAS，程序会在建模型前从 `nvidia-cublas-cu12`（CUDA 版 torch
   的依赖）预载它，不需要设置 `LD_LIBRARY_PATH`。
@@ -101,18 +99,16 @@ Release 之后才能下载**；在那之前，那几个平台上只能装到原�
   pip install -e ".[asr-win-rocm,harness]"
   ```
 
-  ⚠ **接着补上「用 pip 安装」的第 4 步**：覆盖安装上面 Windows 那个 `cu128` 补丁 wheel。它与「识别跑在哪」无关——原版
-  CTranslate2 缺 WT refine 扩展，加载模型时就会报错。那个 wheel 的 CUDA 运行时是静态链接的、cuBLAS 到用时
-  才加载，所以在没有 N 卡驱动的机器上照样 import、照样在 CPU 上解码（CI 的冒烟就是在无卡 runner 上跑的）。
+  ⚠ **接着补上「用 pip 安装」的第 4 步**：覆盖安装 Release 里带 `rocm` 与 `win_amd64` 的补丁 wheel。它用的 ROCm 运行库
+  就是第 1 步装的 ROCm SDK，程序在建模型前向 SDK 要库的位置，不用改 `PATH`。
 
-  ⚠ **识别（ASR）仍在 CPU 上**：Windows 的 ROCm 版 CTranslate2 还没发布，所以每趟会多一条
-  `an AMD card needs the ROCm/HIP build` 的回退告警（[`ct2-wheel.md`](ct2-wheel.md)）。
-  上卡的是**人声分离、silero 辅助与第二模型校验**——分离本来就是整条管线最重的一段（CPU 路径上约占八成耗时），
-  所以这一步的收益是实打实的。Linux + AMD 不受此限，用 `[asr]` 即可：那条线有 `2.11.0+rocm7.1`。
+  ⚠ **这个 wheel 没有在任何一张 A 卡上跑过**。识别报错或结果异常时，先加 `--device cpu` 对照，再改装上面 Windows
+  那个 `cu128` wheel 退回旧状态：识别回到 CPU（每趟多一条 `an AMD card needs the ROCm/HIP build` 的告警），
+  人声分离、silero 辅助与第二模型校验照样上卡——分离本来就是整条管线最重的一段（CPU 路径上约占八成耗时）。
+  两种结果都请反馈。Linux + AMD 用 `[asr]` 即可：那条线有 `2.11.0+rocm7.1`。
 - **macOS**：目前只走 CPU。人声分离在 CPU 上最慢，长音频可能耗时很久。
 - **自检**：`torch.__version__` 应分别带 `+cu128` / `+rocm7.1` / `+rocm7.2.1`（macOS 不带后缀）；
-  `ctranslate2.__version__` 应以 `+finesub…` 结尾，末段是 `cu128` / `rocm7.2` / `cpu`——Windows + AMD
-  用的也是 `cu128` 那一份（识别在 CPU 上）。
+  `ctranslate2.__version__` 应以 `+finesub…` 结尾，末段是 `cu128` / `rocm7.2` / `cpu`。
 
 ## 自检
 
@@ -121,7 +117,7 @@ python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 # 期望:2.11.0+cu128 True —— 版本号不带 +cu128 就是装到 CPU 版了,重装 torch 三件套
 
 python -c "import ctranslate2; print(ctranslate2.__version__)"
-# 期望:4.8.1+finesub0.4.0.cu128 —— 只有 4.8.1 就是原版,重跑 CT2 覆盖命令
+# 期望:4.8.1+finesub0.6.0.cu128 —— 只有 4.8.1 就是原版,重跑 CT2 覆盖命令
 
 python -m finesub.pipeline --help
 # 期望:参数表。本项目不再安装 asr-pipeline / vad-asr 之类的命令,仓库开发版

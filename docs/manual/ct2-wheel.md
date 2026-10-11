@@ -9,12 +9,12 @@ ASR 阶段需要一份打过补丁的 CTranslate2。PyPI 上的原版无法运�
 | 平台 + 显卡 | 末段 |
 | --- | --- |
 | Windows / Linux + NVIDIA | `cu128` |
-| **Windows + AMD** | `cu128`（识别在 CPU 上跑，见 [仓库安装](repo-install.md)「Windows 上的 A 卡」） |
-| Linux + AMD | `rocm7.2` |
+| Windows / Linux + AMD | `rocm7.2` |
 | macOS | `cpu` |
 
-⚠ 除 Windows 外的 wheel 由 CI 构建，**发布前 Release 里还没有它们**；Windows + AMD 不受影响，
-它用的就是已经发布的那份 `cu128`。构建与发布的规矩见 [`../ct2-distribution.md`](../ct2-distribution.md)。
+五个都由 CI 构建，构建与发布的规矩见 [`../ct2-distribution.md`](../ct2-distribution.md)。⚠ 两个 `rocm7.2` 没有在任何一张
+A 卡上跑过；识别报错或结果异常时，改装同一 Release 里同平台的 `cu128` 那份（没有 N 卡也能在 CPU 上解码）：
+识别回到 CPU，其余阶段照常用卡。两种结果都请反馈。
 
 ## 装
 
@@ -22,10 +22,10 @@ ASR 阶段需要一份打过补丁的 CTranslate2。PyPI 上的原版无法运�
 
 ```powershell
 # uv:
-uv pip install --reinstall --no-deps "https://github.com/caca2331/finesub/releases/download/ct2-4.8.1%2Bfinesub0.4.0/ctranslate2-4.8.1+finesub0.4.0.cu128-cp312-cp312-win_amd64.whl"
+uv pip install --reinstall --no-deps "https://github.com/caca2331/finesub/releases/download/ct2-4.8.1%2Bfinesub0.6.0/ctranslate2-4.8.1+finesub0.6.0.cu128-cp312-cp312-win_amd64.whl"
 
 # pip:
-pip install --force-reinstall --no-deps "https://github.com/caca2331/finesub/releases/download/ct2-4.8.1%2Bfinesub0.4.0/ctranslate2-4.8.1+finesub0.4.0.cu128-cp312-cp312-win_amd64.whl"
+pip install --force-reinstall --no-deps "https://github.com/caca2331/finesub/releases/download/ct2-4.8.1%2Bfinesub0.6.0/ctranslate2-4.8.1+finesub0.6.0.cu128-cp312-cp312-win_amd64.whl"
 ```
 
 ## 验证安装
@@ -34,7 +34,7 @@ pip install --force-reinstall --no-deps "https://github.com/caca2331/finesub/rel
 python -c "import ctranslate2; print(ctranslate2.__version__)"
 ```
 
-- 打印 `4.8.1+finesub0.4.0.cu128` —— 正确。
+- 打印 `4.8.1+finesub0.6.0.cu128` —— 正确（其它平台末段换成上表对应的那个）。
 - 输出为 `4.8.1` 则说明仍是原版，请重新执行上面的覆盖安装命令。
 
 ## 故障排查
@@ -47,8 +47,8 @@ python -c "import ctranslate2; print(ctranslate2.__version__)"
 不会跑完一趟再交出空字幕。
 
 **AMD 卡上识别回退到 CPU，警告说 `an AMD card needs the ROCm/HIP build`**
-装的是 CUDA 版或 CPU 版，换成文件名带 `rocm` 的 wheel。⚠ 这条只对 Linux 成立：Windows 的 ROCm 版
-还没发布，那里的识别就留在 CPU（[`repo-install.md`](repo-install.md)「Windows 上的 A 卡」）。
+装的是 CUDA 版或 CPU 版，换成文件名带 `rocm` 的 wheel（Windows 上是带 `rocm` 与 `win_amd64` 的那份，
+见 [`repo-install.md`](repo-install.md)「Windows 上的 A 卡」）。
 
 **重装或升级项目后再次出现该错误**
 重装项目会按 `==4.8.1` 装回原版，请再次执行覆盖安装命令。

@@ -98,8 +98,8 @@ sha256 也算对了，就是没跑上面那条 `gh release create`。产品 rele
 | Windows x64 ROCm/HIP | `windows-2022` | `rocm7.2` | `windows-rocm.sh` | 无 |
 
 ⚠ **Windows ROCm 这一格发布前先看一眼 torch**：AMD 的 Windows 版 PyTorch 停在 2.9.1，所以那个组合走
-`[asr-win-rocm]`（`docs/manual/repo-install.md`「Windows 上的 A 卡」、计划 10.3 第 13 条）。在这个 wheel 发布
-之前，Windows 上的 A 卡分离上卡、识别留 CPU；发布后才补齐识别那一半。
+`[asr-win-rocm]`（`docs/manual/repo-install.md`「Windows 上的 A 卡」、计划 10.3 第 13 条）。这个 wheel 的 ROCm 运行库
+来自那条线装的 ROCm SDK pip 包（`cuda_libs._preload_windows_rocm`）；改 torch 线时连它一起看。
 
 - **CPU 侧与手工构建一致**：静态裁剪的 oneDNN 3.12.3，不开 MKL、不开 Ruy（理由见 `ct2-patches/README.md`）。
   macOS 用 Accelerate（我们在 CPU 上只跑 float32，SGEMM 足够），上游的 arm64 配方带 Ruy，这里去掉。
@@ -130,12 +130,9 @@ sha256 也算对了，就是没跑上面那条 `gh release create`。产品 rele
 **起步顺序**（资产只能由公开仓库上的 CI 在快照之后编出来）：① 一次快照把 workflow 发到 `main`；
 ② 在 `main` 上手动触发构建并发布；③ 之后的改动才能在文档与 CI 的 macOS job 里引用这些资产。
 
-⚠ **什么时候发：随下个 finesub 版本一起发**（owner 2026-09-17 定在发版前，2026-10-10 确认随下次发版发）。五个变体都已编过、
-验过，只差发布：要发的是四个新变体，外加用 CI 版 Windows CUDA 替换手工编的 `finesub0.4.0`，label 用那次发版的版本号。
-压到发版时才发，是因为这期间补丁集与构建脚本还可能改，早发一轮就要再发一轮。步骤（快照 → `workflow_dispatch` →
-改 URL 与锁 → 正常发版）与「10-10 之后构建输入（workflow、构建脚本、补丁本身；说明文字不算）再改过就重做比对与试编」写在维护者的发版说明里。发完把
-`docs/manual/repo-install.md`、`docs/manual/ct2-wheel.md`、`docs/manual/resources.md`（等级表的 ⚠ 那段）与
-`CHANGELOG.md` 里「wheel 尚未发布，识别会在加载模型前报错」的说法改掉。
+**现状**：五个变体随 finesub 0.6.0 发布在 Release `ct2-4.8.1+finesub0.6.0`（owner 2026-09-17 定在发版前、2026-10-10
+确认随发版发：期间补丁集与构建脚本还可能改，早发一轮就要再发一轮）。CI 版 Windows CUDA 替换了手工编的 `finesub0.4.0`，
+后者留在 Release 里给旧版本用。下次重编时同样换一个 label，按上面的起步顺序走。
 
 **CI 编的 Windows wheel**（计划 P1）：它不会与手工编的同一个 hash，所以替换手工 wheel 时换补丁集版本号、
 发新 Release、重新生成两份锁——**所有 Windows 安装会重建一次运行时**。替换前要在两份逐字节夹具上与手工 wheel 比对：

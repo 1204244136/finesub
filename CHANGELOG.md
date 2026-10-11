@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-11
+
+### 补丁版 CTranslate2 换成 CI 构建，多了 Linux、macOS 与 AMD 的版本
+
+补丁版 CTranslate2 现在由 CI 构建，发在 Release `ct2-4.8.1+finesub0.6.0`，一共五个：Windows CUDA（替换此前手工编的
+`finesub0.4.0`，新增 encoder 的 flash attention，见下一条）、Linux CUDA、Linux ROCm、Windows ROCm、macOS CPU。
+⚠ **托管安装升级到这一版时会重建一次运行环境**（锁里的 CTranslate2 换了），第一次运行会多等一会儿，之后照常。
+Linux、macOS 与 AMD 显卡的识别从此有对应的 wheel 可装，装法见 [仓库安装](docs/manual/repo-install.md)「其他平台」；
+两个 ROCm 版没有在任何一张 A 卡上跑过，用上了请反馈。
+
 ### CodeBuddy 本地 agent 改用独立 CLI
 
 独立安装并登录 CodeBuddy Code CLI 后即可调用；不再依赖 WorkBuddy 桌面端、其 Node 或加密凭据。
@@ -400,7 +410,7 @@ FineSub 以前只认 Windows + NVIDIA。现在：
 
 - **AMD 显卡**（装 ROCm 版 PyTorch）：人声分离、silero 辅助与第二模型校验会用上卡。Windows 上要用
   `pip install -e ".[asr-win-rocm]"`——AMD 的 Windows 版 PyTorch 停在 2.9.1，用 `[asr]` 装会被换成不带
-  ROCm 的 PyPI 版、显卡静默用不上；那里的识别也还在 CPU 上（Windows 的 ROCm 版 CTranslate2 未发布）。判断「这张卡有没有内核」
+  ROCm 的 PyPI 版、显卡静默用不上。判断「这张卡有没有内核」
   按 AMD 的规矩走（架构在不在构建列表里，`HSA_OVERRIDE_GFX_VERSION` 生效）；有核显又有独显、而 0 号不是
   显存最大的那块时，会提示用 `HIP_VISIBLE_DEVICES` 选卡。识别要用打过补丁的 CTranslate2 的 ROCm 版。
 - **Linux + NVIDIA**：CTranslate2 需要的 cuBLAS 会自动从 CUDA 版 torch 带的包里加载，不用设
@@ -420,8 +430,7 @@ GPU 支持的构建、驱动缺失或过旧、显卡被环境变量藏了），�
 和「这台机器没有显卡」一样安静，区别只体现在慢上好几倍。
 
 这些平台都只支持源码安装，等级是「实验」：跑在未经验收的平台与显卡上时，运行会提示一次，告诉你结果若有异常
-加 `--device cpu` 对照、去哪反馈。提示不改变任何行为。平台对应的 patched CTranslate2 由 CI 构建，**发布到
-Release 之前，这些平台的识别阶段会在加载模型时报错**。详见 `docs/manual/resources.md`「平台与支持等级」与
+加 `--device cpu` 对照、去哪反馈。提示不改变任何行为。平台对应的 patched CTranslate2 由 CI 构建（见本版第一条）。详见 `docs/manual/resources.md`「平台与支持等级」与
 `docs/manual/repo-install.md`「其他平台」。
 
 Windows + NVIDIA 的输出与之前逐字节相同。
