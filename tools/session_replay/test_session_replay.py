@@ -27,7 +27,6 @@ from session_replay.sessions.correction import (
 )
 from session_replay.run import resolve_sampling_plan
 from session_replay.sessions.base import pin_client_role_to_free_model
-from session_replay.sessions.research import _load_research_fixture
 from finesub.llm.chunking import SubtitleSegment
 from finesub.llm.prompts import ContextPack
 
@@ -97,25 +96,6 @@ def _write_minimal_exchange(path: Path, *, search_body: str) -> None:
         ]
     )
     path.write_text(text, encoding="utf-8")
-
-
-def test_research_fixture_fallback_uses_run_root_context(tmp_path: Path) -> None:
-    artifact_dir = tmp_path / "artifacts"
-    artifact_dir.mkdir()
-    research_context = tmp_path / "clip-research-context.json"
-    research_context.write_text(
-        json.dumps({"context_pack": {"general_context": {"summary": "ok"}}}),
-        encoding="utf-8",
-    )
-
-    fixture = _load_research_fixture(
-        artifact_dir,
-        "round1",
-        research_context=research_context,
-    )
-
-    assert fixture["_from_context"] is True
-    assert fixture["context_pack"]["general_context"]["summary"] == "ok"
 
 
 def test_split_exchange_sections_prefers_named_roles() -> None:
@@ -199,13 +179,73 @@ def test_extract_fixture_freezes_search_not_system_example(tmp_path: Path) -> No
     assert "w1" in user
 
 
+def test_extract_fixture_reads_the_task_flow_delivery_exchange(tmp_path: Path) -> None:
+    """A task-flow delivery exchange renders the whole conversation: the
+    window's inputs are in the *opening* user message (retrieval slots hold the
+    placeholder), what the batch produced is in the fill turn. The fixture must
+    freeze the opening's CSV/advice and the fill's search results -- not the
+    last user section wholesale, and never the placeholder."""
+    from finesub.llm.request_prompts import NOT_RETRIEVED_YET
+
+    run_dir = tmp_path / "BV_flow"
+    exchanges = run_dir / "llm-artifacts" / "exchanges"
+    exchanges.mkdir(parents=True)
+    _write_minimal_stable(run_dir / "BV_flow-stable.json")
+    opening = (
+        "请严格根据 system 指令。\n\n<entry_details>\n词条A 详情\n</entry_details>\n\n"
+        "<previous_advice>\n上窗建议\n</previous_advice>\n\n<pre_round_notes>\n（无）\n</pre_round_notes>\n\n"
+        f"本窗口搜索结果：\n<search_results>\n{NOT_RETRIEVED_YET}\n</search_results>\n\n"
+        "<preceding_context>\n</preceding_context>\n\n<asr_result>\n1|0.0|1.0|0.2|hello\n2|1.2|1.3|0.0|world\n</asr_result>\n\n最后提醒：输出字幕。"
+    )
+    request = "<reasoning>先查</reasoning>\n<window_notes>专名可疑</window_notes>\n<search_queries>\nfoo\n</search_queries>"
+    fill = (
+        "以下是你上一条回复所请求的输入。\n\n<entry_details>\n词条A 详情\n词条B 详情\n</entry_details>\n\n"
+        "<search_results>\nFILLED_SEARCH\n</search_results>\n\n请交付。"
+    )
+    (exchanges / "003-01-correction-0001-attempt0.md").write_text(
+        "\n".join(
+            [
+                "# correction-0001-attempt0", "",
+                "## 请求（system）", "", "system", "",
+                "## 请求（user）", "", opening, "",
+                "## 请求（assistant）", "", request, "",
+                "## 请求（user）", "", fill, "",
+                "## 模型响应", "", "<translated>\nsub|1|1.0|0.0|hello|你好|8|2|\n</translated>", "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "BV_flow-research-context.json").write_text(
+        json.dumps({"planning": {"profile_id": "media=text,retrieval=local,difficulty=quality"},
+                    "context_pack": {"general_context": {}, "window_contexts": {}}}),
+        encoding="utf-8",
+    )
+    fixture = extract_fixture_from_exchange(run=run_dir, chunk_id="0001")
+    assert fixture.search_results == "FILLED_SEARCH"
+    assert "词条B 详情" in fixture.entry_details
+    assert fixture.previous_advice == "上窗建议"
+    assert fixture.window_notes == "专名可疑"
+    assert fixture.window["source_ids"] == ["1", "2"]
+
+    # A direct delivery (two sections, placeholder left in place) freezes nothing.
+    (exchanges / "003-01-correction-0001-attempt0.md").write_text(
+        "\n".join(
+            ["# correction-0001-attempt0", "", "## 请求（system）", "", "system", "",
+             "## 请求（user）", "", opening, "", "## 模型响应", "", "<translated>\n</translated>", ""]
+        ),
+        encoding="utf-8",
+    )
+    direct = extract_fixture_from_exchange(run=run_dir, chunk_id="0001")
+    assert direct.search_results == ""
+    assert direct.entry_details == "词条A 详情"
+
+
 def test_load_legacy_fixture_binds_only_its_frozen_chunk(tmp_path: Path) -> None:
     fixture = CorrectionFixture(
         session="correction",
         version=1,
         profile_id="media=text,retrieval=local,difficulty=intermediate",
         chunk_id="0001",
-        evidence_pack_mode=False,
         task_update_feedback=False,
         context_pack={
             "general_context": {"global_summary": "g"},
@@ -323,7 +363,6 @@ def test_live_correction_replay_factory_receives_variant_name(
         version=1,
         profile_id="media=text,retrieval=local,difficulty=intermediate",
         chunk_id="0001",
-        evidence_pack_mode=False,
         task_update_feedback=False,
         context_pack={"general_context": {}, "window_contexts": []},
         previous_advice="",
@@ -478,7 +517,6 @@ def test_summary_includes_token_totals(tmp_path: Path) -> None:
         version=1,
         profile_id="media=audio,retrieval=local,difficulty=quality",
         chunk_id="0001",
-        evidence_pack_mode=False,
         task_update_feedback=False,
         context_pack={"general_context": {}, "window_contexts": {}},
         previous_advice="",
@@ -575,25 +613,29 @@ def test_reject_unsupported_variant_raises_on_force_tier() -> None:
 
 
 def test_non_correction_adapters_reject_variant_in_build_messages() -> None:
-    from session_replay.sessions.fast_round import FastRound1SessionAdapter
-    from session_replay.sessions.query import QuerySessionAdapter
-    from session_replay.sessions.research import (
-        ResearchR1SessionAdapter,
-        ResearchR2SessionAdapter,
-    )
-    from session_replay.sessions.search_judge import SearchJudgeSessionAdapter
+    from session_replay.sessions.task_flow import PrepareTaskSessionAdapter
 
     # The guard fires before any fixture is touched, so a bare dict/None is
     # enough to reach it.
-    for adapter in (
-        QuerySessionAdapter(),
-        ResearchR1SessionAdapter(),
-        ResearchR2SessionAdapter(),
-        SearchJudgeSessionAdapter(),
-        FastRound1SessionAdapter(),
-    ):
+    for adapter in (PrepareTaskSessionAdapter(),):
         with pytest.raises(NotImplementedError):
             adapter.build_messages({}, variant="capableB")
+
+
+def test_indexes_from_fixture_reads_both_shapes() -> None:
+    """Flat per-category keys (old fixtures) and the nested mapping the
+    round-input dumps write both resolve to one ``knowledge_indexes`` mapping
+    (review 2026-09-07, third round: the nested shape once replayed empty)."""
+
+    from session_replay.fixture import indexes_from_fixture
+
+    flat = {
+        "streamer_index": "- 星野灯 | | 阿灯 | 个人势",
+        "common_index": "- 原神 [游戏] | Genshin | 原 | RPG",
+    }
+    assert set(indexes_from_fixture(flat)) == {"streamer", "common"}
+    nested = {"knowledge_indexes": {"streamer": "- 星野灯 | | 阿灯 | 个人势"}}
+    assert indexes_from_fixture(nested) == {"streamer": "- 星野灯 | | 阿灯 | 个人势"}
 
 
 def test_save_load_fixture_roundtrip(tmp_path: Path) -> None:
@@ -602,7 +644,6 @@ def test_save_load_fixture_roundtrip(tmp_path: Path) -> None:
         version=1,
         profile_id="media=audio,retrieval=local,difficulty=quality",
         chunk_id="0001",
-        evidence_pack_mode=False,
         task_update_feedback=False,
         context_pack={"general_context": {}, "window_contexts": {}},
         previous_advice="",
@@ -1109,3 +1150,126 @@ def test_a_permissive_gold_verdict_is_covered_but_not_discriminating() -> None:
     assert payload["sources_discriminating"] == 1
     # Not a re-cut artefact: the person wrote this one.
     assert payload["sources_mixed"] == []
+
+
+# --- task-flow adapters (docs/llm_harness_research.md, 「准备任务」) ----
+
+
+def test_prepare_task_adapter_replays_the_dumped_builder_input(tmp_path) -> None:
+    from tools.session_replay.registry import get_session
+
+    adapter = get_session("prepare-task")
+    fixture = {
+        "transcript": "--- window 0001 ---\n1|テスト\n",
+        "extra_info": "",
+        "knowledge_indexes": {"streamer": "- 主播A | | 测试", "common": ""},
+        "emits_queries": True,
+        "emits_entries": True,
+        "native_search": False,
+        "max_requested_entries": 12,
+        "agentic": False,
+        "style_catalog": "",
+    }
+    messages = adapter.build_messages(fixture)
+    assert [m["role"] for m in messages] == ["system", "user"]
+    assert "获取缺失输入" in messages[0]["content"]
+    assert adapter.validate_reply("<reasoning>x</reasoning><context_pack>{}</context_pack>") == []
+    assert adapter.validate_reply(
+        "<reasoning>x</reasoning><analysis_notes>n</analysis_notes><requested_entries></requested_entries>"
+        "<keep_entries></keep_entries><search_queries></search_queries>"
+    ) == []
+    assert adapter.validate_reply("<reasoning>x</reasoning>")  # neither shape
+
+
+def test_window_request_adapter_builds_the_opening_only(tmp_path) -> None:
+    import json as _json
+
+    from tools.session_replay.registry import get_session
+    from tools.session_replay.fixture import CorrectionFixture
+
+    stable = tmp_path / "x-stable.json"
+    stable.write_text(
+        _json.dumps({"segments": [{"id": "1", "start": 0.0, "end": 1.0, "text": "一。"}]}),
+        encoding="utf-8",
+    )
+    adapter = get_session("correction-request")
+    fixture = CorrectionFixture.from_dict(
+        {
+            "chunk_id": "0001",
+            "profile_id": "correction_media=text,retrieval=local,difficulty=quality,continuity=serial",
+            "context_pack": {"general_context": {}, "window_contexts": []},
+            "window": {"chunk_id": "0001", "source_ids": ["1"], "clip_start": 0.0, "clip_end": 1.0},
+            "stable_json": str(stable),
+        }
+    )
+    messages = adapter.build_messages(fixture)
+    assert [m["role"] for m in messages] == ["system", "user"]
+    assert "获取缺失输入" in messages[0]["content"]
+    agentic = adapter.build_messages(fixture, agentic=True)
+    assert "由你自行取得" in agentic[0]["content"] and "获取缺失输入（同一任务内" not in agentic[0]["content"]
+    assert adapter.validate_reply(
+        "<reasoning>x</reasoning><window_notes></window_notes><search_queries></search_queries>", fixture
+    ) == []
+
+
+def test_replay_follows_the_source_runs_preset_and_falls_back_when_it_is_gone(tmp_path, capsys, monkeypatch) -> None:
+    import json as _json
+
+    from finesub import config as app_config
+    from finesub.llm.routing.model_routes import default_model_routes, install_runtime_preset
+    from tools.session_replay import run as replay_run
+
+    # This suite runs outside test/conftest.py: pin an empty config so a
+    # developer's own [llm] preset cannot make it red or falsely green.
+    empty = tmp_path / "config.toml"
+    empty.write_text("", encoding="utf-8")
+    monkeypatch.setenv("FINESUB_CONFIG_FILE", str(empty))
+    app_config.clear_config_cache()
+    default_model_routes.cache_clear()
+
+    artifacts = tmp_path / "run" / "llm-artifacts"
+    artifacts.mkdir(parents=True)
+    record = artifacts / "resolved-switches.json"
+    record.write_text(_json.dumps({"active_preset": "fast"}), encoding="utf-8")
+    install_runtime_preset(None)
+    assert replay_run._source_run_preset(tmp_path / "run") == "fast"
+    record.write_text(_json.dumps({"active_preset": "gone"}), encoding="utf-8")
+    assert replay_run._source_run_preset(tmp_path / "run") is None
+    assert "no longer exists" in capsys.readouterr().err
+    app_config.clear_config_cache()
+    default_model_routes.cache_clear()
+
+
+
+@pytest.mark.parametrize(("native_search", "retrieval"), [(False, "none"), (True, "native")])
+def test_text_replay_calls_complete_with_its_real_signature(tmp_path, monkeypatch, native_search, retrieval) -> None:
+    """`complete()` takes the three-way `retrieval` switch; the generic loop
+    passed the retired `native_search` boolean and every correction-request /
+    prepare-task replay failed before reaching the API (da7329dd..930a6379)."""
+
+    import inspect
+
+    from finesub.llm.client import RoleClient
+    from tools.session_replay.sessions import base
+
+    seen = {}
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        def complete(self, role, messages, **kwargs):
+            inspect.signature(RoleClient.complete).bind(None, role, messages, **kwargs)
+            seen.update(kwargs)
+
+            class Call:
+                content = "ok"
+            return Call()
+
+    monkeypatch.setattr(base, "RoleClient", FakeClient)
+    base.run_text_replay(
+        session_name="t", messages=[{"role": "user", "content": "x"}],
+        validate_reply=lambda _content: [], out_dir=tmp_path, n=1, max_attempts=1,
+        native_search=native_search,
+    )
+    assert seen["retrieval"] == retrieval and "native_search" not in seen

@@ -163,34 +163,6 @@ def test_research_components_cover_indices_extra_info_and_preinjection() -> None
     assert components["streamer_index_tokens"] == len("- 主播A | 别名 | 简介")
     assert components["common_index_tokens"] == 0  # empty marker
     assert components["preinjected_entry_tokens"] == len("## 主播A\n\n档案内容")
-    assert components["round1_notes_tokens"] == 0
-
-
-def test_search_loop_components_cover_contract_progress_and_entries() -> None:
-    from finesub.llm.exchange_metadata import search_loop_input_components
-
-    user = (
-        "<background>\n背景\n</background>\n"
-        "<research_contract>\n{\"goal\":\"g\"}\n</research_contract>\n"
-        "<executed_queries>\nq1\n</executed_queries>\n"
-        "<research_progress>\n进展\n</research_progress>\n"
-        "<streamer_index>\n- 主播A | 别名 | 简介\n</streamer_index>\n"
-        "<common_index>\n（空）\n</common_index>\n"
-        "<knowledge_entries>\n## 条目\n\n内容\n</knowledge_entries>\n"
-        "<search_results>\n--- query: q1 ---\n结果\n</search_results>"
-    )
-    components = search_loop_input_components(
-        counter=FakeCounter(), messages=[{"role": "user", "content": user}]
-    )
-
-    assert components["background_tokens"] == len("背景")
-    assert components["contract_tokens"] == len('{"goal":"g"}')
-    assert components["executed_queries_tokens"] == len("q1")
-    assert components["progress_tokens"] == len("进展")
-    assert components["streamer_index_tokens"] > 0
-    assert components["common_index_tokens"] == 0
-    assert components["knowledge_injection_tokens"] == len("## 条目\n\n内容")
-    assert components["search_injection_tokens"] == len("--- query: q1 ---\n结果")
 
 
 def test_correction_components_cover_entries_advice_and_notes() -> None:
@@ -218,15 +190,6 @@ def test_knowledge_update_session_name_uses_chunk_number() -> None:
     assert (
         infer_session_name("knowledge_update_response", {"chunk": 3})
         == "knowledge-update-chunk03"
-    )
-
-
-def test_search_execution_ledger_is_not_a_session_response() -> None:
-    assert not is_session_response_record(
-        "search_loop_round", {"round": 0, "executed": [{"provider": "exa"}]}
-    )
-    assert is_session_response_record(
-        "search_loop_round", {"round": 0, "response_content": "ok", "usage": {}}
     )
 
 

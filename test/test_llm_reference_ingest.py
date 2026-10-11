@@ -284,7 +284,8 @@ def test_process_task_runs_stages_and_knowledge_update(tmp_path, monkeypatch) ->
         stable.write_text("{}", encoding="utf-8")
         return stable
 
-    def fake_correction(**kwargs):
+    def fake_correction(request):
+        kwargs = vars(request)
         calls["correction"] = kwargs
         out = Path(kwargs["output_path"])
         _write_srt(out, ["机器一", "机器二"])
@@ -296,7 +297,7 @@ def test_process_task_runs_stages_and_knowledge_update(tmp_path, monkeypatch) ->
 
     monkeypatch.setattr(reference_ingest, "download_audio", fake_download)
     monkeypatch.setattr(reference_ingest, "run_reference_pipeline", fake_pipeline)
-    monkeypatch.setattr(reference_ingest, "run_full_correction", fake_correction)
+    monkeypatch.setattr(reference_ingest, "run_correction_task", fake_correction)
     monkeypatch.setattr(reference_ingest, "run_knowledge_update", fake_knowledge_update)
     monkeypatch.setattr(
         sys,
@@ -323,7 +324,10 @@ def test_process_task_runs_stages_and_knowledge_update(tmp_path, monkeypatch) ->
         "language": "ja",
         "gpu": "high",
     }
-    assert calls["correction"]["knowledge"] == "collect"
+    # Reads and collects feedback -- the second step updates the base from it
+    # -- but leaves the post-task update to that step.
+    assert calls["correction"]["knowledge"] == "read"
+    assert calls["correction"]["collect_feedback"] is True
     assert calls["correction"]["test_profile"] is True  # mm-med preset
     assert calls["correction"]["profile"].retrieval == "local"
     assert "https://example.com/v" in calls["correction"]["extra_info"]
@@ -371,7 +375,8 @@ def test_batch_isolates_a_failed_task_and_runs_the_rest(
         stable.write_text("{}", encoding="utf-8")
         return stable
 
-    def fake_correction(**kwargs):
+    def fake_correction(request):
+        kwargs = vars(request)
         out = Path(kwargs["output_path"])
         _write_srt(out, ["机器"])
         return out
@@ -385,7 +390,7 @@ def test_batch_isolates_a_failed_task_and_runs_the_rest(
     )
     monkeypatch.setattr(reference_ingest, "download_audio", fake_download)
     monkeypatch.setattr(reference_ingest, "run_reference_pipeline", fake_pipeline)
-    monkeypatch.setattr(reference_ingest, "run_full_correction", fake_correction)
+    monkeypatch.setattr(reference_ingest, "run_correction_task", fake_correction)
     monkeypatch.setattr(reference_ingest, "run_knowledge_update", fake_knowledge_update)
 
     from finesub import scheduler as runner
@@ -441,7 +446,8 @@ def test_process_task_mm_high_url_downloads_video(tmp_path, monkeypatch) -> None
         stable.write_text("{}", encoding="utf-8")
         return stable
 
-    def fake_correction(**kwargs):
+    def fake_correction(request):
+        kwargs = vars(request)
         calls["correction"] = kwargs
         out = Path(kwargs["output_path"])
         _write_srt(out, ["机器"])
@@ -451,7 +457,7 @@ def test_process_task_mm_high_url_downloads_video(tmp_path, monkeypatch) -> None
     monkeypatch.setattr(reference_ingest, "resolve_video_id", lambda url, data_root: "vid1")
     monkeypatch.setattr(reference_ingest, "download_video", fake_download_video)
     monkeypatch.setattr(reference_ingest, "run_reference_pipeline", fake_pipeline)
-    monkeypatch.setattr(reference_ingest, "run_full_correction", fake_correction)
+    monkeypatch.setattr(reference_ingest, "run_correction_task", fake_correction)
     monkeypatch.setattr(
         reference_ingest,
         "run_knowledge_update",
@@ -475,7 +481,7 @@ def test_process_task_mm_high_url_downloads_video(tmp_path, monkeypatch) -> None
     assert calls["download_video"] == "https://example.com/v"
     # The downloaded video is the ASR source as well: no audio track is
     # extracted first, so separation sees it without a lossy generation.
-    assert calls["pipeline_audio"] == calls["correction"]["video_path"]
+    assert calls["pipeline_audio"] == str(calls["correction"]["video_path"])
     assert calls["pipeline_audio"].endswith("vid1.mp4")
     assert calls["correction"]["profile"].uses_video is True
 
@@ -542,12 +548,11 @@ def test_the_task_summary_does_not_name_a_retired_ledger(tmp_path, monkeypatch) 
     assert "常见翻译错误库" not in summary
     assert "知识库词条更新" in summary
 
-def _stage_llm_calls(tmp_path, monkeypatch, *, cli_style, cli_mode, config_mode):
+def _stage_llm_calls(tmp_path, monkeypatch, *, cli_style, cli_mode, config_mode, efficiency=False):
     """Run `stage_llm` with both halves faked, and report what they received."""
 
     import argparse
 
-    from finesub.llm.knowledge import style as style_module
     from finesub.llm.knowledge.maintain import main as maintain_main
     from finesub.llm.knowledge.node.repo import KnowledgeRepo
 
@@ -555,18 +560,33 @@ def _stage_llm_calls(tmp_path, monkeypatch, *, cli_style, cli_mode, config_mode)
     maintain_main(["--root", str(root), "new", "style", "default_style", "--intro", "默认"])
     KnowledgeRepo.forget(root)
 
-    def fake_config_str(section, key, *, path=None):
-        if (section, key) == ("llm", "style_mode"):
-            return config_mode
-        return None
+    # A real file through the real reader: only `[llm] style_mode` is written.
+    from finesub import config as app_config
 
-    monkeypatch.setattr(style_module, "config_str", fake_config_str)
+    config = tmp_path / "config.toml"
+    config.write_text(
+        f'[llm]\nstyle_mode = "{config_mode}"\n' if config_mode is not None else "",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FINESUB_CONFIG_FILE", str(config))
+    app_config.clear_config_cache()
 
     calls: dict[str, dict] = {}
-    monkeypatch.setattr(
-        reference_ingest, "run_full_correction",
-        lambda **kw: calls.__setitem__("correction", kw) or (tmp_path / "out.srt"),
-    )
+
+    def fake_correction(request):
+        calls["correction"] = vars(request)
+        if request.style == "auto":
+            # What the orchestrator records for a store whose only style is
+            # `default_style`: the no-choice result (auto-style-gaps plan C).
+            from finesub.llm.knowledge.base import append_task_artifact
+
+            append_task_artifact(
+                request.task_artifact_dir, kind="style_selection", task_id=request.task_id,
+                payload={"intent": "auto", "outcome": "selected", "key": "default_style",
+                         "reason": "没有可选的 style", "rev": None},
+            )
+
+    monkeypatch.setattr(reference_ingest, "run_correction_task", fake_correction)
     monkeypatch.setattr(
         reference_ingest, "run_reference_knowledge_update",
         lambda **kw: calls.__setitem__("update", kw),
@@ -575,7 +595,10 @@ def _stage_llm_calls(tmp_path, monkeypatch, *, cli_style, cli_mode, config_mode)
     (tmp_path / "out.srt").write_text("1\n", encoding="utf-8")
     from finesub.llm.routing.profiles import resolve_profile
 
-    settings = reference_ingest.ResolvedSettings()
+    settings = (
+        reference_ingest.ResolvedSettings(media="text", retrieval="none", difficulty="efficiency")
+        if efficiency else reference_ingest.ResolvedSettings()
+    )
     task = reference_ingest.ResolvedTask(
         srt_path=tmp_path / "refined.srt",
         media="",
@@ -618,14 +641,52 @@ def test_style_reaches_both_halves_and_obeys_the_config(tmp_path, monkeypatch) -
     learning = _stage_llm_calls(tmp_path, monkeypatch, cli_style=None, cli_mode=None,
                                 config_mode="update")
     # the correction half is READ even under `update` (it cannot write, and
-    # saying `update` there would warn about a failure that is not one)
+    # saying `update` there would warn about a failure that is not one); no
+    # `--style` is `auto` (auto-style-gaps plan C), passed on as the intent
     assert learning["correction"]["style_mode"] == "read"
-    assert learning["correction"]["style"] == ("default_style",)
-    # ...while the second half is the one that actually writes
-    assert learning["update"]["style_names"] == ("default_style",)
+    assert learning["correction"]["style"] == "auto"
+    # ...while the second half writes the style the correction task recorded
+    assert learning["update"]["style_names"] == ("style/default_style",)
 
     reading = _stage_llm_calls(tmp_path, monkeypatch, cli_style=None, cli_mode=None,
                                config_mode=None)
-    assert reading["correction"]["style"] == ("default_style",)
+    assert reading["correction"]["style"] == "auto"
     assert reading["update"]["style_names"] == ()  # read: injected, not learned
+
+    named = _stage_llm_calls(tmp_path, monkeypatch, cli_style="default_style", cli_mode="update",
+                             config_mode=None)
+    assert named["correction"]["style"] == ("default_style",)
+    assert named["update"]["style_names"] == ("default_style",)
+
+
+def test_ingest_learns_the_style_under_efficiency_too(tmp_path, monkeypatch) -> None:
+    """Efficiency caps a correction run's style at read; ingest is the
+    write-back workflow and updates its knowledge at every difficulty, so
+    `--style-mode update` still learns there (owner 2026-10-01 cap)."""
+
+    calls = _stage_llm_calls(tmp_path, monkeypatch, cli_style=None, cli_mode="update",
+                             config_mode=None, efficiency=True)
+    assert calls["correction"]["style_mode"] == "read"
+    assert calls["update"]["style_names"] == ("style/default_style",)
+
+
+def test_ingest_enters_auto_even_when_asked_explicitly_under_efficiency(tmp_path, monkeypatch) -> None:
+    """`reference_ingest` resolves without `difficulty` (it is the write-back
+    workflow), so an explicit `--style auto` is not efficiency's refusal there:
+    it runs auto like any other difficulty (auto-style-gaps plan C)."""
+
+    calls = _stage_llm_calls(tmp_path, monkeypatch, cli_style="auto", cli_mode="update",
+                             config_mode=None, efficiency=True)
+    assert calls["correction"]["style"] == "auto"
+    assert calls["correction"]["style_efficiency_cap"] is False
+    assert calls["update"]["style_names"] == ("style/default_style",)
+    # ...and the correction half honours that: the request resolves to auto
+    # under efficiency instead of refusing the explicit intent.
+    from finesub.llm.knowledge.style import resolve_style_selection
+
+    request = calls["correction"]
+    assert resolve_style_selection(
+        request["style"], request["style_mode"], knowledge_root=tmp_path / "knowledge",
+        difficulty="" if not request["style_efficiency_cap"] else "efficiency",
+    ).auto
 

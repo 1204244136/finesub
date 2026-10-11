@@ -1,50 +1,24 @@
-# 测试分类与按需运行
+# 测试：组织方式与守卫
 
-默认 `pytest -q` 跑全量；准确数量以 `pytest --collect-only -q` 为准。测试通过 `pytest-xdist` 按 **CPU 核数**并行（`pyproject.toml` 的 `addopts = "-n auto --timeout=120"`）。单 worker：`pytest -q -n 0`。
+这份讲测试为什么这样组织、守着什么。**什么时候跑什么、命令怎么写**在 [`test-runs.md`](test-runs.md)。
 
-**`--timeout=120` 卡的是「挂住」，不是「跑得慢」**：实测最慢的单例约 3.3 秒，两个数量级的余量；套件里有真起子进程（agent driver）和真起本地 HTTP server 的用例，没有超时就是一个没有任何输出的CI job。重资源用例自己放宽。
-
-**全量约 1 分钟**（`-n auto`，约 2050 例；`-n 2` 约 2 分钟）。如果你看到的是几十分钟，先确认仓库根的
-`conftest.py` 还在——见下方「为什么仓库根有一个 conftest.py」。
+**`--timeout=120` 卡的是「挂住」，不是「跑得慢」**（`pyproject.toml` 的 `addopts = "-n auto --timeout=120"`）：实测最慢的单例约 3.3 秒，两个数量级的余量；套件里有真起子进程（agent driver）和真起本地 HTTP server 的用例，没有超时就是一个没有任何输出的CI job。重资源用例自己放宽。
 
 **`finesub_bootstrap` 的测试在根套件里**（`test/bootstrap/`）：装机层是 CLI 的地基，
 改 `fsops.py` 应该在提交前那条 `pytest -q` 里就红，而不是等一个本地没人跑的套件。其中
-**只有 Windows 能真跑**的两份（`test/bootstrap/test_fsops_links.py` 的 junction/robocopy、
-`test/test_secrets.py` 的 DPAPI）在 Linux runner 上是 skip，所以 `ci.yml` 的 `windows` job
-**按名字**再跑它们一次——skip 不是 pass，那个 job 就是为了让它们真的执行一回。
+**只有 Windows 能真跑**的几处（`test/bootstrap/test_fsops_links.py` 的 junction/robocopy、
+`test/test_secrets.py` 的 DPAPI、`test/test_native_paths.py::test_the_crt_locale_switches_to_utf8`
+的 CRT locale 切换）在 Linux runner 上是 skip，所以 `ci.yml` 的 `windows` job
+**按名字**再跑它们一次——skip 不是 pass，那个 job 就是为了让它们真的执行一回。locale 那条在
+维护者本机（代码页已是 65001）上是平凡通过，只有代码页不是 UTF-8 的 runner 才真测到切换。
 
-## 日常命令
-
-| 命令 | 用途 |
-|------|------|
-| `pytest -q` | 全量回归（默认 `-n auto`，约 1 分钟） |
-| `pytest -q -m llm` | 只跑 LLM harness |
-| `pytest -q -m pipeline` | 只跑管线编排 / GPU 配置 |
-| `pytest -q -m asr` | 只跑 ASR/VAD/对齐/文本工具 |
-| `pytest -q --run-heavy-resource` | 含重资源测试（若有） |
-| `pytest -q --run-network-mock` | 含绑本机端口的路由证明测试（`[llm] proxy`） |
-
-**不建议再按域挑着跑**：全量既然是分钟级，挑选的收益已经低于挑错的风险。日常节奏是
-**改文件时跑对应的单文件（`-n 0`，秒级），准备提交时跑全量**。上面的域命令留给「只想看
-某一域是否还绿」的场合——三个合起来现在确实盖得全（见「标记说明」）。
-
-## 何时跑哪种
-
-| 时机 | 跑什么 |
-|------|--------|
-| 改完一个文件，还在改 | 下表里对应的**单文件**，`-n 0`（秒级） |
-| 一个改动自认为完成 | 全量 `pytest -q` |
-| 提交前 | `python -m compileall -q src test; pytest -q; git status --short` |
-| 换 CT2 wheel / 动 VAD-ASR 核心 / 动分离器性能 | 全量 + `pytest test/test_fw_refine.py --run-heavy-resource -q`（**CI 永远跑不到它**）+ `test_resource_budget_pipeline.py --run-heavy-resource -n 0` |
-| 增删改名 `src/finesub/` 顶层模块，或动发布契约（`build-wheel.ps1` 的清单） | 全量 **+ `pytest -q cli/tests`**——根 `pytest -q` 收集不到 `cli/tests`，而 wheel 的清单守卫在根套件的 `test_packaging.py`、壳的行为在 `cli/tests` |
-| 发版 | 两个环境各跑一次全量（`agent-tasks/release/SKILL.md` 第 2 步：装了 `[asr]` 的与没装的**查的是相反的病**）+ `cli/tests`；CI 的 `windows` job 补上本机 Linux 跑不到的另一半 |
-| **动设备解析那一族**（`speech/runtime/device.py`、`resources.py`、裁判放置、分离器设备） | 全量 **两遍**：`pytest -q` 与 `CUDA_VISIBLE_DEVICES=-1 pytest -q`。见下 |
+**下载路径的默认单测一律不联网**：fake HTTP、fake subprocess、小文件，不访问公共镜像也不加载
+模型。实机验收何时要重做见 [test-runs.md「何时跑哪种」](test-runs.md#何时跑哪种)。
 
 ## 设备解析：两条只能这样验的手法
 
-两条都来自 2026-08 的逐阶段设备解析（取舍依据在
-[`plans/stage-device-plan.md`](plans/stage-device-plan.md)，那份计划两次写下「本机验不了」、
-两次都太早）。它们是**测试纪律**，所以住在这里，不住在那份计划稿里。
+两条都来自 2026-08 的逐阶段设备解析（取舍依据在维护者的本地计划里，不随公开快照发布；
+那份计划两次写下「本机验不了」、两次都太早）。它们是**测试纪律**，所以住在这里，不住在计划稿里。
 
 **一、在进程内劈开 torch 与 CT2。** 「CT2 能用这张卡而 torch 不能」这种机器多数人没有，
 但不必换机器：`cuda_usable()` 判负的条件是卡的 compute capability **低于**
@@ -69,52 +43,6 @@ monkeypatch.setattr(torch.cuda, "get_arch_list", lambda: ["sm_130"])
 `is_available()` 是 True、`device_count()` 是 0，而 CT2 报 1（它把空串读成「未设置」）。
 这正是「档位问 torch、ASR 问 CT2」的又一个理由——谁也别替谁回答。
 
-## 路径 → 测试文件
-
-⚠ **`requires_main_checkout` 在 worktree 里一律 skip，所以那些用例在任何分支上都是绿的。**
-⚠ 那个 `FINESUB_KNOWLEDGE_WRITE=1` **只配给测试用**：它解除的是产品对主库的 worktree 写保护，
-测试能带着它是因为它们全用 tmp 根。**别带着它从 worktree 跑任何生产命令**——那道保护就是为了
-不让 worktree 里的一次实验写进主 checkout 的知识库。
-动到它们覆盖的面时，用逃生舱跑一遍：`FINESUB_TEST_ALLOW_WORKTREE=1 FINESUB_KNOWLEDGE_WRITE=1
-python -m pytest -q <file>`。2026-09-02 就是这样才发现两条断言早已删除字段的死测试——它们在
-`dev` 上是红的，而每个 worktree 里的「全量 passed」都没碰到。⚠ 逃生舱下会多出两条**本来就
-该失败**的（`test_paths` / `test_separator_accel` 断言 checkout 根解析，worktree 天然重定向），
-那不是回归。
-
-| 改动位置 | 推荐命令 |
-|----------|----------|
-| `src/finesub/config.py`（共享 `config.toml` 的读取/缓存） | `pytest -q test/test_config.py test/test_llm_api_keys.py` |
-| `src/finesub/llm/routing/{api_keys,config}.py`, `client.py`, `llm_runtime.py`, `rate_limit.py`, `content_filter.py`, `config.toml` | `pytest -q test/test_llm_api_keys.py test/test_llm_client.py test/test_llm_config_and_budget.py test/test_llm_content_filter.py test/test_paths.py` |
-| `src/finesub/llm/search_loop.py`, `research.py` | `pytest -q test/test_llm_search_loop.py test/test_llm_research.py` |
-| `src/finesub/llm/correction_translation.py`, `stages/`（含 `stages/correction/` 八模块） | `pytest -q test/test_llm_correction_translation.py test/test_llm_fast_mode.py test/test_llm_text_route.py test/test_llm_video_route.py` |
-| `src/finesub/llm/knowledge/` | `pytest -q test/test_llm_knowledge_base.py test/test_llm_knowledge_materials.py test/test_llm_knowledge_update.py test/test_llm_knowledge_style.py` |
-| `src/finesub/llm/knowledge/node/`（node store：schema/版本行/CAS、preset、三投影、无损导入与 parity；`apply`/`envelope`/`draft` 为 overlay 归并 + 按实体 CAS 的 apply engine；`cli`/`edit`/`history` 为人工编辑面与 revert/restore） | `pytest -q test/test_llm_knowledge_node.py test/test_llm_knowledge_node_apply.py test/test_llm_knowledge_node_cli.py test/test_llm_knowledge_node_matching.py test/test_llm_agent_mcp_kb.py`；真实库实测用 `python -m finesub.llm.knowledge.node.migrate --source knowledge --store tmp/kb-shadow/kb.sqlite --report tmp/kb-shadow/report` |
-| `src/finesub/llm/web_search.py` | `pytest -q test/test_llm_web_search.py test/test_llm_web_search_urls.py` |
-| `src/finesub/llm/agent/{local_agent,agent_paths,agent_cleanup}.py`、Agent 路由/执行身份、bootstrap 路径与 shell | `pytest -q test/test_llm_local_agent.py test/test_llm_agent_paths.py test/test_llm_execution_policy.py test/test_llm_model_router.py cli/tests/test_cli_main.py test/bootstrap/test_paths.py test/bootstrap/test_shell_commands.py test/bootstrap/test_shell.py` |
-| `src/finesub/llm/agent/{agent_task_runtime,agent_transports,agent_retrieval,agent_task_control}.py`（durable task 协议：租约/回收/blocked 出口/预算 ledger/会话谱系） | `pytest -q test/test_llm_agent_task_runtime.py test/test_llm_agent_transports.py test/test_llm_agent_retrieval.py test/test_llm_agent_task_control.py` |
-| `src/finesub/llm/session_checkpoint.py`、`knowledge/snapshot.py` | `pytest -q test/test_llm_session_checkpoint.py test/test_llm_knowledge_snapshot.py` |
-| `src/finesub/llm/agent/{agent_quota,agent_ping}.py`（订阅耗尽判据、**按额度池**冻结、`finesub agent-ping`） | `pytest -q test/test_llm_agent_quota.py` |
-| `src/finesub/llm/routing/model_routes.{py,toml}`、`routing/model_catalog.{py,psv}`（target/模型组/预设/policy 的声明与校验、快速选模型、双 digest、出厂预设与下限告警） | `pytest -q test/test_llm_model_routes.py test/test_llm_config_and_budget.py` |
-| `src/finesub/llm/chunking.py`, `prompt_templates/`, `prompt_artifacts.py` | `pytest -q test/test_llm_srt_and_chunking.py test/test_llm_prompts.py test/test_llm_prompt_compose.py` |
-| `src/finesub/subtitles/{alignment,metrics,model,postprocess,rendering}.py`, `src/finesub/llm/output_protocol.py`, `task_report.py` | `pytest -q test/test_llm_srt_alignment.py test/test_llm_subtitle_metrics.py test/test_llm_output_protocol.py test/test_llm_srt_and_chunking.py test/test_llm_srt_postprocess.py test/test_srt_rendering.py test/test_llm_task_report.py` |
-| `src/finesub/{pipeline,batch,paths,run_metadata}.py`, media/subtitles/speech import boundaries, speech stage/stabilization/separation/runtime gate, packaging | `pytest -q test/test_asr_stabilize.py test/test_pipeline_refactor.py test/test_batch_runner.py test/test_import_boundaries.py test/test_paths.py test/test_run_metadata.py test/test_vocal_separation_pool.py test/test_gpu_stage_gate.py test/test_packaging.py` |
-| 显存/内存预算实测（真跑分离+ASR，重资源） | `pytest -q test/test_resource_budget_pipeline.py --run-heavy-resource -n 0` |
-| `src/finesub/speech/recognition/{transcribe,checkpoint,segments}.py`, `src/finesub/speech/postprocessing/segmentation.py`, `src/finesub/speech/preprocessing/{vad,energy}.py`, `src/finesub/text.py` | `pytest -q test/test_asr_and_text_utils.py test/test_segment_split.py test/test_vad_streaming.py test/test_vad_segment_energy.py` |
-| `src/finesub/speech/runtime/{resources,gpu_stage_gate}.py` | `pytest -q test/test_resource_profiles.py test/test_gpu_stage_gate.py` |
-| `src/finesub/speech/recognition/word_starts.py`、`vad_asr_stage.py` 的 `vad_timeline` 产物 | `pytest -q test/test_word_starts.py test/test_pipeline_refactor.py test/test_vad_streaming.py` |
-| 跨全树的源码守卫：`subprocess.run(text=True)` 必须带 `encoding=`（中文 Windows 上不带就崩，见 `CHANGELOG.md`） | `pytest -q test/test_subprocess_text_encoding.py` |
-| `src/finesub/speech/recognition/vad_asr_stage.py` 的 VAD 阶段产物（`-vad.json` + 帧级 npz 的读写、失效判据、与 pipeline/清理的对应） | `pytest -q test/test_vad_prefix.py` |
-| `src/finesub_bootstrap/fsops.py` 的发布性重命名（两档预算、两处故意不重试） | `pytest -q test/bootstrap/test_fsops.py test/bootstrap/test_downloader.py` |
-| `src/finesub/reporting.py`、各阶段的上报点（契约见 [`reporting.md`](reporting.md)） | `pytest -q test/test_reporting.py test/test_pipeline_reporting_boundary.py` |
-| `src/finesub_bootstrap/` 的下载族：`download_routes`/`download_sources`/`downloader`/`asset_resolve`/`model_fetch`/`model_ensure`/`hf_verify`/`model_manifest`（契约见 [`download-routes.md`](download-routes.md)） | `pytest -q test/bootstrap/test_download_routes.py test/bootstrap/test_downloader.py test/bootstrap/test_hf_verify.py test/bootstrap/test_model_ensure.py test/bootstrap/test_model_caches.py test/bootstrap/test_asset_resolve.py`，另加 `test/bootstrap/test_cn_lock.py test/bootstrap/test_runtime_regional_lock.py` |
-
-也可用域标记代替显式文件列表，例如 `pytest -q -m llm`。
-
-**下载路径的默认单测一律不联网**：fake HTTP、fake subprocess、小文件，不访问公共镜像也不加载
-模型。真正的实机验收（全量摘要比对、全新安装、破坏哈希、中断续传）已于 2026-08-21 跑过一次，
-逐项结果在 [`download-routes.md`](download-routes.md) §9；它不是回归套件的一部分，也不需要
-每次发版重跑——除非改了镜像表、lock 生成器或模型清单。
-
 ## 标记说明
 
 三个域标记在 `test/conftest.py` 的 `_PIPELINE_FILES` / `_ASR_FILES` 里按**文件**声明
@@ -126,8 +54,8 @@ python -m pytest -q <file>`。2026-09-02 就是这样才发现两条断言早已
 | `pipeline` | 管线/批处理编排，以及一次运行所依赖的运行时与预置层：GPU 与线程预算、设备判定、分离器自身的管道、终端 reporting、config、secrets、state |
 | `asr` | 音频 → 词 → 字幕这条路：VAD、解码、对齐、稳定化、分句，以及它们用的文本工具 |
 | `heavy_resource` | GPU/大模型/大音频；默认 skip，需 `--run-heavy-resource` |
-| `network_mock` | 起真实的本机 socket 去证明一条路由（目前只有 `[llm] proxy` 的转发证明）；默认 skip，需 `--run-network-mock`。快且不出机器，但不该让每次 `pytest -q` 都去绑端口 |
-| `requires_main_checkout` | 契约依赖当前仓库就是主 checkout（例如真实 checkout 路径、知识库 apply/commit）；linked worktree 中自动 skip |
+| `network_mock` | 起真实的本机 socket 去证明一条路由或一个网络层契约（`[llm] proxy` 的转发证明、API 调用硬截止对滴流/无响应服务端成立）；默认 skip，需 `--run-network-mock`。快且不出机器，但不该让每次 `pytest -q` 都去绑端口 |
+| `requires_main_checkout` | 契约依赖当前仓库就是主 checkout（真实 checkout 路径的解析）；linked worktree 中自动 skip，所以这些用例在任何分支上都是绿的。现在只剩三条（`test_paths`、`test_separator_accel`、`test_llm_config_and_budget` 里探测本地 tokenizer 的那条）；知识库的测试不在其中——worktree 写保护只挡**共享的**知识库，测试用的 tmp 根照常可写。逃生舱见 [`test-runs.md`](test-runs.md#何时跑哪种) |
 
 **三个域标记是一个划分**：每个测试文件恰好带一个，`-m "llm or pipeline or asr"` 收集到的
 就是全量（与 `pytest -q` 一致）。这条由 `test_packaging.py::test_the_domain_markers_cover_every_test_file`
@@ -145,7 +73,8 @@ python -m pytest -q <file>`。2026-09-02 就是这样才发现两条断言早已
 ### 没有 `slow` 标记
 
 `slow` 已于 2026-08-15 连同 36 处用法一起删除。它不是「不好用」，而是**和真实耗时反相关**：
-被它标住的 36 例里有 31 例来自 `test_llm_search_loop.py`（模块级 `pytestmark`），单例全部
+被它标住的 36 例里有 31 例来自当时的 `test_llm_search_loop.py`（模块级 `pytestmark`；那个文件随
+搜索 loop 于 2026-09-09 一起删了，所以这段只能回溯到 `f5ba89df` 的父提交去核），单例全部
 低于 0.27 秒；而实测最慢的三例——`test_llm_local_agent.py` 的两个子进程用例（各 3.3 秒）和
 `test_state_store.py::test_concurrent_writers_do_not_lose_each_others_sections`（3.06 秒）——
 一个都没被标住。`-m "not slow"` 于是恰好踢掉最快的那批、留下最慢的那批。
@@ -164,8 +93,8 @@ python -m pytest -q <file>`。2026-09-02 就是这样才发现两条断言早已
 ## 测试替身放哪：一个名字可能有多个查找点
 
 **`monkeypatch.setattr` 只改一个模块的绑定。** 一个名字被拆进多个模块后，patch 其中一个
-不会炸——只是那条测试悄悄不再测另外几个。实测两例：`load_entry_texts` 在纠错子包的四个
-模块里各绑一份、`PROMPT_VERSION` 被 `run`（窗口断点指纹）与 `query_round`（会话 checkpoint
+不会炸——只是那条测试悄悄不再测另外几个。实测两例：`load_entry_texts` 在纠错子包的五个
+模块里各绑一份、`PROMPT_VERSION` 被 `run`（窗口断点指纹）与 `request_turn`（会话 checkpoint
 哈希）各绑一份，只 patch 前者会让「contract 一 bump 全部断点作废」这条测试半真。
 
 两条随之而来的规矩：
@@ -178,7 +107,7 @@ python -m pytest -q <file>`。2026-09-02 就是这样才发现两条断言早已
   ——依赖照样写在文件顶部，名字仍在调用时解析。反过来，有些按名绑定是**故意**的
   （测试要替换的正是「这个模块的视图」），移动前先读注释。
 
-拆模块或改名时这两条会一起出现，见 [`refactor-followups.md`](plans/refactor-followups.md) §5。
+拆模块或改名时这两条会一起出现。
 
 ## 为什么仓库根有一个 conftest.py
 
@@ -205,18 +134,28 @@ pytest 的 `tmp_path` / `tmp_path_factory.mktemp` 都走 `make_numbered_dir`，�
 - **放仓库根**。两个套件（`test/`、`cli/tests`）的 rootdir 都解析到仓库根，一处覆盖全部；
   放 `test/conftest.py` 只管一个。
 
-## 结构守卫：六条自动化规则
+## 结构守卫：自动化规则
 
 这些测试不测行为，测**结构约束**，因为它们各自对应一次「什么都没报错，但事情已经错了」：
 
 | 守什么 | 文件 | 出错时长什么样 |
 | --- | --- | --- |
 | 导入方向（media/subtitles 不向上依赖、`speech` 不依赖 `llm`、别处不得 import `finesub.pipeline`） | `test_import_boundaries.py` | import 照常成功，分层悄悄没了 |
+| **「这台机器有什么 GPU」只在 `speech/runtime/device.py` 问 torch**（`is_available`、`get_device_*`、`torch.version.cuda/hip`、`torch.backends.mps`、`torch.xpu` 等；用卡的调用如 `empty_cache` 不算） | `test_import_boundaries.py` 的 `test_device_probes_live_in_one_module` | 一处裸 `is_available()` 把活放上没有内核的卡；AMD 卡被当成 NVIDIA |
+| **ASR 解码选项只在 `asr_backend.DECODE_OPTIONS` 声明**，`transcribe.py` 不得内联拼选项名；每个注册的后端正好接受它能力对应的那一组 | `test_asr_backend_contract.py`（含一个故意写坏的第二后端，证明守卫会红） | 加了选项，只实现了 CT2 的后端悄悄忽略它，在没人跑 CI 的硬件上走另一条路 |
+| **`torch.jit.load` 只在 `speech/runtime/native_paths.py` 调**，别处用它的 `load_torchscript`（传文件对象） | `test_import_boundaries.py` 的 `test_torchscript_loads_go_through_one_helper` | UTF-8 代码页的机器上一切正常；中文 Windows（GBK）上装在中文路径下时，libtorch 的窄字符 `fopen` 报「文件不存在」——0.5.1 的 silero 报错就是这样 |
+| **依赖锁里的环境标记只能是目标平台（64 位 Windows 上的 CPython）恒为真的那几种** | `test/bootstrap/test_runtime_health.py` 的 `test_every_lock_marker_is_true_on_the_target_platform` | 运行环境的快检不求值标记：一个在目标平台为假的标记会让那个包被当成「整个包不见了」，重建又装不上它，于是每次运行都停在重建上 |
 | 选项默认值只有一份（argparse 不得抄后端的答案） | `test_option_defaults.py` | 两处默认值慢慢漂开，前端与后端行为不一致 |
 | 文档链接与章节号落得到（含源码注释里的、含中文数字节号） | `test_doc_links.py` | 链接照常渲染，指向不存在的东西 |
 | **单个函数不得超过 300 行，已超的不得再长** | `test_function_size.py` | 没有任何一刻需要有人判断「这个函数是不是太大了」——`run_search_loop` 就是这样长到 882 行的 |
 | **文档枚举的集合必须与代码一致**（当前只守 GPU 档位名） | `test_doc_facts.py` | 代码加了两个档位，文档的表还是三行，而且这类错误已经复发过一次 |
 | **中文正文用全角标点**（范围只有 `docs/manual/`） | `test_doc_style.py` | 文档照常渲染，但下一次内容改动的 diff 被标点噪声淹掉——2026-09-03 一次 700 行改写里真正的变动只有六个选项名 |
+| **只有注册表和两个结构化表的主人直接读 `config.toml`**（`settings.py`、`api_keys.py`、`model_routes.py`） | `test_settings.py` | 又多出一种读法：`[chunking]` 就是这样把 `true` 读成 1、`3.7` 读成 3 的 |
+| **每个声明过的配置键都写进它的文档**；说明在 `docs/manual/` 下的，还要进 `config.example.toml` 与 `resources.md` 的节表 | `test_settings.py` | 键能用，但除了读代码没人知道——启用这条时一次抓到 10 处 |
+| **捕获文本输出的子进程必须写明 `encoding=`** | `test_subprocess_text_encoding.py` | 英文与 UTF-8 机器上一切正常；中文 Windows 上第一个非 ASCII 字节就在读线程里崩，报错不指向真因 |
+| **子进程必须带 `creationflags=no_window()`**，须共用终端的逐个列进 `SHARES_THE_TERMINAL` | `test_subprocess_console_window.py` | 在终端里和本机 agent 宿主里都看不出来；只有 FineSub 被无窗口拉起时，每个子进程闪一个黑框（见下一节） |
+| **公开文档不得点名发布时剥离的文件、不得带维护者本机的路径**；`.gitignore` 放行的路径必须进 `$PrivatePaths` | `test_publish_filter.py` | 公开仓库里的读者拿到一个打不开的文件名或别人机器上的路径；清理前攒了 140 多处 |
+| **测试不得在 checkout 里留下批次状态或运行日志**（只含 `.batch.lock` 的 `out/batch/<id>/`、空的 `logs/run-*.log`、指向 pytest 临时目录的 `batches.json` 行） | `test/conftest.py` 的 autouse fixture `_batch_and_logs_in_tmp` 加会话结束时的检查（不是单条测试：整轮跑完才判，泄漏了就让整轮失败） | 每跑一次全量多一批垃圾；注册表被测试行灌满，真批次的 `--resume-batch` 要在里面找——修复前攒了 34 个目录、101 个日志、50 行 |
 
 ⚠ `test_function_size.py` 的 `_ALLOWED` 是**棘轮不是豁免名单**：每条带着测量当天的行数，
 断言是 `<=`，掉回 300 行以下的必须删条目。要让某个函数变大，得手动改那个数字——
@@ -230,19 +169,45 @@ pytest 的 `tmp_path` / `tmp_path_factory.mktemp` 都走 `make_numbered_dir`，�
 范围，**先归一化再改 `_SCOPES`**，顺序反了就是一片红。它遮蔽代码块、行内代码、链接目标、
 URL 与 HTML——遮蔽面和做归一化时用的是同一套，否则守卫会去管它没管过的地方。
 
+## Windows 子进程不弹窗：为什么要这个 flag、怎么验
+
+**机制。** Windows 让控制台子进程沿用父进程的 console。父进程**没有** console 时（被 GUI
+宿主、`pythonw`、计划任务无窗口拉起），每个控制台子进程都会新开一个**可见**的，活多久闪多久。
+`finesub_bootstrap.processes.no_window()`（`CREATE_NO_WINDOW`）让子进程拿到隐藏 console，
+它再起的进程沿用这个隐藏 console——所以 agy 的 hook、厂商 CLI 内部起的进程这些我们传不了 flag
+的，也一并安静。agent CLI 的启动原本就带 `creationflags`，但只有进程组和挂起，照样闪；守卫因此
+判**值**（跟随同一作用域里的一次局部赋值），不只看有没有这个关键字。
+
+**实测（2026-09-16）。** 同一段操作（agy `--version`/`--help`/`/hooks` ×2、`ffmpeg -version`），
+在无 console 的 FineSub 进程里：修复前 6 个可见窗口，修复后 0 个。修复后又在无 console 下跑了一次
+真实的 Codex 调用：CLI 正常启动、正常输出事件流，窗口数为 0。
+
+**怎么复现**——三步，缺一步就测不出来：
+
+1. **FineSub 那一层必须真的没有 console。** 用 `subprocess.Popen([...], creationflags=subprocess.DETACHED_PROCESS)`
+   拉起跑被测代码的 Python（进程里 `kernel32.GetConsoleCP()` 为 0 即确认）。⚠ 在终端里、在
+   Claude Code 或 CodeBuddy 的 shell 里直接跑**看不出问题**：它们都给了 console（agent 宿主给的是
+   隐藏的，code page 非 0、`GetConsoleWindow()` 为 0），不带 flag 的子进程也不会弹窗。
+2. **用 WinEvent 钩子数窗口，不要轮询。** `SetWinEventHook(EVENT_OBJECT_CREATE, EVENT_OBJECT_SHOW, …,
+   WINEVENT_OUTOFCONTEXT)` 加消息循环，只数类名为 `ConsoleWindowClass` 的 `EVENT_OBJECT_SHOW`。
+   ⚠ 每 20 ms `EnumWindows` 轮询一次会漏掉：`agy --version` 这种进程几毫秒就结束，第一版监视就是
+   这样一个都没抓到的。先用一次 `CREATE_NEW_CONSOLE` 起的 `cmd /c exit` 自测，确认钩子能数到 1。
+3. **确认 import 的是被测代码。** 在 worktree 里，不经 pytest 的 `python -c` 会 import 主 checkout
+   的 editable 安装；被测脚本里显式 `sys.path.insert` worktree 的 `src` 并打印模块的 `__file__`。
+   这次就有一轮因此测到了未修的代码。
+
+**守卫的已知盲区**（今天仓库里都不存在，记下而不处理）：`**kwargs` 拆包按「已抑制」放行；
+`from subprocess import run` 这种直接导入看不见；经参数注入的进程工厂（`environment.py` 的
+`process_factory`）不在扫描面里，那一处靠调用点自己传 flag。
+
 ## 备注
 
-- PowerShell 下不要用 `test/test_llm_*.py` glob（不展开）；用显式文件列表或 `-m llm`。
 - `test_pipeline_refactor.py`、`test_intervals.py`、`test_vad_streaming.py` 收集时会 import torch，collect 略慢属正常。
-- 默认测试套件不生成 prompt preview。重打工具（`tools/session_replay`）按需维护，
-  其测试不被默认收集，需要时显式运行 `python -m pytest tools/session_replay -n 0`。
-- 离线探针（`tools/bench`）同理不被默认收集：`python -m pytest tools/bench`。
-  它们的依赖在 **`[bench]` extra**（`onnx` / `sentencepiece` / `scikit-learn`；
-  `onnxruntime` 已在 `[asr]` 里），装机是 `pip install -e ".[asr,bench]"`——
-  标准的 `[asr,harness,dev]` 跑这些探针会直接 `ImportError`。
+- 默认测试套件不生成 prompt preview。重打工具（`tools/session_replay`）与离线探针（`tools/bench`）的测试
+  不被默认收集，怎么跑见 [`test-runs.md`](test-runs.md#命令)。
 - 默认单测不得加载 Whisper/audio-separator、处理大音频或消耗 Gemini quota。
 - `.github/workflows/ci.yml` 除根套件外还有两个 Windows job：`windows`（`cli/tests`、按名字跑
-  DPAPI 与 junction 两份、构建 wheel）与 `thin-cli-py310`（Python 3.10 构建并安装 wheel，在 managed
+  DPAPI、junction 与 CRT locale 三处、构建 wheel）与 `thin-cli-py310`（Python 3.10 构建并安装 wheel，在 managed
   runtime 不存在时运行 `finesub agent-clean`，守住 cleanup 的轻依赖/不 provisioning 契约）。
 - ⚠️ **`test_fw_refine.py` 整个模块在 CI 里从不执行**：开头两条
   `pytest.importorskip("scipy" / "faster_whisper")` 会整模块 skip，而 CI 只装
@@ -251,13 +216,7 @@ URL 与 HTML——遮蔽面和做归一化时用的是同一套，否则守卫�
   **代价最大的一条在这里面**：`test_a_cpu_model_decodes_and_then_shuts_down`
   （`heavy_resource`，另需 `--run-heavy-resource`）守的是 CPU GEMM 后端选错导致的
   死锁/`No SGEMM backend on CPU`，两种都只在真解码时暴露。也就是说**换 CT2 wheel 后必须
-  在本机手动跑它**，CI 绿不代表这条验过：
-
-  ```powershell
-  python -m pytest test/test_fw_refine.py --run-heavy-resource -q
-  ```
-
-  完整的换 wheel 验收清单见 `tools/wt_refine_port/ct2-patches/README.md`。
+  在本机手动跑它**，命令见 [test-runs.md「CI 跑不到、只能本机跑的」](test-runs.md#ci-跑不到只能本机跑的)。
 - linked worktree 的 `.git` 是指向主仓的文件。`test/conftest.py` 据此跳过
   `requires_main_checkout`，但显式验证 worktree 重定向/写保护的测试仍正常运行；回到主
   checkout 后这些用例自动恢复，不需要额外参数。

@@ -29,8 +29,7 @@
 - checkpoint identity/读写：`speech/recognition/checkpoint.py`
 - 入口：生产缺省由 profile 决定；`--wt-workers N` 只作为 **DEV/UNSAFE benchmark 覆盖**。
 - 测试：`test/test_wt_shard.py`（规划）、`test/test_wt_sharding.py`（执行）
-- 设计期完整记录（实施顺序、逐条测试计划、验收标准、设计期收益预期）在本地
-  `docs/archive/wt_parallelism_plan.md`，不随仓库发布。
+- 设计期完整记录（实施顺序、逐条测试计划、验收标准、设计期收益预期）在维护者的本地归档里，不随仓库发布。
 
 ## 实测标定（2026-07-29，RTX 5060 Ti，`large-v3-turbo`）
 
@@ -451,7 +450,7 @@ shard 首组暂缓 recall → 左 shard 完成后导出最后 5 秒 → 再算�
 
 ### 历史阻碍（仍成立的问题陈述）
 
-词级时间戳质量：`tools/qwen3_explore/FINDINGS.md` §5 实测**原生 whisper** 词时戳的段首
+词级时间戳质量：`tools/qwen3_explore/FINDINGS.md` [§5 目标 4](../tools/qwen3_explore/FINDINGS.md#5-目标-4qwen-asr-文本--全局分句) 实测**原生 whisper** 词时戳的段首
 漂移中位 0.180 s、26% 超 0.3 s，且全链路无人纠正（段尾只有 0.020 s，有能量补齐兜底）。
 切点的时间不确定性就等于段首不确定性——这是当初必须用 WT（`refine` 能把段首分歧减半）的
 原因。

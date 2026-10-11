@@ -82,14 +82,9 @@ def _assembled_prompts() -> dict:
     appear after assembly -- which is the state that has to match the contract.
     """
 
-    from finesub.llm.prompt_compose import compose_correction_query_system
+    from finesub.llm.prepare_prompts import build_prepare_task_messages
+    from finesub.llm.request_prompts import build_window_task_messages
     from finesub.llm.routing.profiles import resolve_profile
-    from finesub.llm.prompts import (
-        build_fast_round1_messages,
-        build_research_round1_messages,
-        build_research_round2_messages,
-        build_search_loop_messages,
-    )
     from finesub.llm.chunking import SubtitleSegment, plan_correction_windows
 
     class _Counter:
@@ -108,21 +103,15 @@ def _assembled_prompts() -> dict:
         [SubtitleSegment("1", 0.0, 1.0, "テスト")], counter=_Counter()
     )[0]
     return {
-        "query": compose_correction_query_system(
-            resolve_profile("audio", "local", "quality"),
-            search_queries_rules="（示例搜索规则）",
-        ),
-        "fast_round1": build_fast_round1_messages(
-            window=window, streamer_index="- k | a | d", common_index=""
+        "prepare_task_request": build_prepare_task_messages(
+            transcript="1|hi", knowledge_indexes={"streamer": "- k | a | d", "common": ""}
         )[0]["content"],
-        "research_round1": build_research_round1_messages(transcript="1|hi")[0][
-            "content"
-        ],
-        "research_round2": build_research_round2_messages(transcript="1|hi")[0][
-            "content"
-        ],
-        "search_loop": build_search_loop_messages(
-            round_index=0, max_rounds=2, is_final_round=False, contract_json="{}"
+        "prepare_task_delivery": build_prepare_task_messages(transcript="1|hi")[0]["content"],
+        "correction_request": build_window_task_messages(
+            request_channel=True,
+            knowledge_indexes={"streamer": "- k | a | d", "common": ""},
+            window=window,
+            profile=resolve_profile("audio", "local", "quality"),
         )[0]["content"],
     }
 
@@ -149,6 +138,10 @@ def test_extractor_and_prompt_agree_on_top_level_blocks() -> None:
     validation.
     """
 
-    text = _assembled_prompts()["research_round1"]
+    text = _assembled_prompts()["prepare_task_request"]
+    # The prompt names `<context_pack>` in prose long before the example
+    # blocks, which the nesting-aware extractor would read as an unclosed
+    # opener; measure from the request-block examples onward instead.
+    examples = text[text.index("请求回复的输出块") :]
     for tag in ("requested_entries", "keep_entries"):
-        assert find_top_level_tag_blocks(text, tag), tag
+        assert find_top_level_tag_blocks(examples, tag), tag

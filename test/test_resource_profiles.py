@@ -9,6 +9,7 @@ those two never get confused: "my card is 8GB so it fits" is the mistake.
 
 from __future__ import annotations
 
+import io
 import pytest
 
 from finesub.reporting import NullReporter, reporting_to
@@ -456,6 +457,46 @@ class TestCpuTier:
 
         pin(True, 12.0)
         assert detect_gpu_tier() == "standard_large_vram"
+
+    def test_the_cpu_tier_says_when_a_card_is_sitting_there_unused(
+        self, monkeypatch
+    ) -> None:
+        """The tier is right, but silence would hide a broken environment.
+
+        Covers the call site: without it `detect_gpu_tier` is silent again and
+        nothing else in the suite notices.
+        """
+
+        from finesub.reporting import reporting_to, terminal_reporter
+        from finesub.speech.runtime import device
+
+        monkeypatch.setattr(device, "cuda_device_present", lambda: False)
+        monkeypatch.setattr(device, "installed_gpu_vendors", lambda: frozenset({"AMD"}))
+        monkeypatch.setattr(device, "_WARNED_UNUSED_CARD", False)
+
+        stream = io.StringIO()
+        with reporting_to(terminal_reporter(stream)):
+            assert detect_gpu_tier() == "cpu"
+
+        assert "nothing here can use it" in stream.getvalue()
+
+    def test_asking_for_the_cpu_is_not_answered_with_a_card_hint(
+        self, monkeypatch
+    ) -> None:
+        """`--device cpu` is a decision, not an accident to point out."""
+
+        from finesub.reporting import reporting_to, terminal_reporter
+        from finesub.speech.runtime import device, resources
+
+        monkeypatch.setattr(device, "cuda_device_present", lambda: False)
+        monkeypatch.setattr(device, "installed_gpu_vendors", lambda: frozenset({"AMD"}))
+        monkeypatch.setattr(device, "_WARNED_UNUSED_CARD", False)
+
+        stream = io.StringIO()
+        with reporting_to(terminal_reporter(stream)):
+            assert resources.resolve_gpu_tier(None, device="cpu") == "cpu"
+
+        assert stream.getvalue() == ""
 
     def test_a_machine_with_no_visible_device_is_not_a_gpu_tier(
         self, monkeypatch

@@ -28,15 +28,15 @@ def test_switch_vector_derives_every_trait() -> None:
         ("text", "none", "quality"): (False, False, False, False, 3.5),
         ("text", "native", "quality"): (True, False, False, False, 4.5),
         ("text", "local", "quality"): (False, True, False, False, 4.5),
-        ("audio", "local", "quality"): (False, True, True, False, 5.0),
-        ("video", "local", "quality"): (False, True, True, True, 6.0),
+        ("audio", "local", "quality"): (False, True, True, False, 4.5),
+        ("video", "local", "quality"): (False, True, True, True, 4.5),
     }
     for switches, expected in expectations.items():
         profile = resolve_profile(*switches)
         media, retrieval, difficulty = switches
         # The convenience knob sets both per-task switches (plan v2 D20).
         assert profile.profile_id == (
-            f"correction_media={media},planning_media={media},"
+            f"correction_media={media},"
             f"retrieval={retrieval},difficulty={difficulty},"
             "continuity=serial"
         )
@@ -47,36 +47,20 @@ def test_switch_vector_derives_every_trait() -> None:
             profile.correction_use_video,
             profile.output_coefficient,
         ) == expected
-        assert profile.planning_media == profile.correction_media
 
 
-def test_per_task_media_overrides_split_the_axes() -> None:
-    profile = resolve_profile(
-        "video", "local", "quality", correction_media="text"
-    )
-    assert profile.correction_media == "text"
-    assert profile.planning_media == "video"
-    assert profile.uses_media and profile.uses_video
-    assert not profile.correction_use_audio
-    assert profile.planning_use_video
-    # The output coefficient budgets the correction window only.
-    assert profile.output_coefficient == resolve_profile(
-        "text", "local", "quality"
-    ).output_coefficient
-    assert profile.profile_id == (
-        "correction_media=text,planning_media=video,retrieval=local,"
-        "difficulty=quality,continuity=serial"
-    )
-    assert parse_profile_id(profile.profile_id) == profile
-
-
-def test_parse_profile_id_reads_pre_split_vectors() -> None:
-    # Fingerprints and replay fixtures frozen before D20 carry the single
-    # ``media`` axis; it maps onto both switches.
+def test_parse_profile_id_reads_both_media_spellings() -> None:
+    # The bare ``media=`` form, and the vector frozen while the planning-media
+    # axis existed (2026-08 to 2026-09-09): the extra key is ignored.
     parsed = parse_profile_id(
         "media=audio,retrieval=local,difficulty=quality,continuity=serial"
     )
     assert parsed == resolve_profile("audio", "local", "quality")
+    with_planning = parse_profile_id(
+        "correction_media=text,planning_media=video,retrieval=local,"
+        "difficulty=quality,continuity=serial"
+    )
+    assert with_planning == resolve_profile("text", "local", "quality")
 
 
 def test_legacy_preset_names_still_parse_for_old_artifacts() -> None:
@@ -90,7 +74,7 @@ def test_legacy_preset_names_still_parse_for_old_artifacts() -> None:
 def test_default_profile_keeps_the_harness_default_run_shape() -> None:
     # The retired "mm-med"; pipeline.py asks for media=video explicitly.
     assert DEFAULT_PROFILE.profile_id == (
-        "correction_media=audio,planning_media=audio,retrieval=local,"
+        "correction_media=audio,retrieval=local,"
         "difficulty=quality,continuity=serial"
     )
     assert DEFAULT_PROFILE.output_scale == 1.0
@@ -118,8 +102,8 @@ def test_resolve_profile_rejects_unknown_and_bad_scale() -> None:
 
 def test_expected_output_tokens_scales_with_k_and_coefficient() -> None:
     mm_med = resolve_profile("audio", "local", "quality")
-    assert expected_output_tokens(mm_med, 1_000) == 5_000
-    assert expected_output_tokens(mm_med.with_output_scale(1.3), 1_000) == 6_500
+    assert expected_output_tokens(mm_med, 1_000) == 4_500
+    assert expected_output_tokens(mm_med.with_output_scale(1.5), 1_000) == 6_750
     text_low = resolve_profile("text", "none", "efficiency")
     assert expected_output_tokens(text_low, 1_000) == 3_500
     assert expected_output_tokens(text_low, 0) == 0
@@ -137,16 +121,16 @@ def test_max_window_csv_tokens_matches_design_table() -> None:
         ("text", "none", "quality"): 15_423,
         ("text", "native", "quality"): 11_996,
         ("text", "local", "quality"): 11_996,
-        ("audio", "local", "quality"): 10_796,
-        ("video", "local", "quality"): 8_997,
+        ("audio", "local", "quality"): 11_996,
+        ("video", "local", "quality"): 11_996,
     }
     fast = {
         ("text", "none", "efficiency"): 12_122,
         ("text", "none", "quality"): 12_122,
         ("text", "native", "quality"): 9_428,
         ("text", "local", "quality"): 9_428,
-        ("audio", "local", "quality"): 8_485,
-        ("video", "local", "quality"): 7_071,
+        ("audio", "local", "quality"): 9_428,
+        ("video", "local", "quality"): 9_428,
     }
     for key, expected in normal.items():
         assert max_window_csv_tokens(resolve_profile(*key)) == expected
@@ -154,7 +138,7 @@ def test_max_window_csv_tokens_matches_design_table() -> None:
         assert max_window_csv_tokens(resolve_profile(*key), fast=True) == expected
     # k > 1 shrinks the cap.
     scaled = resolve_profile("audio", "local", "quality", output_scale=1.25)
-    assert max_window_csv_tokens(scaled) == int(53_982 / (1.25 * 5.0))
+    assert max_window_csv_tokens(scaled) == int(53_982 / (1.25 * 4.5))
 
 
 def test_video_token_rate_low_and_high_resolution() -> None:

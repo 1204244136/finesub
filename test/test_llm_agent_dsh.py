@@ -16,12 +16,14 @@ import pytest
 
 from finesub.llm.agent.agent_mcp_server import TOOL_NAMES
 from finesub.llm.agent.local_agent import (
+    DSH_INLINE_PROBE_MAX_CHARS,
     DriverProbe,
     DshDriverConfig,
     DshLocalAgentDriver,
     LocalAgentPolicyViolationError,
     LocalAgentTransientError,
     MCP_SERVER_NAME,
+    probing_driver,
 )
 
 
@@ -67,7 +69,7 @@ def _server() -> dict:
 
 def _driver(**overrides) -> DshLocalAgentDriver:
     driver = DshLocalAgentDriver(
-        DshDriverConfig(model="deepseek-official/deepseek-v4-flash", **overrides)
+        DshDriverConfig(model="deepseek-official/deepseek-flash", **overrides)
     )
     driver._resolved_command = ("node.exe", "bin.js")
     return driver
@@ -101,6 +103,57 @@ def test_a_call_without_the_harness_server_is_refused_not_squeezed_into_argv(
     with pytest.raises(LocalAgentPolicyViolationError, match="tool protocol only"):
         _driver()._argv(
             _capsule(tmp_path),
+            native_search=False,
+            probe=DriverProbe(available=True),
+            mcp_server=None,
+        )
+
+
+def test_a_quota_probe_rides_argv_without_the_harness_server(tmp_path) -> None:
+    """The one call dsh takes without MCP: a probe asks for a word, not a window.
+
+    Before this, the refusal above also caught every probe, so `agent-ping`
+    reported each dsh row `failed` without calling dsh and the router's
+    exhaustion probe never reached it. The overlay is the production one minus
+    the MCP entry -- same model route, same denied plugins.
+    """
+
+    driver = probing_driver(_driver())
+    driver._resolved_command = ("node.exe", "bin.js")
+    argv = driver._argv(
+        _capsule(tmp_path, "Reply with the single word: OK"),
+        native_search=False,
+        probe=DriverProbe(available=True),
+        mcp_server=None,
+    )
+
+    assert argv[-1] == "Reply with the single word: OK"
+    entries = json.loads(
+        Path(argv[argv.index("--patch") + 1]).read_text(encoding="utf-8")
+    )
+    assert not any("insert" in entry for entry in entries)
+    assert _by_id(entries, "agent-default-model")["config"] == {
+        "provider": "deepseek-official",
+        "model": "deepseek-flash",
+    }
+    denied = {entry["id"] for entry in entries if entry.get("disabled")}
+    assert set(DshDriverConfig().disabled_tool_plugins) | {"tool-web"} <= denied
+    # The user's `$DSH_HOME/AGENTS.md` stays out of every call.
+    assert "agent-instructions" in denied
+
+
+def test_the_probe_opening_is_only_for_probes_and_only_for_short_asks(
+    tmp_path,
+) -> None:
+    """A production driver still refuses; a probe carrying a window still refuses."""
+
+    assert DshDriverConfig().inline_probe is False
+    assert _driver().config.inline_probe is False
+    probe_driver = probing_driver(_driver())
+    probe_driver._resolved_command = ("node.exe", "bin.js")
+    with pytest.raises(LocalAgentPolicyViolationError, match="inline limit"):
+        probe_driver._argv(
+            _capsule(tmp_path, "x" * (DSH_INLINE_PROBE_MAX_CHARS + 1)),
             native_search=False,
             probe=DriverProbe(available=True),
             mcp_server=None,
@@ -174,7 +227,7 @@ def test_the_overlay_names_the_route_the_catalog_chose(tmp_path) -> None:
     entries = _entries(_driver(), tmp_path)
     assert _by_id(entries, "agent-default-model")["config"] == {
         "provider": "deepseek-official",
-        "model": "deepseek-v4-flash",
+        "model": "deepseek-flash",
     }
 
 
@@ -211,6 +264,8 @@ def test_the_web_tool_is_left_on_only_for_a_call_entitled_to_search(
     }
     assert "tool-web" in disabled
     assert "tool-bash" in disabled and "tool-subagent" in disabled
+    # dsh 0.1.5 moved fetching into its own backend plugin; it follows the tool.
+    assert "web-fetch-http" in disabled
 
     entitled = {
         entry["id"]
@@ -218,6 +273,9 @@ def test_the_web_tool_is_left_on_only_for_a_call_entitled_to_search(
         if entry.get("disabled")
     }
     assert "tool-web" not in entitled
+    # Denying only the backend would leave `web_fetch` offered and failing:
+    # `dsh-tool-web` registers it by product switch, not backend presence.
+    assert "web-fetch-http" not in entitled
     assert "tool-bash" in entitled
 
 
@@ -438,7 +496,7 @@ def test_the_packaged_rows_map_thinking_to_words_deepseek_accepts() -> None:
         # one that matters: `[presets.default.thinking]` leaves
         # `correction-*/quality` unset, so it falls to
         # `DEFAULT_THINKING_LEVEL = "medium"` and the correction window sends
-        # whatever sits here. The same model family on WorkBuddy was measured
+        # whatever sits here. The same model family on CodeBuddy was measured
         # thinking without converging at `high` on a real window -- 28 minutes
         # to the hard timeout, clean in one call at `low`
         # (docs/llm_local_agent.md §12.1.5). The top cell stays `high` because
@@ -554,6 +612,79 @@ def test_dsh_reads_its_tool_events_out_of_the_session_transcript(tmp_path) -> No
     # A capsule whose plugin never wrote a log is thinner evidence, not an
     # error: the answer already succeeded.
     assert _dsh_session_rows(tmp_path / "nope") == []
+
+
+def test_dsh_0_1_5_renamed_its_transcript_and_the_audit_still_reads_it(
+    tmp_path,
+) -> None:
+    """dsh 0.1.5 writes `session.v3.jsonl`; reading only `session.jsonl` saw nothing.
+
+    Found 2026-09-12 on a synthetic native window: the model searched twice and
+    fetched twice, and the attempt said `native_search_not_used` -- every tool
+    event of every dsh call had dropped out of the audit, with the suite green.
+    The event format itself did not change. `web_fetch` is a retrieval row too,
+    the same shape Claude Code's `WebFetch` and agy's fetch tool produce, so the
+    fetched URL reaches provenance instead of vanishing.
+    """
+
+    from finesub.llm.agent.local_agent import DSH_SESSION_DIRNAME, _dsh_session_rows
+
+    root = tmp_path / "events" / DSH_SESSION_DIRNAME
+    log = root / "--some-cwd--" / "session-v3" / "session.v3.jsonl"
+    log.parent.mkdir(parents=True)
+    # Not a transcript, and must not be read as one.
+    (log.parent / "session.meta.jsonl").write_text(
+        json.dumps({"type": "tool/call", "data": {"callId": "x", "name": "web_search"}})
+        + "\n",
+        encoding="utf-8",
+    )
+    log.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "tool/call", "data": {
+                    "callId": "s1", "name": "web_search",
+                    "arguments": json.dumps({"queries": ["原神 小吉祥草王"]})}}),
+                json.dumps({"type": "tool/result", "data": {
+                    "message": {"source": {"kind": "tool", "callId": "s1"},
+                                "content": [{"type": "tool-result", "content": [
+                                    {"type": "text",
+                                     "text": "Sources:\n- https://wiki.example/nahida"}]}]}}}),
+                json.dumps({"type": "tool/call", "data": {
+                    "callId": "f1", "name": "web_fetch",
+                    "arguments": json.dumps({"url": "http://dict.example/kusanali"})}}),
+                # Redirected to https, and the page body links elsewhere -- as
+                # the real dictionary page's footer did (2026-09-12).
+                json.dumps({"type": "tool/result", "data": {
+                    "message": {"source": {"kind": "tool", "callId": "f1"},
+                                "content": [{"type": "tool-result", "content": [
+                                    {"type": "text",
+                                     "text": "Fetched https://dict.example/kusanali (HTTP 200)\n\n"
+                                             "External web content follows.\n\n"
+                                             "# Kusanali\n\nMade by https://github.com/someone"}]}]}}}),
+                json.dumps({"type": "tool/call", "data": {
+                    "callId": "m1", "name": "mcp__finesub__submit",
+                    "arguments": "{}"}}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rows = _dsh_session_rows(root)
+    assert [row["tool"] for row in rows] == [
+        "web_search",
+        "web_fetch",
+        "mcp__finesub__submit",
+    ]
+    retrieval = [row for row in rows if row.get("item_type") == "web_search"]
+    assert [row["tool"] for row in retrieval] == ["web_search", "web_fetch"]
+    assert retrieval[0]["urls"] == ["https://wiki.example/nahida"]
+    # The page asked for and the page read after the redirect -- and not the
+    # footer link in its body, which a search result would have counted.
+    assert retrieval[1]["urls"] == [
+        "http://dict.example/kusanali",
+        "https://dict.example/kusanali",
+    ]
 
 
 def test_dsh_hands_its_search_backend_the_key_only_when_entitled(monkeypatch) -> None:

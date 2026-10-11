@@ -14,10 +14,6 @@ from finesub.llm.knowledge.update import (
     derive_task_paths,
     run_knowledge_update,
 )
-from finesub.llm.prompts import (
-    build_fast_round1_messages,
-    build_research_round2_messages,
-)
 from finesub.llm.research import extract_round_task_feedback
 from finesub.subtitles.model import SrtSegment, render_srt
 
@@ -153,9 +149,9 @@ def _write_task_outputs(tmp_path: Path, *, with_refined: bool = False):
         encoding="utf-8",
     )
     paths["annotated_csv"].write_text(
-        "# type|position|duration|corrected|translation|conf|note\n"
-        "sub|1|1.0|0.0|hello|你好|8|2|\n"
-        "sub|2|1.0|0.0|bye|再见|7|2|\n",
+        "# type|position|duration|gap|corrected|translation|conf|char_count|spk|note\n"
+        "sub|1|1.0|0.0|hello|你好|8|2||\n"
+        "sub|2|1.0|0.0|bye|再见|7|2||\n",
         encoding="utf-8",
     )
     paths["research_context"].write_text(
@@ -204,7 +200,6 @@ def _write_task_outputs(tmp_path: Path, *, with_refined: bool = False):
     return final_srt, paths, refined
 
 
-@pytest.mark.requires_main_checkout
 def test_run_knowledge_update_artifacts_only_ignores_a_stray_block(
     tmp_path,
 ) -> None:
@@ -239,7 +234,7 @@ def test_run_knowledge_update_artifacts_only_ignores_a_stray_block(
     assert "<refined_csv>" not in user
     assert "<common_mistakes>" not in user
     assert "<good_examples>" not in user
-    # Knowledge applied; mistake ledger untouched (design F/G).
+    # Knowledge applied.
     assert "A 固定译为甲" in (knowledge_root / "rendered" / "common" / "游戏B.md").read_text(
         encoding="utf-8"
     )
@@ -259,7 +254,6 @@ def test_run_knowledge_update_artifacts_only_ignores_a_stray_block(
     assert "knowledge_update_apply_report" in kinds
 
 
-@pytest.mark.requires_main_checkout
 def test_run_knowledge_update_retries_invalid_jsonl_then_applies(tmp_path) -> None:
     final_srt, paths, _ = _write_task_outputs(tmp_path)
     knowledge_root = tmp_path / "knowledge"
@@ -298,7 +292,6 @@ def test_run_knowledge_update_retries_invalid_jsonl_then_applies(tmp_path) -> No
     assert not ku_responses[1]["payload"].get("parse_error")
 
 
-@pytest.mark.requires_main_checkout
 def test_run_knowledge_update_reruns_skip_applied_chunks(tmp_path) -> None:
     final_srt, _, _ = _write_task_outputs(tmp_path)
     knowledge_root = tmp_path / "knowledge"
@@ -330,7 +323,6 @@ def test_run_knowledge_update_reruns_skip_applied_chunks(tmp_path) -> None:
     ) == entry_text
 
 
-@pytest.mark.requires_main_checkout
 def test_run_knowledge_update_recovers_commit_before_ledger_crash(tmp_path) -> None:
     final_srt, paths, _ = _write_task_outputs(tmp_path)
     knowledge_root = tmp_path / "knowledge"
@@ -366,12 +358,11 @@ def test_run_knowledge_update_recovers_commit_before_ledger_crash(tmp_path) -> N
     assert "recovered_after_commit" in ledger_path.read_text(encoding="utf-8")
 
 
-@pytest.mark.requires_main_checkout
 def test_run_knowledge_update_refined_mode_reads_the_refined_material(tmp_path) -> None:
     """What the refined variant is FOR: the refined lines reach the prompt.
 
     It used to also write the mistake ledger; that half became a style entry
-    (`docs/plans/translation-style-plan.md`), which this run names none of — so the
+    (`docs/knowledge.md`, 「style 类别」), which this run names none of — so the
     prompt carries no style section either."""
 
     final_srt, _, refined = _write_task_outputs(tmp_path, with_refined=True)
@@ -448,7 +439,6 @@ def test_run_knowledge_update_dry_run_writes_no_revision_when_apply_is_true(
     assert knowledge_version(knowledge_root) == "rev:0"
 
 
-@pytest.mark.requires_main_checkout
 def test_run_knowledge_update_splits_over_limit_chunks(tmp_path, monkeypatch) -> None:
     # Two executed windows so the over-limit chunk can split on the boundary.
     final_srt = tmp_path / "x.srt"
@@ -475,9 +465,9 @@ def test_run_knowledge_update_splits_over_limit_chunks(tmp_path, monkeypatch) ->
         encoding="utf-8",
     )
     paths["annotated_csv"].write_text(
-        "# type|position|duration|corrected|translation|conf|note\n"
-        "sub|1|1.0|0.0|hello|你好|8|2|\n"
-        "sub|2|1.0|0.0|bye|再见|7|2|\n",
+        "# type|position|duration|gap|corrected|translation|conf|char_count|spk|note\n"
+        "sub|1|1.0|0.0|hello|你好|8|2||\n"
+        "sub|2|1.0|0.0|bye|再见|7|2||\n",
         encoding="utf-8",
     )
     for chunk_id, ids in (("0001", ["1"]), ("0002", ["2"])):
@@ -551,18 +541,6 @@ def test_run_knowledge_update_splits_over_limit_chunks(tmp_path, monkeypatch) ->
 # feedback collection prompt wiring (research round 2 / fast round 1)
 
 
-def test_research_round2_feedback_block_only_when_collecting() -> None:
-    base = dict(transcript="--- window 0001 ---\n1|hello\n")
-    off = build_research_round2_messages(**base)
-    on = build_research_round2_messages(**base, collect_task_feedback=True)
-
-    assert "task_update_feedback" not in off[0]["content"]
-    assert "task_update_feedback" not in off[1]["content"]
-    assert "<task_update_feedback>" in on[0]["content"]
-    assert "knowledge_hints" in on[0]["content"]
-    assert "task_update_feedback" in on[1]["content"]  # closing reminder
-
-
 def test_extract_round_task_feedback_is_best_effort() -> None:
     text = (
         "<context_pack>{}</context_pack>\n"
@@ -581,41 +559,13 @@ def test_extract_round_task_feedback_is_best_effort() -> None:
     )
 
 
-def test_fast_round1_feedback_block_only_when_collecting() -> None:
-    from finesub.llm.chunking import SubtitleSegment, plan_correction_windows
+def _pretend_worktree_sharing(monkeypatch, root) -> None:
+    """This process is a linked worktree and ``root`` is the shared base."""
 
-    window = plan_correction_windows(
-        [
-            SubtitleSegment("1", 0.0, 1.0, "えっと。"),
-            SubtitleSegment("2", 1.2, 2.0, "やばい。"),
-        ],
-        counter=FakeTokenCounter(),
-    )[0]
-    off = build_fast_round1_messages(window=window)
-    on = build_fast_round1_messages(window=window, collect_task_feedback=True)
+    from finesub.llm.knowledge import base as knowledge_base
 
-    assert "task_update_feedback" not in off[0]["content"]
-    assert "<task_update_feedback>" in on[0]["content"]
-    assert "task_update_feedback" in on[1]["content"]
-
-
-def test_fast_round1_parse_collects_feedback() -> None:
-    from finesub.llm.stages.fast_session import parse_fast_round1_output
-
-    text = (
-        "<analysis_notes>要点</analysis_notes>\n"
-        "<requested_entries>星野灯</requested_entries>\n"
-        "<keep_entries></keep_entries>\n"
-        "<search_queries>游戏B 剧情</search_queries>\n"
-        f"<task_update_feedback>{_feedback_json()}</task_update_feedback>"
-    )
-    off = parse_fast_round1_output(text, count_tokens=len)
-    on = parse_fast_round1_output(text, collect_task_feedback=True, count_tokens=len)
-
-    assert off.task_update_feedback == ""
-    assert "游戏B" in on.task_update_feedback
-
-
+    monkeypatch.setattr(knowledge_base, "is_linked_worktree", lambda: True)
+    monkeypatch.setattr(knowledge_base, "shared_knowledge_roots", lambda: {root.resolve()})
 
 
 def test_a_worktree_asks_before_writing_the_main_knowledge_base(
@@ -626,7 +576,7 @@ def test_a_worktree_asks_before_writing_the_main_knowledge_base(
     # costs nothing: no quota is spent and the ledger does not advance.
     final_srt, _, _ = _write_task_outputs(tmp_path)
     client = FakeClient(_proposal_response())
-    monkeypatch.setattr(update_module, "is_linked_worktree", lambda: True)
+    _pretend_worktree_sharing(monkeypatch, tmp_path / "knowledge")
     monkeypatch.delenv("FINESUB_KNOWLEDGE_WRITE", raising=False)
 
     report = run_knowledge_update(
@@ -643,7 +593,7 @@ def test_a_worktree_asks_before_writing_the_main_knowledge_base(
 
 def test_a_worktree_writes_when_the_developer_says_so(tmp_path, monkeypatch) -> None:
     final_srt, _, _ = _write_task_outputs(tmp_path)
-    monkeypatch.setattr(update_module, "is_linked_worktree", lambda: True)
+    _pretend_worktree_sharing(monkeypatch, tmp_path / "knowledge")
     monkeypatch.setenv("FINESUB_KNOWLEDGE_WRITE", "1")
 
     report = run_knowledge_update(
@@ -657,7 +607,6 @@ def test_a_worktree_writes_when_the_developer_says_so(tmp_path, monkeypatch) -> 
     assert report.get("skipped") != "worktree_readonly"
 
 
-@pytest.mark.requires_main_checkout
 def test_another_process_holding_the_knowledge_lock_skips_applying(
     tmp_path, monkeypatch
 ) -> None:
@@ -802,7 +751,6 @@ def test_conflicted_entries_only_picks_what_a_repair_round_can_fix() -> None:
     assert len(conflicted_entries(many)) == MAX_REPAIR_ENTRIES
 
 
-@pytest.mark.requires_main_checkout
 def test_a_conflict_is_fed_back_with_the_winner_s_version(tmp_path, monkeypatch) -> None:
     """B' (plan §4.2): the dropped lines are re-decided against what the winner
     wrote, at the new revision and with the handles of that revision."""
@@ -846,7 +794,6 @@ def test_a_conflict_is_fed_back_with_the_winner_s_version(tmp_path, monkeypatch)
     assert "knowledge_conflict_repair" in kinds
 
 
-@pytest.mark.requires_main_checkout
 def test_a_failing_repair_round_leaves_the_run_alone(tmp_path, monkeypatch) -> None:
     """Everything else is already committed, so B' is additive by construction:
     a repair that errors must not turn a successful update into a failure."""
@@ -874,7 +821,6 @@ def test_a_failing_repair_round_leaves_the_run_alone(tmp_path, monkeypatch) -> N
     assert "error" in report["chunks"][0]["knowledge_repair_report"]
 
 
-@pytest.mark.requires_main_checkout
 def test_self_inflicted_conflicts_do_not_buy_a_repair_round(tmp_path, monkeypatch) -> None:
     """No foreign revision since the read -- the only commit is the main
     apply's own -- so the drops collided with the model's own lines, and a
@@ -897,7 +843,6 @@ def test_self_inflicted_conflicts_do_not_buy_a_repair_round(tmp_path, monkeypatc
     assert "knowledge_repair_report" not in report["chunks"][0]
 
 
-@pytest.mark.requires_main_checkout
 def test_a_repair_round_that_fails_validation_still_leaves_its_exchange(
     tmp_path, monkeypatch
 ) -> None:

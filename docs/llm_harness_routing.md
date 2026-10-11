@@ -62,16 +62,16 @@ checkpoint，与其它路由改动同口径。决策理由见 `llm_design_notes.
 （v1 的 pool/chain 已由它们取代）。同一名义模型的 free/paid 行不合并，因为能力、context、
 quota 或工具开放情况可以按 tier 不同。
 
-**7 个任务组 × 3 档 difficulty = 21 个格子**；预设把格子绑到有序模型组，格子携带默认
+**4 个任务组 × 3 档 difficulty = 12 个格子**；预设把格子绑到有序模型组，格子携带默认
 变体与 thinking 档位，模型组条目可选覆盖变体（prompt 迭代用）。**格子支持难度回落**
 （2026-08-11）：没绑的 intermediate/efficiency 沿 efficiency→intermediate→quality 在**同一
 预设内**向上找（difficulty 只换 prompt，不悄悄换别人的组）；整组一格都没绑才跨到 default
-预设。因此 default 只需绑每组的 quality（loader 强制）——现行 9 个绑定：7×quality +
+预设。因此 default 只需绑每组的 quality（loader 强制）——现行 6 个绑定：4×quality +
 correction-mm/intermediate + correction-text/intermediate（correction 的 intermediate 显式
 降到 lite 组，是"免费额度尽→切档继续"的出口；efficiency 继承它）。
 有意变更（相对 v1 链）：correction 的 lite 移入 intermediate 格；knowledge 用自己的窄组；research
-**去掉了 lite 兜底**、lightweight 只留 3.5-lite（免费档撞额度时这些任务停下等待或走付费尾巴
-[3.6]，而不是降质）。组内 fallback 统一为 `unavailable/quota/rate_limit/timeout/transient`
+**去掉了 lite 兜底**（免费档撞额度时停下等待或走付费尾巴 [3.6]，而不是降质；`lightweight-default`
+组随查询轮与搜索裁判一起删了，2026-09-09）。组内 fallback 统一为 `unavailable/quota/rate_limit/timeout/transient`
 （D8）。新增 catalog fact 不会自动上线，必须显式进入 target、模型组和预设绑定。
 绑定期告警在启动校验时按**当前激活的预设**打印：**下限分数只查 quality 格**（floor 守的是
 任务的标称质量；correction/knowledge 70，其余 50——另外两档本身就是声明过的降档，不告警）、
@@ -80,11 +80,10 @@ correction-mm/intermediate + correction-text/intermediate（correction 的 inter
 3.5 Flash Lite），不在声明里写死。
 
 **用户自定义（model-routing v2，`config.toml [llm.*]`，样例在 `config.example.toml`，有一致性测试）**：
-`[llm.providers.<id>]`（kind=`openai_compat|anthropic` + base_url；key 按 `FINESUB_KEY_<ID>`
-放 `.env`，同一条加密路径）、`[llm.models.<id>]`（成为 self-reported fact + 自动 target；
-**`max_input_tokens` 必填**——它与 `context_window` 一起决定窗口怎么切，填错每窗都炸；其余限额缺省按付费档，输出上限缺省
-65536）、`[llm.model_groups.<id>]`、`[llm.presets.<id>]`（未绑格子回落 default 同名格，
-test_target 可省继承 default 的），`[llm] preset = "<id>"` 选激活预设。
+自己的端点与模型不写在这里，是数据根 `model_catalog.psv` 里的行（`provider_kind` / `base_url` / `key_env` 是列，
+见下文「`[llm.providers]` / `[llm.models]` 已从 `config.toml` 移除」）；`config.toml` 里写的是
+`[llm.model_groups.<id>]`、`[llm.presets.<id>]`（未绑格子回落 default 同名格，
+test_target 可省继承 default 的；`defaults` 表给纠错五个开关写默认值，由 `correction_request.resolve_switches` 读，顺序是命令行 > 激活预设 > default 预设 > `CODE_DEFAULTS`，owner 2026-09-30），`[llm] preset = "<id>"` 选激活预设。
 **同名即覆盖**（2026-08-12 统一）：用户的模型组/预设用打包已有的 id 就替换掉那一个，
 与 catalog 按 `fact_id` 覆盖同一套心智模型；覆盖 `default` 预设也允许，其完整性校验
 （每个任务组的 quality 格必须绑上、test_target 必须可达）跑在合并之后。**test_target 可达性
@@ -96,11 +95,11 @@ test_target 可省继承 default 的），`[llm] preset = "<id>"` 选激活预�
 注意 `config.toml` 文件本身**不**跨目录合并：按「checkout 根 → user-data」取第一个存在的。全部命名表，无
 `[[数组表]]`——D11 预告的 round-trip TOML 放宽实际不需要，暂不引入（曾经的标量写入器
 `config_file.py` 随桌面端一起退场，`config.toml` 现在只有手改一条路）。行为要点：**自定义 HTTP endpoint 只做纯文本**（媒体由打包 Gemini REST 或本地 Agy 承担，
-配 `--correction-media text` 使用）；**非 Gemini 不传采样参数**（D18，重掷靠 prompt 尾部
+配 `--media text` 使用）；**非 Gemini 不传采样参数**（D18，重掷靠 prompt 尾部
 seed 文本）；**日封禁不适用**（strike 依赖 Gemini `quotaId`；其他家 429 归 rate_limit，
 402/`insufficient_quota` 归 quota 直接推进组内下一位）；**未知限额不 fail-closed**
 （self_reported fact 放行，artifact 标注来源）；**规划包络取组内最低**（D13：纠错窗口与知识更新分块都按
-`min(max_input)`/`min(max_output)` 规划、并按组内最大 `token_scale` 换算，包络由谁决定在绑定期告警里点名；fast 会话内部的固定上限仍是遗留项）；**改未被激活
+`min(max_input)`/`min(max_output)` 规划、并按组内最大 `token_scale` 换算，包络由谁决定在绑定期告警里点名；fast 回填的注入上限是绝对值、不随组收缩，不为小上下文模型缩（owner 2026-09-30））；**改未被激活
 预设引用的模型/组只动 advisory digest**，也不影响新调用的路由身份。供应商行为差异与
 adapter 契约见 `docs/provider-adapters.md`。
 
@@ -122,7 +121,7 @@ accepted/skipped、原因和执行结果（含 video→audio 安全网触发时�
 facts 与用户侧的激活预设/绑定/思考旋钮/模型组——它进入调用路由与尚未提交的 session 调用身份（L1），
 **不进入已提交 research/window/stage 的失效键**（L2/L3），这正是「换模型组继续跑」能用的原因
 （docs/llm_local_agent.md §11）；`advisory_digest` 覆盖咨询性字段（显示名、
-`quality_score`、`floor_score`、预设名），只进 artifact。
+`quality_score`、`floor_score`、预设名、预设的开关默认值），只进 artifact。开关默认值放这边是有意的：它只以解析后的取值进入调用，那时与命令行上写的同一个值无从区分，失效范围也就与手动改那个开关相同；收进路由身份的话，改一个默认值会让全部 L1 断点失配，连命令行已经盖过它的 run 也一样。
 
 `config.toml [llm].execution_policy` 可选：
 
@@ -141,7 +140,7 @@ fallback。provider tier（`LOCAL_CODEX`/`LOCAL_CLAUDE`/`LOCAL_AGY`）决定用�
 
 两个 agent 策略下，窗口剪辑先只以**本地路径**引用，不预先上传 Gemini Files——`agent-only` 因此
 根本不需要 Gemini key。只有当某个 API 候选真的要回答时才惰性上传，且缓存在 **client 实例**上按
-`(provider_tier, 剪辑绝对路径)` 记账：同一个窗口的查询轮、纠错轮与每次重试共用一次上传（Files
+`(provider_tier, 剪辑绝对路径)` 记账：同一个窗口的请求回合、交付轮与每次重试共用一次上传（Files
 对象 48 小时过期，调用失败时会丢弃缓存条目，下次重传）。
 
 媒体规划包络按**声明的**候选链算，不看 agy 是否真的装了：只要路由里有 `video_high_resolution_only`
@@ -167,7 +166,9 @@ project 根，也就是**整个 episode parent**，而不是本次 capsule：并
 `HTTP(S)_PROXY`/`NO_PROXY`/`NODE_EXTRA_CA_CERTS`**——代理后面的机器上三家 CLI 都会连不上，且失败
 会归类成 unavailable/transient，不容易看出根因。
 不能忽略 user config/rules 的旧 CLI 默认不可用，只能以明确的
-`local_agent_allow_unisolated_user_config=true` 做实验。API 与 agent 均写 `execution_attempts`；API 另
+`local_agent_allow_unisolated_user_config=true` 做实验；user config 里 service tier 不被支持的旧
+CLI 另有 `local_agent_service_tier`（`""` / `fast` / `flex`）作兼容覆盖。两者都在 `[llm]` 下，
+不进 manual。API 与 agent 均写 `execution_attempts`；API 另
 保留 `api_attempts` 兼容字段，agent native-search attempt 内保留紧凑 query/URL events。policy、
 `routing_identity_digest`、capsule schema、driver/protocol/config digest、toolset、sandbox 和 agent
 profile 进入 resume execution identity。若调用方注入自定义 client/router，fingerprint 使用该实际
@@ -197,11 +198,11 @@ pool（Free 优先，其次 Paid）的第一把 key。
    search judge 常量）已随之移除，旋钮是唯一来源。打包 default 的取值见下方「出厂旋钮实况」。
    注意回落方向**朝上**：research/knowledge 的 intermediate 格没有写死，正是靠这条继承了
    quality 的 high。
-2. **模型级 thinking 映射**（catalog / `[llm.models]` 的 `thinking` 列，默认恒等）：
+2. **模型级 thinking 映射**（catalog 的 `thinking` 列，默认恒等）：
 
    | 取值 | 含义 |
    | --- | --- |
-   | `true`（打包行全是它；`[llm.models]` 不写该字段时的默认） | **恒等映射**：抽象档位原样发出 |
+   | `true`（这一列留空时的默认；打包行约一半是它，其余写了自己的映射） | **恒等映射**：抽象档位原样发出 |
    | `false` | 该模型完全不发思考参数 |
    | `高映射,中映射,低映射` | 三个供应商取值，覆盖恒等 |
 
@@ -214,7 +215,7 @@ pool（Free 优先，其次 Paid）的第一把 key。
    `[llm].local_agent_reasoning_effort` 默认为空；非空时是刻意压过所有模型映射的全局兼容覆盖。
    agent 调用走 capsule 还是工具会话**不是配置键**：由 cell 的 `agent_session` 档位与 driver 的
    probe 派生（`per-window` 有 MCP 就工具会话；`api`/`resume`/带媒体恒 capsule），见
-   [`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) §1；档位进 routing identity，实际
+   [`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) [§1 档位与形态](llm_agent_tool_protocol.md#1-档位与形态)；档位进 routing identity，实际
    传输只进 route decision trace。
 
 Gemini 3.x 通过 `thinkingConfig.thinkingLevel` 控制思考深度；`thinking_level` 为空时才按
@@ -222,14 +223,13 @@ Gemini 3.x 通过 `thinkingConfig.thinkingLevel` 控制思考深度；`thinking_
 
 2026-07-12 使用 `GEMINI_FREE` 直连实测确认 `gemini/gemini-3.1-flash-lite` 支持原生 thinking（`thinkingLevel=medium` 返回 `thoughtsTokenCount`）；此前 catalog 将其标为不支持是误判（该结论在旧 `supports_reasoning` 列时代得出，现映射列同样适用）。
 
-按 token 数计的 `thinking_budget`（供不支持 thinkingLevel 的模型）不再单独维护，一律由 level 按 API 输出上限的比例派生（`config.thinking_budget_for_level`）：low/medium/high = 20%/40%/60% × 65,536 → 13,107 / 26,214 / 39,321。
+按 token 数计的 `thinking_budget`（供不支持 thinkingLevel 的模型）不再单独维护，默认由 level 按 API 输出上限的比例派生（`config.thinking_budget_for_level`）：low/medium/high = 20%/40%/60% × 65,536 → 13,107 / 26,214 / 39,321。例外是模型自己的上限更低时：catalog 的 `thinking` 列写三个整数，就是三档实际发出的预算（`model_catalog.dispatched_thinking`），出厂的 2.5 Flash 写 `24576,16384,8192`——派生的 26,214 / 39,321 超过它的上限 24,576，API 会拒绝整次调用。写法见 [`manual/model-routing.md`](manual/model-routing.md)「`thinking` 列」。
 
 出厂旋钮实况（2026-08-12 调整）：
 
 | 任务组 | quality | intermediate | efficiency |
 | --- | --- | --- | --- |
 | correction-mm / correction-text | medium | medium | **low** |
-| planning-mm / planning-text / search_judge | medium | medium | **low** |
 | research / knowledge | **high** | **high**（继承） | **low** |
 
 即：**efficiency 一律 low（13,107 budget）；research 与 knowledge 一路到 intermediate 都是
@@ -256,7 +256,7 @@ RPM 100、TPM 4M、日限额无限、`quality_score` **留空即「没有判断�
 `openai_compat`。⚠ **`context_window` 留空不是「没有上下文」而是「输入与输出是两个独立额度」**，
 存成两者之和，联合约束因此不咬人（Gemini 的真实形态）；单池供应商必须显式填，填得比任一半还
 小直接报行号。窗口的输入包络是 `min(max_input_tokens, context_window − 预留)`，预留是**预计输出**——
-**两遍求 min，不是逐列**（异质组里逐列会高估，见 `plans/model-window-limits-plan.md` §3）。
+**两遍求 min，不是逐列**（异质组里逐列会高估）。
 覆盖是整行替换而非补丁。
 
 **`[llm.providers]` / `[llm.models]` 已从 `config.toml` 移除**：端点方言与 URL 是事实，进
@@ -285,19 +285,17 @@ catalog 列；`config.toml` 只留编排（`[llm.model_groups]`、`[llm.presets]
   可重试，同理任何 id/计数里的 `4290` 会被当成 `429`。后果是白白冷却一把 key 并原地重试
   一个重试一万次也不会变的参数错误。
 - **错误分类**（`client.classify_quota_error`，按**结构化 `quotaId`** 而非 `retryDelay` 提示）：`...PerDay...` → `DAILY`、`...PerMinute...` → `PER_MINUTE`、其余 429/限流 → `OTHER_RATE`。**不用 retry 提示判日限**——Gemini 对真·日耗尽也返回 ~20–60s 的通用退避，提示区分不了日/分钟（旧 `has_short_retry_hint` 门控正因此把真日限误当瞬时，已删）。
-- **日封禁需 strike 确认（per-key）**：单发的 `PerDay` 不立即封。`rate_limit.note_daily_quota_hit` 累计 strike，**连续 ≥3 次**（`DAILY_STRIKE_COUNT`；成功即 `reset_daily_strikes` 清零）才写入 `.state` 的 `llm_rate_limit.daily_exhausted`，在 **Pacific 日历日**内跳过该 key。不再要求首末跨度（旧 `DAILY_STRIKE_SPAN_SECONDS` 已删），但**跨 Pacific 日的旧 strike 会被丢弃**（2026-08-08）——此前时间戳只写不读、streak 只在成功或封禁时清零，导致「周一两次 flicker + 周四一次 429」在全新日额度上凑满 3 次而误封。strike **按 HTTP 尝试计数**（含同一逻辑调用的 sticky 重试）是有意为之：尝试之间的等待是 `max(指数退避, provider retryDelay)`，真·PerDay 429 带的 retryDelay 很长，所以三次尝试跨越的是有意义的时间段，而非一阵突发。strike/`daily_exhausted` 以 **`(tier, model, key_id)`** 记账（照 exa `ApiKeyPool` 模式）：named key 用其名称，匿名 key 用 `sha256:<前12位hex>`——**.state 不明文存 key 原值**。一把 key 的日封不连带同 endpoint 的其他 key。免费档 `PerDay` 信号会 flicker，故不凭一次就封整天；strike 与 `daily_exhausted` 均落 `.state` 跨进程可见——写入时按 key **合并**而非整段覆盖（2026-08-08 修）：limiter 是 `lru_cache` 的、内存副本在 `__init__` 时读取一次，整段写回会抹掉另一个 FineSub 进程期间写下的日封禁；本进程**主动清除**的项不会被磁盘副本复活。`PerMinute`/普通 429、临时 5xx 退避重试或回退下一 endpoint；生成请求单次 timeout 为 15 分钟，**sticky retry budget 为 3**（观察发现哪怕 5xx 也会占用日额度，故从 7 下调并拉长退避），但连续两次 timeout 会提前抛出原始 timeout failure；参数/鉴权等不可重试 4xx 立即上抛。
+- **日封禁需 strike 确认（per-key）**：单发的 `PerDay` 不立即封。`rate_limit.note_daily_quota_hit` 累计 strike，**连续 ≥3 次**（`DAILY_STRIKE_COUNT`；成功即 `reset_daily_strikes` 清零）才写入 `.state` 的 `llm_rate_limit.daily_exhausted`，在 **Pacific 日历日**内跳过该 key。不再要求首末跨度（旧 `DAILY_STRIKE_SPAN_SECONDS` 已删），但**跨 Pacific 日的旧 strike 会被丢弃**（2026-08-08）——此前时间戳只写不读、streak 只在成功或封禁时清零，导致「周一两次 flicker + 周四一次 429」在全新日额度上凑满 3 次而误封。strike **按 HTTP 尝试计数**（含同一逻辑调用的 sticky 重试）是有意为之：尝试之间的等待是 `max(指数退避, provider retryDelay)`，真·PerDay 429 带的 retryDelay 很长，所以三次尝试跨越的是有意义的时间段，而非一阵突发。strike/`daily_exhausted` 以 **`(tier, model, key_id)`** 记账（照 exa `ApiKeyPool` 模式）：named key 用其名称，匿名 key 用 `sha256:<前12位hex>`——**.state 不明文存 key 原值**。一把 key 的日封不连带同 endpoint 的其他 key。免费档 `PerDay` 信号会 flicker，故不凭一次就封整天；strike 与 `daily_exhausted` 均落 `.state` 跨进程可见——写入时按 key **合并**而非整段覆盖（2026-08-08 修）：limiter 是 `lru_cache` 的、内存副本在 `__init__` 时读取一次，整段写回会抹掉另一个 FineSub 进程期间写下的日封禁；本进程**主动清除**的项不会被磁盘副本复活。`PerMinute`/普通 429、临时 5xx 退避重试或回退下一 endpoint；生成请求单次 timeout 随允许的输出量推算（软/硬两段，见 `llm_harness_behavior.md`「API 调用的两段超时」），**sticky retry budget 为 3**（观察发现哪怕 5xx 也会占用日额度，故从 7 下调并拉长退避），但连续两次 timeout 会提前抛出原始 timeout failure；参数/鉴权等不可重试 4xx 立即上抛。
 - **429/可重试错误退避公式**：`sleep = min(max(4×2^attempt, parse_retry_after_seconds(exc)), 300) + 1`（基数 2026-07-29 由 0.5 改为 4，同上：少烧额度、拉长间隔）。`parse_retry_after_seconds`（`rate_limit.py`）解析主流 provider 的等待提示（Gemini `retryDelay`/`"Please retry in Xs"`、OpenAI/Anthropic `Retry-After`/`retry_after`、通用 `"wait Xs"`/`"try again in Xs"`），无提示时取 0；上限 300s 防止 provider 返回异常大值。
 - **Endpoint 链**：`LLMRole` 仍是调用点兼容 API，但实际有序 target 来自 `model_routes.toml` 的
   route chain。`audio_multimodal`（纠错窗 / fast 纠错步）API 基链为
   `FREE+3.7-flash → FREE+3.6-flash → FREE+3.5-flash → PAID+3.7-flash`；
-  `general_capable`（research r1/r2、fast r1、知识更新等）为
-  `FREE+3.6-flash → FREE+3.5-flash → FREE+3.7-flash → PAID+3.7-flash`；
-  `lightweight_multimodal` 与 `lightweight` 共用 3.5 Flash Lite 的 free→paid 池。原生搜索按调用在
+  `general_capable`（准备任务、知识更新等）为
+  `FREE+3.6-flash → FREE+3.5-flash → FREE+3.7-flash → PAID+3.7-flash`。原生搜索按调用在
   当前绑定组内过滤；显式 opt-in 的 `gemini-native-search` 是免费 2.5 Flash → 付费 3.7 Flash。
   execution policy 可在基础链前叠加 agent pool。
-  启动能力校验在 fast 规划之后按**本次实际调用形态**检查：local 常规流要求 planning 任务组的
-  查询轮链，local fast 改为要求 correction 任务组的 media-bearing fast R1 链；不会同时要求两条
-  互斥链。
+  启动能力校验按**本次实际调用形态**检查：纠错任务组的（可能带媒体的）链恒查；`retrieval=native`
+  另查准备任务的链里有没有能开原生搜索的成员。
 - **`chat_complete` 的 key 处理（sticky + per-key daily）**：每次调用指定单一
   `provider_tier`（或 `profile`），先按 `config.toml` 解析该 tier 的 pool；被关闭或
   无 key 的 tier 在 endpoint chain 中跳过。同 tier 下按 pool 顺序取 key，**跳过已
@@ -305,7 +303,7 @@ catalog 列；`config.toml` 只留编排（`[llm.model_groups]`、`[llm.presets]
   PerDay 429 同时喂给该 key 的 strike gate（gate 确认即锁该 key 并立即轮换），仅当
   该 key 的重试预算全花在限流上才轮到下一把；media 调用因上传文件项目隔离钉 Gemini
   File 自己的 owner key。batch 的 LLM task pool 仍为 1；单个 task 内只有
-  `continuity=parallel` 会并发查询轮/纠错窗。
+  `continuity=parallel` 会并发请求回合/交付轮。
 - **钉 key 只为媒体，而且「哪一把、哪个 tier」是记下来的、不是推出来的**。上传的 Gemini File 属于
   **上传那把 key 的 project**，别的 key 读它一律 403。所以：
   1. `UploadedFileRef.api_key_id` / `api_provider_tier` 记住**实际上传它的 canonical key 与池**；
@@ -328,14 +326,13 @@ catalog 列；`config.toml` 只留编排（`[llm.model_groups]`、`[llm.presets]
   > 缓存对象可能对这个模型好用、对链上下一个就读不到。每次命中都要按当前 model 复查。
 
 - **`continuity=parallel` 不再额外钉 key（owner 2026-08-19 改判）**。此前为守「任意时刻只有
-  一把 key 有在途请求」，并行把**所有**调用（含纯文本的查询轮）都钉住；现行判定是
+  一把 key 有在途请求」，并行把**所有**调用（含纯文本的）都钉住；现行判定是
   **并行在 key 这件事上跟 serial 一样**，偶尔出现两把 key 同时活跃可以接受，要求只是
   「尽量避免频繁来回换」，不是绝对禁止。
 
   「尽量避免」由循环里**既有的 sticky 重试**兑现，不需要并行专属机制：429 先在**同一把
   key 上**原地重试，只有把该 key 的重试预算全花在配额错误上才轮到下一把。
-  原不变式的论证（媒体项目隔离 + 多把免费 key 同时活跃的风控形态）记在本地
-  `docs/archive/llm_parallel_plan.md` A.2；其中媒体那半条仍然成立并落在上一条，
+  原不变式的论证（媒体项目隔离 + 多把免费 key 同时活跃的风控形态）记在维护者的本地归档里；其中媒体那半条仍然成立并落在上一条，
   风控那半条已由本次判定放宽。「一个并行 worker 绑一把 key」仍然没有被采纳——现在是
   「谁都不绑，各自按池子顺序走」。
 

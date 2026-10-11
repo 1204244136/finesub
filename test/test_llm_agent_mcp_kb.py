@@ -33,19 +33,31 @@ def _seed(root) -> KnowledgeRepo:  # type: ignore[no-untyped-def]
     return repo
 
 
+class _ReadLedger:
+    """Just enough runtime for `kb_read`: it books every successful reply
+    (the `--style auto` read-check stands on that ledger)."""
+
+    def __init__(self) -> None:
+        self.reads: list[dict] = []
+
+    def record_kb_read(self, **kwargs):  # type: ignore[no-untyped-def]
+        self.reads.append(kwargs)
+
+
 def _server(
-    monkeypatch, root, identity: str | None = "rev:1", entitlement: str | None = "read"
+    monkeypatch, root, identity: str | None = "rev:1", entitlement: str | None = "read",
+    tools=KB_TOOL_NAMES,
 ) -> HarnessToolServer:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("FINESUB_MCP_KNOWLEDGE_ROOT", str(root))
     server = HarnessToolServer(
-        object(),
+        _ReadLedger(),
         assignment_id="a",
         worker_id="w",
         session_id="s",
         instance_id="i",
-        tools=list(KB_TOOL_NAMES),
+        tools=list(tools),
     )
-    server._task = {"task_id": "t"}
+    server._task = {"task_id": "t", "lease_generation": 1}
     metadata: dict = {}
     if identity:
         metadata["knowledge_identity"] = identity
@@ -257,6 +269,23 @@ def test_kb_validate_prechecks_proposals_with_seeded_handles(tmp_path, monkeypat
     assert bad["ops_translated"] == 0 and bad["skipped"]
 
 
+def test_the_alias_row_handle_rides_the_manifest_and_the_writer_read(tmp_path, monkeypatch) -> None:
+    """Cold read Q5: the `[别名]` row's `@a` handle reaches agent sessions both
+    ways -- replayed from the prompt's handle table and rendered by a
+    propose-grant `kb_read` -- and `kb_validate` resolves it."""
+
+    _seed(tmp_path)
+    server = _server(monkeypatch, tmp_path, entitlement="propose")
+    server._manifest["metadata"]["kb_handle_bindings"] = [
+        {"handle": "@a1", "kind": "aliases", "id": "S", "expected_valid_from_rev": 1}
+    ]
+    ok = _payload(server, 1, "kb_validate", proposals='{"op":"update","id":"@a1","line":"[别名] Genshin、GI","reason":"r"}')
+    assert ok["ops_translated"] >= 1 and ok["ops_appliable"] == ok["ops_translated"]
+    assert ok["skipped"] == [] and ok["problems"] == []
+    writer = _payload(_server(monkeypatch, tmp_path, entitlement="propose"), 2, "kb_read", entry="原神")["text"]
+    assert "[别名] Genshin  <!-- @a1 -->" in writer
+
+
 def test_kb_validate_surfaces_fold_rejections(tmp_path, monkeypatch) -> None:
     """An op the apply would skip (NFKC-duplicate alias) must not pre-check as
     a clean pass (review 2026-08-26)."""
@@ -275,9 +304,20 @@ def test_kb_validate_surfaces_fold_rejections(tmp_path, monkeypatch) -> None:
 
 
 def test_kb_validate_is_knowledge_update_only(tmp_path, monkeypatch) -> None:
+    """Cold read P062: a reading task is not offered `kb_validate`; a
+    pseudo-conversational session that exposes it anyway is refused per call,
+    with the tools the grant does admit (not the style grant's hint)."""
+
+    from finesub.llm.agent.agent_mcp_server import KB_ENTITLEMENT_TOOLS
+
+    assert "kb_validate" not in KB_ENTITLEMENT_TOOLS["read"]
+    assert "kb_validate" in KB_ENTITLEMENT_TOOLS["propose"]
+    assert KB_ENTITLEMENT_TOOLS["style"] == ("kb_read",)
     _seed(tmp_path)
     server = _server(monkeypatch, tmp_path, entitlement="read")
-    assert "not admitted" in _error(server, 1, "kb_validate", proposals='{"op":"noop"}')
+    error = _error(server, 1, "kb_validate", proposals='{"op":"noop"}')
+    assert "does not admit kb_validate" in error and "it admits kb_" in error
+    assert "style" not in error
 
 
 def test_kb_search_never_silently_truncates(tmp_path, monkeypatch) -> None:
@@ -458,3 +498,98 @@ def test_kb_read_preview_tier_follows_the_task_entitlement(tmp_path, monkeypatch
     assert "\n[别名]" in writer and "用途：" in writer      # core slots + discipline
     assert "\n[别名]" not in reader and "用途：" not in reader
     assert "スカラマシュ" in reader and "スカラマシュ" in writer   # content, both tiers
+
+
+# --- the narrow `style` grant and the kb_read ledger (auto-style-gaps plan A) ----
+
+
+def _seed_style(root) -> None:  # type: ignore[no-untyped-def]
+    from finesub.llm.knowledge.maintain import main as maintain_main
+
+    _seed(root)
+    KnowledgeRepo.forget(root)
+    maintain_main(["--root", str(root), "new", "style", "甲组", "--intro", "甲组的口味"])
+    maintain_main(["--root", str(root), "new", "style", "原神", "--intro", "与游戏条目同名"])
+    KnowledgeRepo.forget(root)
+
+
+def test_kb_read_books_each_successful_reply_into_the_task_ledger(tmp_path, monkeypatch) -> None:
+    """The `--style auto` read-check stands on this ledger: the resolved entry
+    and whether `sections` narrowed it, booked after the size cap passed -- a
+    reply the model never received is never "read"."""
+
+    _seed_style(tmp_path)
+    server = _server(monkeypatch, tmp_path)
+    rev = KnowledgeRepo.open(tmp_path).rev
+    server._manifest["metadata"]["knowledge_identity"] = f"rev:{rev}"
+    _payload(server, 1, "kb_read", entry="style/甲组")
+    _payload(server, 2, "kb_read", entry="原神", sections=["档案"])
+    assert [(r["entry"], r["category"], r["sections"]) for r in server.runtime.reads] == [
+        ("甲组", "style", False),
+        ("原神", "common", True),
+    ]
+    assert server.runtime.reads[0]["task_id"] == "t" and server.runtime.reads[0]["lease_generation"] == 1
+
+    import finesub.llm.agent.agent_mcp_server as mcp
+
+    monkeypatch.setattr(mcp, "KB_REPLY_MAX_CHARS", 40)
+    _error(server, 3, "kb_read", entry="style/甲组")
+    assert len(server.runtime.reads) == 2
+
+
+def test_the_style_grant_reads_style_entries_and_nothing_else(tmp_path, monkeypatch) -> None:
+    """Spawned for a style-only window, the server offers `kb_read` alone; and
+    because a pseudo-conversational session exposes every tool at launch, the
+    same limit is enforced per call against the task's entitlement."""
+
+    from finesub.llm.agent.agent_mcp_server import KB_ENTITLEMENT_TOOLS, TOOL_NAMES
+
+    _seed_style(tmp_path)
+    rev = KnowledgeRepo.open(tmp_path).rev
+    narrow = _server(
+        monkeypatch, tmp_path, identity=f"rev:{rev}", entitlement="style",
+        tools=[*TOOL_NAMES, *KB_ENTITLEMENT_TOOLS["style"]],
+    )
+    offered = {t["name"] for t in narrow.tool_definitions} & set(KB_TOOL_NAMES)
+    assert offered == {"kb_read"}
+    assert "Unknown tool" in _error(narrow, 1, "kb_index")
+
+    wide = _server(monkeypatch, tmp_path, identity=f"rev:{rev}", entitlement="style")
+    assert "does not admit kb_index" in _error(wide, 2, "kb_index")
+    assert "does not admit kb_search" in _error(wide, 3, "kb_search", query="原神")
+    assert "style/<名字>" in _error(wide, 4, "kb_read", entry="原神")  # bare name
+    assert "only read style entries" in _error(wide, 5, "kb_read", entry="common/原神")
+    read = _payload(wide, 6, "kb_read", entry="style/原神")  # same name, style namespace
+    assert read["entry"] == "原神" and "与游戏条目同名" in read["text"]
+
+
+def test_the_style_binding_owes_no_index_block(tmp_path) -> None:
+    from finesub.llm.client import _agent_knowledge_binding
+
+    _seed(tmp_path)
+    binding = _agent_knowledge_binding(
+        {"kb_tools": "style", "knowledge_root": str(tmp_path), "knowledge_identity": "rev:1"}
+    )
+    assert binding is not None and binding["entitlement"] == "style"
+    assert binding["tools"] == ("kb_read",) and binding["block"] is None
+    read = _agent_knowledge_binding(
+        {"kb_tools": "read", "knowledge_root": str(tmp_path), "knowledge_identity": "rev:1"}
+    )
+    assert read["tools"] == tuple(t for t in KB_TOOL_NAMES if t != "kb_validate")
+    assert read["block"]["kind"] == "kb_index"
+
+
+def test_only_a_propose_grant_hears_of_the_alias_row_and_kb_validate(tmp_path, monkeypatch) -> None:
+    """Cold read round 2, P178: a reading session's `kb_read` description must
+    not point at `kb_validate` or `<knowledge_proposals>`, which it lacks."""
+
+    def kb_read_description(tools):  # type: ignore[no-untyped-def]
+        server = HarnessToolServer(
+            object(), assignment_id="a", worker_id="w", session_id="s", instance_id="i", tools=tools,
+        )
+        return next(t["description"] for t in server.tool_definitions if t["name"] == "kb_read")
+
+    reading = kb_read_description(["next_task", *(n for n in KB_TOOL_NAMES if n != "kb_validate")])
+    proposing = kb_read_description(["next_task", *KB_TOOL_NAMES])
+    assert "kb_validate" not in reading and "@a" not in reading
+    assert "kb_validate" in proposing and "@a" in proposing

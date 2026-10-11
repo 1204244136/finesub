@@ -457,3 +457,33 @@ sub | c | AUTO | AUTO | 三行 | 第三句 | high | AUTO |
             with_start=True,
             with_comments=False,
         )
+
+
+def test_a_merged_example_row_past_the_hard_span_says_so() -> None:
+    """Cold read round 2, P172: a narrowing example's `#` comment called a
+    4.6 s two-source merge "在界内" against a 4 s hard threshold. An example
+    may only show a merge past the hard span with a comment that names it."""
+
+    for variant in ("capableB", "capableC", "basicA", "basicB"):
+        rendered = build_examples(variant=variant, with_start=True, with_comments=True)
+        blocks = re.findall(
+            r"(?ms)^<asr_result>\n(.*?)^</asr_result>.*?^<translated>\n(.*?)^</translated>$",
+            rendered,
+        )
+        assert blocks
+        for asr_block, translated in blocks:
+            spans = {}
+            for line in asr_block.splitlines():
+                if not line.strip() or line.startswith("local_id|"):
+                    continue
+                local_id, start, duration, _gap, _text = line.split("|", 4)
+                spans[local_id] = (float(start), float(start) + float(duration))
+            previous = ""
+            for row in translated.splitlines():
+                cells = row.split("|")
+                ids = cells[1].split(",") if cells[0] == "sub" else []
+                if 2 <= len(ids) <= 3 and all(i in spans for i in ids):
+                    span = max(spans[i][1] for i in ids) - min(spans[i][0] for i in ids)
+                    if span > THRESHOLDS["hard_seconds"]:
+                        assert previous.startswith("#") and "越" in previous and "界内" not in previous, (variant, row)
+                previous = row

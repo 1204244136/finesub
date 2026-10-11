@@ -36,28 +36,30 @@ def test_cache_root_uses_the_checkout_without_a_model_dir(monkeypatch) -> None:
     assert accel._cache_root() == checkout / "cache" / "separator-accel"
 
 
-def _fake_torch(device: str = "NVIDIA GeForce RTX 5070 Ti"):
-    return type(
-        "T",
-        (),
-        {
-            "__version__": "2.11.0+cu128",
-            "version": type("V", (), {"cuda": "12.8"})(),
-            "cuda": type(
-                "C",
-                (),
-                {
-                    "is_available": staticmethod(lambda: True),
-                    "get_device_capability": staticmethod(lambda: (12, 0)),
-                    "get_device_name": staticmethod(lambda: device),
-                },
-            )(),
-        },
-    )()
+def _fake_card(
+    monkeypatch,
+    device: str = "NVIDIA GeForce RTX 5070 Ti",
+    *,
+    runtime: str = "cuda12.8",
+    arch: str = "sm120",
+) -> None:
+    """Pin what the cache key reads: torch's version and `device`'s answers."""
+
+    from finesub.speech.runtime import device as device_module
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "torch",
+        type("T", (), {"__version__": "2.11.0+cu128"})(),
+    )
+    monkeypatch.setattr(device_module, "cuda_usable", lambda: True)
+    monkeypatch.setattr(device_module, "gpu_runtime_tag", lambda: runtime)
+    monkeypatch.setattr(device_module, "gpu_arch_tag", lambda: arch)
+    monkeypatch.setattr(device_module, "gpu_name", lambda index=None: device)
 
 
 def test_cache_key_binds_every_version_the_artefact_depends_on(monkeypatch) -> None:
-    monkeypatch.setitem(__import__("sys").modules, "torch", _fake_torch())
+    _fake_card(monkeypatch)
 
     key = accel.cache_key("model.ckpt")
 
@@ -81,13 +83,9 @@ def test_cache_key_separates_cards_that_share_an_architecture(monkeypatch) -> No
     reader noticing.
     """
 
-    monkeypatch.setitem(__import__("sys").modules, "torch", _fake_torch())
+    _fake_card(monkeypatch)
     on_5070 = accel.cache_key("model.ckpt")
-    monkeypatch.setitem(
-        __import__("sys").modules,
-        "torch",
-        _fake_torch("NVIDIA GeForce RTX 5060 Ti"),
-    )
+    _fake_card(monkeypatch, "NVIDIA GeForce RTX 5060 Ti")
     on_5060 = accel.cache_key("model.ckpt")
 
     assert on_5070 != on_5060
@@ -104,14 +102,36 @@ def test_cache_key_separates_cards_that_share_an_architecture(monkeypatch) -> No
 
 
 def test_cache_key_is_none_without_cuda(monkeypatch) -> None:
-    fake = type(
-        "T",
-        (),
-        {"cuda": type("C", (), {"is_available": staticmethod(lambda: False)})()},
-    )()
-    monkeypatch.setitem(__import__("sys").modules, "torch", fake)
+    from finesub.speech.runtime import device as device_module
+
+    _fake_card(monkeypatch)
+    monkeypatch.setattr(device_module, "cuda_usable", lambda: False)
 
     assert accel.cache_key("model.ckpt") is None
+
+
+def test_an_amd_card_never_shares_a_key_with_an_nvidia_one(monkeypatch) -> None:
+    _fake_card(monkeypatch)
+    nvidia = accel.cache_key("model.ckpt")
+    _fake_card(monkeypatch, "AMD Radeon RX 7900 XTX", runtime="hip6.4.0", arch="gfx1100")
+    amd = accel.cache_key("model.ckpt")
+
+    assert nvidia != amd
+    assert "hip6.4.0-gfx1100-rx7900xtx" in amd
+
+
+def test_rocm_never_selects_aoti(tmp_path, monkeypatch) -> None:
+    # AOTI links cudart and has only run on NVIDIA; ROCm takes JIT or eager.
+    from finesub.speech.runtime import device as device_module
+
+    paths = _paths(tmp_path)
+    monkeypatch.setattr(accel, "triton_available", lambda: True)
+    monkeypatch.setattr(device_module, "is_rocm", lambda: True)
+    long_input = accel.JIT_MIN_DURATION_SEC + 1
+    expected_long = "eager" if __import__("os").name == "nt" else "jit"
+
+    assert accel.select_backend(paths, long_input, buildable=True) == expected_long
+    assert accel.select_backend(paths, 1.0, buildable=True) == "eager"
 
 
 def test_probe_roundtrip_and_unreadable_probe_reads_as_absent(tmp_path) -> None:

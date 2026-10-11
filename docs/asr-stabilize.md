@@ -54,7 +54,8 @@ vocal -> aligned -> stable -> raw-srt -> translated-srt -> final-srt
 真实出现；曾疑似的 H6 PV 片尾两行后查明保留自 LLM 产物、相邻 `おわり` 经用户重听为
 幻觉，此两行大概率同为幻觉）。`套话幽灵` 的语速判据同理，只是把赔率换成了物理
 不可能性。幻觉的工程化判断到此为止；进一步压误删要靠**低幻觉第二模型校验**
-（Qwen3 ASR 对嫌疑段重认，冒烟已验证），见 wt-refine-handoff P1。
+（Qwen3 ASR 对嫌疑段重认，已实施为 `--qwen-verify`，默认 auto），见 [`vad-asr.md`](vad-asr.md)「数据流」一节里「第二模型校验证据」那段与
+「哪些异常交给 Qwen 裁判，哪些不交」。
 
 ### Profile 2：高噪音标记
 
@@ -166,8 +167,7 @@ docs/vad-asr.md）的整段套话，若证据文本不含该短语（67 clip 标
 但第二模型在这一段听到了东西，所以撤回了丢弃」。**它不改变任何取舍**，记的是**为什么留下**。
 
 加它是因为那个否决是一根很大的无声杠杆，而且有实测错误率：存档里它救回 49 段，**41 段救对、
-8 段救错**——那 8 段的证据根本不是那一段音频的（2026-09-03 定案，见
-`plans/crispasr-followups.md`「第二模型否决只问『证据非空』」）。⚠ **两个分母答的是两个问题，别混**：
+8 段救错**——那 8 段的证据根本不是那一段音频的（2026-09-03 人耳听审定案：段内无语音）。⚠ **两个分母答的是两个问题，别混**：
 **8/49 = 16.3%** 是「这根杠杆一旦拉动、有多大比例拉错」；**8/129 = 6.2%** 是「全部裁判判例里
 有多大比例因此被错误保留」——前者衡量判据本身，后者衡量它对成品的代价。⚠ **在打标之前这 6.2% 在产物里
 完全不可见**：`_profile_2_tags` 清掉两个标志之后，被救回的段和从未被怀疑的段长得一模一样，
@@ -178,9 +178,15 @@ docs/vad-asr.md）的整段套话，若证据文本不含该短语（67 clip 标
 与反事实重放认定的集合**逐段一致（零漏零多）**。
 
 ⚠ **不要顺手把它变成丢弃依据**：没有任何本地信号能把那 41 和 8 分开——加权能量、`confidence`、
-`no_speech_prob`、证据与原文的音/形对应四个都试过并否掉了（数字在 `plans/crispasr-followups.md`）。
+`no_speech_prob`、证据与原文的音/形对应四个都试过并否掉了：加权能量门限 −22 dB 抓 3/8 伤 1/41、
+−18 dB 抓 6/8 伤 6/41，伤的全是真台词；`confidence` 中位 0.233 对 0.205，完全重叠；
+`no_speech_prob` 在存档里恒为 0；音/形对应两边都跨书写系统（救对 31/41、救错 7/8）。
 唯一还活着的候选是**绝对 `frame_dbfs`**（注意与加权能量是两个量），但它的工作点是看完标注
 才挑的、n=8，按 `README_DEV.md` 的开发原则必须先预注册再到新素材上验。
+这个候选已经做成开关、**默认关**：`config.toml` 的 `[stabilize] veto_level_floor = true` 让带绝对
+电平档（`vad_level_tier`）的段不再被否决救回，实测去掉 8 段救错里的 6 段、也去掉 41 段救对里的
+4 段（取舍与理由在 `stabilization.py` 的注释、声明在 `finesub.settings.VETO_LEVEL_FLOOR`）。
+它是 dev-only，不进 manual。
 
 `语言切换幻觉`（2026-08-04 新增，**仅打标，不参与 profile 0 丢弃**）标记 CJK 主导素材里
 突然出现的大段 Latin 低置信文本：
@@ -199,7 +205,8 @@ segment 命中 = 字母数 >= 8
 保留判定；2026-08-05 经 Qwen 双模型重认抽检 5/5 确认音频确为英文），
 低置信只是因为唱歌难识别；(b) **翻译型幻觉**：BV1cqLR6hEp3 224–251s 底下是真实日语台词
 （人工字幕：女皇陛下の偉大なる計画…），Whisper 输出了它的英文翻译——删除会连真实对话的
-唯一痕迹一起丢掉，正确修复是强制语言重解（未实现，见 wt-refine-handoff P1）。
+唯一痕迹一起丢掉，正确修复是强制语言重解（已实施为 `--lang-redecode`，目前只覆盖 group 语言票翻转的子集，见
+[`asr-align.md`](asr-align.md)「语言票翻转重解」）。
 标签保留给下游（LLM 纠错层、未来的强制语言重解触发器）作观测证据。
 confidence 阈值按一遍式解码值标定；teacher-force fallback 路径存在约 −0.14 的系统偏差。
 
@@ -222,13 +229,84 @@ stabilize profile 3、`metadata.premerge`、`premerge_rejoined` /
 `套话幽灵` 的 segment。只带 `时间漂移`、`语言切换幻觉` 或 `第二模型否决` 的 segment 保留
 （后两个仅观测，理由见上）。
 
+## 时间轴格式契约（2026-09-06）
+
+**每一份被重写的 stable，其 segment 都跨住自己的词、时长为正，
+且（在拿得到音频时长时）终点不晚于音频末尾。**
+`normalize_segment_timeline` 在 profile 判定之后、写出之前跑一次。
+
+为什么在这里也跑一次——识别阶段已经在源头修过同样的东西，但**stable 可以从一份早于那次修复
+的 aligned 重建**（或者干脆是手写的），而下游分不出差别：`subtitles/rendering.py` 与
+`llm/chunking.py` 都会静默丢掉 `end <= start` 的条目，丢了不留任何痕迹。实测：全床 59 份
+**产于修复之前**的 aligned 重跑 stabilize，词越界 **40 → 0**。
+
+⚠ **既有重叠不在这里修。** 扩段时的上界卡在后一段起点、下界卡在**前一段已修好的终点**
+（读修复前的值会让相邻两段同时占用同一段间隙——`[1,2]` 的词伸到 2.8、`[3,4]` 的词从 2.2 起，
+两边各自看输入都合法），卡不住的词被拉回段内（与 `clamp_segment_overlaps` 上游用的是同一套
+取舍）——所以这一步**不会新造重叠**：全床 120 份产物重叠数 11 → 11，另有 4000 组随机时间轴
+（含倒置词与乱序段）零反例。但产物里本来
+就有的重叠（全床 4 处，最大 12.6 s，典型是一段长幻觉吞掉了里面的真实台词）**原样保留**：
+它归 `resolve_overlaps` 在渲染时管，那条规则是有意不删任何一条 cue 的，在这里"顺手消掉"
+会把文本挪进邻段、再把空掉的段删掉，那是另一件事。
+
+⚠ **只记录，不告警**（owner 2026-09-06）。修复与仍然存在的违规逐条写入
+`metadata.asr_stabilize.segment_time_repairs`，`kind` 为 `contain`（段被扩到盖住自己的词）/
+`zero-span`（零跨度，随后被延长 0.01 s）/ `overlap`（既有重叠，未修，只记）/
+`overrun`（终点越过音频末尾，已钳回）。
+连续越界尾段从后向前预留正时长，必要时连同前邻段终点一起收短并记录，
+避免零跨度被下游丢弃；具体规则见 `vad-asr.md` 的出口契约。
+计数同时进 `AsrStabilizeReport.segment_time_repairs`。依据是发生率——61 份产物 / 23648 段里
+这类失配从未改变过观众看到的东西，逐次告警的注意力成本高于缺陷本身。
+
+⚠ **越界那一维要看 aligned 有没有记时长（2026-09-07）。** 界读的是
+`metadata.asr_align.audio_duration`；**早于该字段的产物拿不到它**——实测六份交付包，
+一份只有 `segments`、另外五份有 `asr_align` 但都没有这个键。那种情况下这一维**不检查**，
+并写 `metadata.asr_stabilize.audio_end_unchecked = true`：
+「没越界」与「没人量过」在产物里必须长得不一样。要修那种产物得回到音频重算，这条路径没有音频。
+
+### 最终缺口落盘（`speech_gaps`，2026-09-07）
+
+写出之前再量一件事：**最终的 segment 集合把多少 VAD 语音留在了无人认领的状态**，
+写进 `metadata.asr_stabilize.speech_gaps`——
+`speech_sec` / `uncovered_sec` / `uncovered_ratio` / `pieces` / `longest_piece_sec` /
+`spans`（**最长的 50 块、按时间排列**——按大小挑是因为那些才值得打开音频听，按时间排是因为
+人是那么读的；⚠ 所以 `spans[0]` 是最长那几块里最早的一块，**不是最长的一块**，
+最长的时长看 `longest_piece_sec`。上限存在是为了不让病态产物把自己的审计记录变成文件里最大的一块）。
+
+⚠ **它和另外两个覆盖率量的不是一件事，三个都要有：**
+
+| 量 | 在哪一刻 | 回答 |
+| --- | --- | --- |
+| `asr_align.audio_coverage` | VAD 之后 | 有多少源音被交给了模型 |
+| `asr_align.asr_coverage` | 每个解码组，救援前后 | 交给模型的，有多少被认领了 |
+| `asr_stabilize.speech_gaps` | **stabilize 之后** | 哪些 VAD 区间没有被最终 stable 段时间覆盖 |
+
+前两个都在 stabilize 之前测，所以一个组可以覆盖率健康、而它的句子在后面被删掉——
+第三个描述最终 stable 的时间覆盖，不能证明缺失的是真语音、文本是否正确，
+也不反映后续 LLM discard、翻译或 SRT 后处理造成的变化。判断内容漏识仍需听审。
+
+⚠ **只记录，不告警**（owner 2026-09-07，与上节同一条口径），也**不带阈值**：
+理由与 `audio_coverage` 的 docstring 相同——这里没有任何一处是决定，
+管线也没有旋钮让人对着它做点什么。
+
+⚠ **需要 `vad_timeline.intervals` 当尺子**；payload 里没有（手写的、或更老的 schema）就
+**什么都不写**，而不是写一个零——「没有缺口」与「没有尺子」是两个答案。
+
+⚠ 判据是**逐条 VAD 区间**切的，所以两条区间之间的静音永远不算缺口。同一套切法也供
+`--qwen-verify` 的 `collect_gaps` 用（`recognition/segments.uncovered_speech_pieces`），
+两者只差保留什么：那边问「这块值不值得再听一遍」，这边问「观众是不是丢了这段」。
+
+⚠ **profile -1 不经过这一步**：它按定义是字节复制（见上），所以它的输出与它的输入一样干净，
+不多也不少。管线自己产出的 aligned 已在识别阶段满足同一条契约。
+
 ## Schema 与复用
 
 - aligned 的 schema 与此前未稳定化的 stable schema 相同，包含 `segments` 和原
   `metadata.vad` / `metadata.asr_align`；aligned 侧 split 的产物见
   `docs/segmentation-split.md`：word 可带 `whisper_segment_start: true`（ASR 原生分段首词），
   段可带 `tags: ["mid_segment_start"]`（起点是 DP 在 ASR 段内部切出的）。
-- 稳定化保留未知顶层字段、metadata 和未修改的 segment 字段；不写额外 profile metadata。
+- 稳定化保留未知顶层字段、metadata 和未修改的 segment 字段；除时间轴契约的审计记录
+  （`metadata.asr_stabilize.segment_time_repairs`，只在非空时写，见上节）外不写额外 metadata。
 - pipeline 只按输出是否存在复用：stable 已存在时不回补 aligned；aligned 已存在且 stable
   缺失时只跑稳定化；显式 `--stage aligned` 必须生成或复用 aligned。
 - profile 改变不会自动使现有 stable 失效。要重跑需删除 stable 及全部下游 artifact。

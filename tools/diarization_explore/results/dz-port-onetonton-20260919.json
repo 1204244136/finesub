@@ -1,0 +1,107 @@
+[
+ {
+  "ident": "onetonton-01",
+  "label_change_pct": 0.21739130434782608,
+  "speakers_ours": 4,
+  "speakers_reference": 4,
+  "rows_changed": 2
+ },
+ {
+  "ident": "onetonton-02",
+  "label_change_pct": 0.1936108422071636,
+  "speakers_ours": 4,
+  "speakers_reference": 4,
+  "rows_changed": 2
+ },
+ {
+  "ident": "onetonton-03",
+  "label_change_pct": 0.0,
+  "speakers_ours": 4,
+  "speakers_reference": 4,
+  "rows_changed": 0
+ },
+ {
+  "ident": "onetonton-04",
+  "label_change_pct": 0.30927835051546393,
+  "speakers_ours": 4,
+  "speakers_reference": 4,
+  "rows_changed": 3
+ },
+ {
+  "ident": "onetonton-05",
+  "label_change_pct": 0.8648648648648649,
+  "speakers_ours": 4,
+  "speakers_reference": 4,
+  "rows_changed": 8
+ },
+ {
+  "ident": "onetonton-06",
+  "label_change_pct": 0.34443168771526983,
+  "speakers_ours": 4,
+  "speakers_reference": 4,
+  "rows_changed": 3
+ },
+ {
+  "ident": "onetonton-07",
+  "label_change_pct": 0.12853470437017994,
+  "speakers_ours": 4,
+  "speakers_reference": 4,
+  "rows_changed": 1
+ },
+ {
+  "ident": "onetonton-08",
+  "label_change_pct": 0.4889975550122249,
+  "speakers_ours": 5,
+  "speakers_reference": 5,
+  "rows_changed": 4
+ },
+ {
+  "ident": "onetonton-09",
+  "label_change_pct": 0.3424657534246575,
+  "speakers_ours": 5,
+  "speakers_reference": 5,
+  "rows_changed": 3
+ },
+ {
+  "ident": "onetonton-10",
+  "label_change_pct": 0.31982942430703626,
+  "speakers_ours": 4,
+  "speakers_reference": 4,
+  "rows_changed": 3
+ },
+ {
+  "ident": "onetonton-11",
+  "label_change_pct": 0.2621231979030144,
+  "speakers_ours": 4,
+  "speakers_reference": 4,
+  "rows_changed": 2
+ },
+ {
+  "ident": "onetonton-12",
+  "label_change_pct": 0.5018820577164367,
+  "speakers_ours": 4,
+  "speakers_reference": 4,
+  "rows_changed": 4
+ },
+ {
+  "ident": "onetonton-13",
+  "label_change_pct": 0.0,
+  "speakers_ours": 4,
+  "speakers_reference": 4,
+  "rows_changed": 0
+ },
+ {
+  "ident": "onetonton-14",
+  "label_change_pct": 0.2288329519450801,
+  "speakers_ours": 4,
+  "speakers_reference": 4,
+  "rows_changed": 2
+ },
+ {
+  "ident": "onetonton-15",
+  "label_change_pct": 0.21905805038335158,
+  "speakers_ours": 5,
+  "speakers_reference": 5,
+  "rows_changed": 2
+ }
+]

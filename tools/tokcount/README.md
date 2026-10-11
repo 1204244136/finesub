@@ -131,7 +131,7 @@ print(len(target.read_bytes()), hashlib.sha256(target.read_bytes()).hexdigest())
 '@ | python -
 
 # 2. Upload it under its own tag, next to the patched CT2 wheel.
-gh release create tokcount-1.62.0-0 dist/tokcount/tokcount-1.62.0-0-windows-amd64.zip
+gh release create --repo caca2331/finesub tokcount-1.62.0-0 dist/tokcount/tokcount-1.62.0-0-windows-amd64.zip
 ```
 
 The fixed zip timestamp is what makes step 1 reproducible: rebuilding the

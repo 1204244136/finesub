@@ -16,9 +16,8 @@
 ```text
 stable.json 渲染的 raw CSV + 原始音频
   -> 窗口规划（边界同时供背景调查分窗标记）
-  -> 两轮背景调查（+可选多轮搜索 loop；本地搜索代理执行检索）
-  -> 每窗查询轮（轻量多模态提 query）+ 本地搜索
-  -> 听音纠错翻译（注入检索结果与建议链）
+  -> 准备任务（一条对话：请求批 → 本地搜索代理 / 知识库回填 → context pack）
+  -> 听音纠错翻译（每窗一条对话：请求回合 + 本地搜索回填 → 交付；注入建议链）
   -> 本地校验 + SRT 渲染
   -> 可选：任务反馈采集 -> 统一知识更新
 ```
@@ -51,17 +50,19 @@ native search 另有一条 2.5 Flash 覆盖链。v2 把角色降级为 artifact 
 | **事实归 catalog，编排归 config** | 模型能力、限额、provider 方言是可验证事实；任务优先级、模型顺序和档位绑定是用户策略。把两者混在一张表里会让换模型等同于改程序。 |
 | **一行事实代表一个可调用的 `(provider tier, model)`** | 同一名义模型在免费/付费 tier 的 context、quota、工具开放情况可能不同，不能按模型名去重。 |
 | **新增事实不会自动上线** | catalog 只回答“能不能调用”，只有显式进入模型组并被预设绑定后才有流量，避免一次资料补录改变生产行为。 |
-| **任务组取代固定角色链** | `correction-*`、`planning-*`、`research`、`search_judge`、`knowledge` 的质量门槛和失败代价不同；共享一个 general/lightweight 链会让无关会话互相牵制。 |
+| **任务组取代固定角色链** | `correction-*`、`research`、`knowledge` 的质量门槛和失败代价不同；共享一个 general 链会让无关会话互相牵制。 |
 | **模型组是有序 fallback，不做打分选模** | 顺序是用户的显式成本/质量选择；`quality_score` 只做咨询性告警，绝不进入路由决策。 |
 | **difficulty 只选择格子的模型组、prompt 变体与 thinking** | 它不改变窗口几何，显式从 quality 切到 intermediate 后才能复用已完成窗口；组内 fallback 也不再偷偷换 prompt 档。 |
 | **未绑定 difficulty 向上回落** | `efficiency → intermediate → quality` 先在同一预设内找，整组未绑定才借 default；这样只写关心的格子即可，又不会因为省略低档而意外换到另一套策略。 |
 | **规划按整个模型组的保守包络** | 发车前不知道最终由哪个成员应答，所以输入/输出上限取组内最紧者，`token_scale` 取最大且不低于 1.0；宁可多切窗，也不能让 fallback 成员接到装不下的窗口。 |
+| **窗口下限闸门比声明的两列，不比规划包络**（owner 2026-09-03） | 规划要保守地估**总量**，所以包络从上下文窗口里扣掉输出；闸门问的是**形状**——这个成员收不收得下够长的输入、写不写得出够长的答案。两边都够、而总和超过上下文窗口，是正常模型的形态（Haiku 4.5：200000 进 / 64000 出 / 窗口 200000），拿包络去卡会把它判死。代码里是 `group_declared_minima` 与 `group_planning_envelope` 两个方法，别合并成一个。闸门只扫**被 preset 用到的模型组**、不扫 catalog——`gemma-4-31b` 只做联网检索、不在任何组里，扫 catalog 会误伤。 |
+| **catalog 里的 194000 不一律是厂商值** | 它恰好等于已删掉的旧 harness 输入上限，所以带它的行都有「填了默认值」的嫌疑，2026-09-03 逐行裁过，三种情形各不相同：免费 Gemini ×7 是**有意取的速率近似**（`tpm=250000` 下一次 194000 的请求已占 78%，规划更大的窗只会换来 429），不为它改代码；agy 的 Claude 保持 194000（当时是 Opus 4.6，2026-10-03 起是 Opus / Sonnet 5.5 两行）是因为**没人核过 agy 实际透传多少上下文**，它不是厂商数；`local-conversational-agent` 同值但理由不同——附着的对话式 agent **本来就没有厂商数**，填 harness 默认值是可以理解的占位；付费 3.5 Flash Lite 当时的 194000 是**误填**，已改为 1048576。改这些行之前先分清是哪一种。 |
 | **native search 是调用能力，不是独立角色** | 同一任务组只在本次调用要求联网时过滤 `supports_native_search` 与 target 工具声明；过滤为空即报错，不暗中换组或降成外部搜索。 |
-| **两个媒体开关分别回答“哪个任务看媒体”** | 纠错窗和查询轮的收益/成本不同；拆成 `correction_media` 与 `planning_media` 后，纯文本强模型可以纠错，而查询轮继续看音视频。 |
+| **一个媒体开关，纠错窗是唯一读媒体的任务** | 2026-08 曾拆成 `correction_media` 与 `planning_media` 让查询轮单独看音视频；查询轮并入窗口任务后（2026-09-09）只剩纠错窗读媒体，`media=text` 就是纯文本强模型处理音视频素材的路径。 |
 | **自定义 provider 第一刀只支持纯文本** | OpenAI-compatible 与 Anthropic 方言先统一文本、thinking、usage、拒答和错误分类；音视频需要逐方言验证编码与计费，不能把附件静默丢掉。 |
 | **同名覆盖不重写已完成历史** | 用户可整体覆盖打包的 fact/group/preset；routing digest 用于配置审计和新调用，不作为已提交 stage/window 的失效键。恢复只由源结构与存档可解释性决定。 |
-| **优先模型是绑定上的 overlay，不是第二个候选来源** | `[llm.preferred_targets]` 把一个 target 前置到已解析的模型组上，而不是往路由层塞一条新的候选来源——policy 当年就是因为「绑定说一套、policy 悄悄再前缀一套」才被削成纯闸门。前置而非替换同样是有意的：纯文本的自定义 target 替换掉整组会让带媒体的调用无处可去，把媒体能力留在后面才是可路由的。前端偏好因此不需要自己的通道，桌面写配置即可。 |
-| **routing digest 不做三拆（2026-08-12 判定不做）** | 曾计划拆成 selection / envelope / advisory，让恢复层区分「选谁」与「按什么预算切窗」。审计后没有消费者：L3 整体豁免 `execution_identity`，调查产物早就跨模型组复用；窗口体检要的是 `ModelLimits` 的数值本身，不是 digest；`session_input_hash` 整包吃 `execution_identity`；`advisory_digest` 已经把分数与显示名摘了出去——有用的那一半已经做完。`llm_local_agent.md` §11 的方向也是**扩充** execution identity（driver/toolset/sandbox/知识写策略），不是拆它。 |
+| **优先模型是绑定上的 overlay，不是第二个候选来源** | `[llm.preferred_targets]` 把一个 target 前置到已解析的模型组上，而不是往路由层塞一条新的候选来源——policy 当年就是因为「绑定说一套、policy 悄悄再前缀一套」才被削成纯闸门。前置而非替换同样是有意的：纯文本的自定义 target 替换掉整组会让带媒体的调用无处可去，把媒体能力留在后面才是可路由的。前端偏好因此不需要自己的通道，写配置即可。 |
+| **routing digest 不做三拆（2026-08-12 判定不做）** | 曾计划拆成 selection / envelope / advisory，让恢复层区分「选谁」与「按什么预算切窗」。审计后没有消费者：L3 整体豁免 `execution_identity`，调查产物早就跨模型组复用；窗口体检要的是 `ModelLimits` 的数值本身，不是 digest；`session_input_hash` 整包吃 `execution_identity`；`advisory_digest` 已经把分数与显示名摘了出去——有用的那一半已经做完。`llm_local_agent.md` [§11 安全、readiness 与 executi…](llm_local_agent.md#11-安全readiness-与-execution-identity) 的方向也是**扩充** execution identity（driver/toolset/sandbox/知识写策略），不是拆它。 |
 
 ## 输出预算公式的推导
 
@@ -73,26 +74,30 @@ native search 另有一条 2.5 Flash 覆盖链。v2 把角色降级为 artifact 
 c = 2.0(纠错与翻译本体)
   + 1.5(统一思考项)
   + 1.0(retrieval != none)
-  + 0.5(correction_media >= audio)
-  + 1.0(correction_media == video)
 ```
 
-只有纠错媒体进入系数，因为窗口几何约束的是纠错输出；查询轮媒体有自己的固定上限。
+媒体曾经各占一项（audio +0.5、video +1.0），2026-09-30 删掉（owner）：剪辑只占输入，而实测的输出长度
+主要随模型本身与推理强度变化，开关上的加项解释不了它。
 difficulty 不再进入 c：它只选择模型组、prompt 与 thinking。这个决定让“切到 intermediate 继续”
-不会改变窗口计划，代价是旧 `text-low` 对应的 efficiency 锚点从实测 c=2.0 提到 3.5，须重新标定。
+不会改变窗口计划，代价是旧 `text-low` 对应的 efficiency 锚点从实测 c=2.0 提到 3.5。系数不按开关组合逐个标定
+（owner 2026-09-30）。
+
+**实测倍率**（2026-09-04）：56 个纠错窗、14 天、按模型分桶量了「回复正文 token ÷ 窗口 CSV token」，
+中位 **2.03**、p90 2.54，倍率随窗口增大而下降，全程 `output_limited = 0`；CodeBuddy 四个模型 n=6 合计 2.29。
+复算方法：分子取回复正文的 token，分母取 `input_components.csv_input_tokens`。⚠ 分子不能用 `usage.output_tokens`
+——Claude 系 CLI 与 agy 报的是会话累计值，所以 agent 路径上产物里的 `observed_coefficient` 不可用。要再动预算，
+应按模型与推理强度分，而不是按开关。
 
 窗口约束 `k×c×csv_tokens ≤ 0.9×output_limit − 5000`（=53,982 @65,536）反解出 k=1 时每窗 CSV token 上限：
 
 | 代表组合 | c | 常规窗上限 | 快速模式全量上限 |
 | --- | ---: | ---: | ---: |
 | text + none（含 efficiency） | 3.5 | 15,423 | 12,122 |
-| text + local/native | 4.5 | 11,996 | 9,428 |
-| audio + local（旧 mm-med） | 5.0 | 10,796 | 8,485 |
-| video + local（旧 mm-high） | 6.0 | 8,997 | 7,071 |
+| text/audio/video + local/native | 4.5 | 11,996 | 9,428 |
 
 历史注记：该公式取代了更早的 `csv×5 + 10k` 启发式；旧 mm-med 的有效窗口约放大 80%
-（6000→10,796 csv tokens）。当前仍未完成的组合标定集中记录在
-[`llm_followups.md`](llm_followups.md)，不再从历史计划稿推断。
+（6000→10,796 csv tokens，按当时含媒体项的 c=5.0）。默认的质量护栏 `max_window_subtitle_tokens`（10,000）
+比上表多数格都紧，常规窗实际多由它定。仍开着的测量记在 [`llm_followups.md`](llm_followups.md)，不再从历史计划稿推断。
 
 ## 统一知识更新的决策记录
 
@@ -105,10 +110,10 @@ difficulty 不再进入 c：它只选择模型组、prompt 与 thinking。这个
 | B/C | 无精修省略 `refined_csv`；两种证据模式各一段 prompt | 混一段 prompt 会让无精修模式看到大量不适用规则 |
 | E | final_csv = annotated.csv 按**序号 1:1** overlay 后处理 final.srt 的时间与 translation；corrected 不 overlay | annotated 与 translated.srt 由同一 `rendered_segments` 渲染、postprocess 不增删条目，1:1 已核实成立；corrected.srt 不走 postprocess，保留模型原纠错 |
 | F/G | 无精修模式禁写 mistake 库，且**禁用点在 harness**（prompt 不含该块、解析忽略、不调 apply） | 不依赖模型自律输出空块 |
-| H | 三态 `--knowledge none|collect|update`（update 隐含 collect） | 采集与执行解耦但避免双 flag 组合出无意义状态 |
+| H | 三态 `--knowledge none|read|update`（update 隐含 read 并采集反馈；2026-10-01 前中间档叫 `collect` 且会采集） | 采集与执行解耦但避免双 flag 组合出无意义状态；中间档改成只读不采，是因为采来的反馈只有任务后更新在用 |
 | I | feedback v3：任务反馈 confidence 仍为 1-9；字幕行 conf 独立改为 high/median/low；v1 字段直接删除不迁移 | 两者表达不同对象，避免混淆知识线索可信度与字幕复核优先级 |
 | J | refined_csv 用 `start|end|text`（end 而非 duration）+ harness 按 start 重排；**不做**对齐健康检查，噪音由 prompt 告知 | 精修文件可能 index 错乱、含注释性重叠字幕 |
-| K | 分块预算：CSV 三块 ≤100k、词条块 ≤40k、context ≤10k、feedback ≤10k；组装后 >194k 按窗口再切（错误/范例台账全文不再注入） | 各块独立上限 + 总量硬校验，杜绝静默截断 |
+| K | 分块预算：CSV 三块 ≤100k、词条块 ≤60k（2026-10-02 起，原 40k）、context ≤10k、feedback ≤10k；组装后 >194k 按窗口再切（错误/范例台账全文不再注入） | 各块独立上限 + 总量硬校验，杜绝静默截断 |
 | L | 多块顺序 apply + `knowledge-update-chunks.jsonl` ledger 幂等 | 块 2 失败重跑不能把块 1 的 append_history 追加两次 |
 | M | 窗口材料按 **stitch 后实际归属**分组（id 属最后包含它的窗） | 物理重叠窗直接分组会重复计料、注入互相矛盾的行 |
 | N | CLI 位置参数 = 标准 final SRT，其余路径按 stem 派生 | 四条路径全是同 stem 派生，逐个传参易错 |
@@ -116,7 +121,7 @@ difficulty 不再进入 c：它只选择模型组、prompt 与 thinking。这个
 
 ## 知识库行文法 v3 的决策记录（2026-08-29）
 
-（计划正文蒸馏后归档在本地 `docs/archive/kb-line-grammar-plan.md`；现行为见
+（计划正文蒸馏后归档在维护者的本地归档里；现行为见
 [`knowledge.md`](knowledge.md)。这里只留**为什么**——要推翻下面任何一条，先看这一节。）
 
 ### 界面回到 md 的样子，存储没有回去

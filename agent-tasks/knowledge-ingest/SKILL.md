@@ -52,8 +52,8 @@ Get-Content page.md | python -m finesub.llm.knowledge ingest --subject 星野灯
 
 ## 蒸馏准则（判据在 prompt 里，这里只说要点）
 
-唯一真相是 `src/finesub/llm/prompt_templates/fragment_kb_judgment_v1.md` 第 0 条，
-`repair` / `verify` / 共享审核 / 本任务共用：
+唯一真相是 `src/finesub/llm/prompt_templates/fragment_kb_judgment_v1.md` 第 0 条（收录标准，
+`repair` / `verify` / 共享审核 / 本任务共用）与 `fragment_kb_writing_v1.md`（写条目的规则，含参照物那条）：
 
 - 知识库只为两件事服务——**让 ASR 听对**（源语言表层、读音、易错写法）与**让字幕写对**
   （中文定名、别名、语体/自称这类直接决定译文怎么落笔的）。两者都不服务的不收。

@@ -10,6 +10,8 @@ import pytest
 from packaging.requirements import Requirement
 from packaging.version import Version
 
+from test.test_doc_links import LOCAL_ONLY
+
 
 def test_source_uses_package_discovery_without_top_level_modules() -> None:
     root = Path(__file__).resolve().parents[1]
@@ -167,17 +169,21 @@ def test_canonical_docs_do_not_reference_removed_source_layout() -> None:
     docs = [
         root / "README.md",
         root / "README_DEV.md",
-        root / "CLAUDE.md",
+        root / "AGENTS.md",
         # The two subtrees with canonical docs of their own. Leaving them out
         # is how `finesub batch --manifest` survived in cli/README.md for a
         # whole release after that subcommand was deleted: the guard was
         # looking at the docs that happened to be listed, not at the docs that
         # describe the product (2026-08-31).
         root / "cli" / "README.md",
+        # The private notes (archive, plans, reports) are records of their day,
+        # not canonical docs. Excluded by the one list that names them: the
+        # hand-written `"report" not in path.parts` this replaced stopped
+        # matching the day the directory was renamed to `reports`.
         *(
             path
             for path in (root / "docs").rglob("*.md")
-            if "archive" not in path.parts and "report" not in path.parts
+            if not path.relative_to(root).as_posix().startswith(LOCAL_ONLY)
         ),
     ]
     removed_references = (
@@ -254,6 +260,42 @@ def test_canonical_docs_do_not_reference_removed_source_layout() -> None:
 # in the root suite looked.
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_the_amd_windows_extra_differs_from_asr_only_in_the_torch_line() -> None:
+    """`[asr-win-rocm]` is `[asr]` with AMD's Windows torch line, nothing else.
+
+    It exists because AMD publishes no 2.11 for Windows, so `[asr]` would pull
+    the CUDA-less PyPI torch over the user's ROCm one. That is the only reason,
+    so any other difference is drift -- a dependency added to `[asr]` and
+    forgotten here, which installs cleanly and fails somewhere far away.
+    """
+
+    project = tomllib.loads(
+        (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    extras = project["project"]["optional-dependencies"]
+    torch_line = {"torch", "torchaudio", "torchvision", "triton-windows"}
+
+    def rest(extra: str) -> set[str]:
+        return {
+            str(Requirement(raw))
+            for raw in extras[extra]
+            if Requirement(raw).name.lower() not in torch_line
+        }
+
+    assert rest("asr") == rest("asr-win-rocm")
+
+    amd = {
+        Requirement(raw).name.lower(): Requirement(raw)
+        for raw in extras["asr-win-rocm"]
+    }
+    # AMD ships the trio together; a mixed set is the failure this pin prevents.
+    assert str(amd["torch"].specifier) == "==2.9.1"
+    assert str(amd["torchaudio"].specifier) == "==2.9.1"
+    assert str(amd["torchvision"].specifier) == "==0.24.1"
+    # triton-windows is an NVIDIA-only build; the Windows ROCm separator is eager.
+    assert "triton-windows" not in amd
 
 
 def test_windows_ai_runtime_lock_matches_the_pipeline_extras() -> None:

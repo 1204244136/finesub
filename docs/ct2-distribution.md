@@ -11,8 +11,7 @@ wheel 约 17 MB（内含未压缩 79 MB 的 DLL），且每次 CT2/CUDA/补丁�
 一份，但每个**不同**版本都会在公开仓库里永久留一个 blob，clone 的代价落到所有人头上——
 包括只用 LLM 层、根本不装 ASR 的人。Release 资产不进 clone，且给出稳定 URL。
 
-仓里已有 `bin/windows-amd64/tokcount.exe`（17.9 MB）的先例，但那是一次性产物，与这里的
-重编频率不是一回事。
+`bin/windows-amd64/tokcount.exe`（17.9 MB）曾经提交进仓库，2026-08-17 起同样改发 Release、不再跟踪。
 
 **用独立 tag**，形如 `ct2-<上游版本>+finesub<产品版本>`，例如 `ct2-4.8.1+finesub0.4.0`。
 两段各有分工：`4.8.1` 是上游 CT2 版本，`finesub0.4.0` 记的是**引入这个 wheel 的那次 finesub
@@ -67,7 +66,7 @@ cd python && CTRANSLATE2_ROOT=../install-cu-dnnl python setup.py bdist_wheel
 ## 发布
 
 ```bash
-gh release create "ct2-4.8.1+finesub0.4.0" \
+gh release create --repo caca2331/finesub "ct2-4.8.1+finesub0.4.0" \
   python/dist/ctranslate2-4.8.1+finesub0.4.0.cu128-cp312-cp312-win_amd64.whl \
   --title "patched CTranslate2 4.8.1+finesub0.4.0 (cu128)" \
   --notes "WT refine trace extension. Built from ct2-patches on upstream 0d8bcd3."
@@ -84,6 +83,65 @@ sha256 也算对了，就是没跑上面那条 `gh release create`。产品 rele
 解析那条 direct reference。拦它的是发布流程里的一步——`scripts/check-pinned-urls.ps1`
 （release skill 第 3 步），会把这里发的 tag 与 lock 里的 sha256 对照校验。
 **改完 wheel 引用就顺手把 release 发掉**，别攒到发版时。
+
+## CI 构建（多平台，2026-09-17 起）
+
+上面的手工流程只产出 Windows + CUDA 那一个 wheel。其余平台由 `.github/workflows/build-ct2.yml`
+在 GitHub 自带的 runner 上编，逐平台的脚本在 `tools/wt_refine_port/ct2-build/`：
+
+| 变体 | runner | local label 末段 | 脚本 | CI 冒烟 |
+| --- | --- | --- | --- | --- |
+| macOS arm64 CPU | `macos-14` | `cpu` | `macos-cpu.sh` | 有 |
+| Linux x86_64 CUDA 12.8 | `ubuntu-22.04`（manylinux_2_28） | `cu128` | `linux-cuda.sh` | 有（CPU 解码） |
+| Windows x64 CUDA 12.8 | `windows-2022` | `cu128` | `windows-cuda.sh` | 有（CPU 解码） |
+| Linux x86_64 ROCm/HIP | `ubuntu-24.04`（manylinux_2_28） | `rocm7.2` | `linux-rocm.sh` | 无（runner 没有 ROCm） |
+| Windows x64 ROCm/HIP | `windows-2022` | `rocm7.2` | `windows-rocm.sh` | 无 |
+
+⚠ **Windows ROCm 这一格发布前先看一眼 torch**：AMD 的 Windows 版 PyTorch 停在 2.9.1，所以那个组合走
+`[asr-win-rocm]`（`docs/manual/repo-install.md`「Windows 上的 A 卡」、计划 10.3 第 13 条）。在这个 wheel 发布
+之前，Windows 上的 A 卡分离上卡、识别留 CPU；发布后才补齐识别那一半。
+
+- **CPU 侧与手工构建一致**：静态裁剪的 oneDNN 3.12.3，不开 MKL、不开 Ruy（理由见 `ct2-patches/README.md`）。
+  macOS 用 Accelerate（我们在 CPU 上只跑 float32，SGEMM 足够），上游的 arm64 配方带 Ruy，这里去掉。
+- **flash attention 只在两个 CUDA 变体里编**（`CT2_WITH_FLASH_ATTN`，默认 `ON`，在 `ct2-build/common.sh`）：ROCm 那边
+  上游 CMake 不允许，macOS 没有 CUDA。编进去不等于用上：运行时由环境变量 `FINESUB_CT2_FLASH_ATTENTION` 决定、默认 `auto`
+  （`README_DEV.md`「开发专用的 ASR 开关」）；它也是给用户的排查开关，`off` 的用法写在 `manual/ct2-wheel.md`。补丁 0012 / 0013 的来由与上游的硬条件见 `ct2-patches/README.md`。
+- **CUDA 架构列表与 AMD 目标列表**写在 `ct2-build/common.sh`，分别与 `device.CT2_MIN_COMPUTE_CAPABILITY`、
+  `device.CT2_HIP_GFX_TARGETS` 对齐，`test_ct2_build_targets_match_the_device_layer` 钉着。
+- **HIP 构建**照上游 v4.8.1 自己的 ROCm 配方（ROCm 7.2）。它同时定义 `CT2_WITH_CUDA`，所以补丁 0006
+  的 `#ifdef` 生效，0003 的 `median_filter_gpu.cu` 按 HIP 语言编译。ROCm 库不打进 wheel，用系统的——
+  而 PyTorch 的 ROCm 版自带一套，同进程两套运行库是 AMD 那条路的已知风险。
+- **冒烟**（`ct2-build/smoke.py`）：local label 与补丁扩展在不在；`flash_attention_available()` 与该变体应有的一致
+  （workflow 按变体传 `CT2_EXPECT_FLASH_ATTN`）；真在 CPU 上解一次码；删模型限时返回
+  （Ruy 那版就是死在析构）。它替不了换 wheel 后的完整验收（下面「CI 编的 Windows wheel」）。
+- **耗时与资源**（2026-09-17 首次全绿）：CUDA / ROCm 变体各 30–45 分钟，macOS 约 2 分钟。GPU 内核的编译并行度
+  固定为 2（`CT2_GPU_BUILD_JOBS`）：按核数并行时两个 Linux 变体把 16 GB 的 runner 拖到失联，连日志都没留下。
+
+**触发与发布**：
+- `workflow_dispatch` 是唯一能发布的入口（输入 `label`、`variants`、`publish`；`label` 没有默认值——手工 Windows
+  wheel 占着 `0.4.0`，CI 版同名就会撞上）。发布 job 单独持有 `contents: write`，上传到 Release
+  `ct2-4.8.1+finesub<label>`，**从不覆盖已有资产**：上传前先比对 Release 里已有的文件名，撞上一个就整批不传
+  （pylock 记着 sha256，`scripts/check-pinned-urls.ps1` 对它校验）。重编某个变体就换一个补丁集版本号。
+- 推到 `ct2-build-test/**` 分支只编译和冒烟、不发布，label 固定为 `0.0.0.dev0`——workflow 还没进 `main` 时只能这样试
+  （`workflow_dispatch` 要求文件已在默认分支上）。⚠ 这种分支要从公开的 `main` 起、把改过的 workflow 叠上去，
+  **不能从 `dev` 起**：公开仓库只收与 `dev` 没有共同历史的提交，`scripts/pre-push` 会拒掉从 `dev` 派生的推送。
+  fork 的 PR 在本仓库不产生 push 事件；没有 `pull_request` 触发。
+
+**起步顺序**（资产只能由公开仓库上的 CI 在快照之后编出来）：① 一次快照把 workflow 发到 `main`；
+② 在 `main` 上手动触发构建并发布；③ 之后的改动才能在文档与 CI 的 macOS job 里引用这些资产。
+
+⚠ **什么时候发：随下个 finesub 版本一起发**（owner 2026-09-17 定在发版前，2026-10-10 确认随下次发版发）。五个变体都已编过、
+验过，只差发布：要发的是四个新变体，外加用 CI 版 Windows CUDA 替换手工编的 `finesub0.4.0`，label 用那次发版的版本号。
+压到发版时才发，是因为这期间补丁集与构建脚本还可能改，早发一轮就要再发一轮。步骤（快照 → `workflow_dispatch` →
+改 URL 与锁 → 正常发版）与「10-10 之后构建输入（workflow、构建脚本、补丁本身；说明文字不算）再改过就重做比对与试编」写在维护者的发版说明里。发完把
+`docs/manual/repo-install.md`、`docs/manual/ct2-wheel.md`、`docs/manual/resources.md`（等级表的 ⚠ 那段）与
+`CHANGELOG.md` 里「wheel 尚未发布，识别会在加载模型前报错」的说法改掉。
+
+**CI 编的 Windows wheel**（计划 P1）：它不会与手工编的同一个 hash，所以替换手工 wheel 时换补丁集版本号、
+发新 Release、重新生成两份锁——**所有 Windows 安装会重建一次运行时**。替换前要在两份逐字节夹具上与手工 wheel 比对：
+2026-10-10 那一轮（补丁 0001–0013，`ct2-build-test` 试编 run 全绿）在开关 `FINESUB_CT2_FLASH_ATTENTION=off` 时与手工版
+逐字节相同，开 flash 时与本机构建逐字节相同，所以不需要 A 类刻画。之后再改补丁或构建脚本就要重比，拿不到逐字节就按
+`README_DEV.md` 开发原则 A 类刻画。
 
 ## 安装约束：只有 direct reference 能排除 stock
 
@@ -125,7 +183,7 @@ URL 里的三元组（win_amd64 / cp312 / cu128）变成硬约束，任何其它
   手工改坏的情况。
 
 换 wheel（升级 CT2 或重编补丁）时要一起动的：`[runtime]` 里的 URL、重跑
-`uv pip compile` 更新 lock 里的 sha256（下节）。`test_windows_ai_runtime_lock_pins_torch_stack`
+`uv pip compile` 更新 lock 里的 sha256（下节）。`test_windows_ai_runtime_lock_matches_the_pipeline_extras`
 会在两者不一致时报错。
 
 ## 约束与已定项
@@ -184,19 +242,14 @@ URL 里的三元组（win_amd64 / cp312 / cu128）变成硬约束，任何其它
   体积：DLL 61.2 → 79.3 MB，wheel 12.1 → 17.3 MB。oneDNN 已按 `DNNL_ENABLE_WORKLOAD=INFERENCE`
   + 四个原语 + 关掉 graph 组件裁过（未裁剪时是 94.6 / 21.6 MB，裁剪后反而快了约 8%）。**ISA 保持
   `ALL` 是有意的**——那正是 CPU 性能来源，为体积裁它会在部分 CPU 上变慢。
-- ~~**内嵌 GPU 架构没有核实清楚**~~ **已收口（2026-08-20，owner 确认）：新架构可用。**
-  `cuobjdump --list-elf` 报告 SASS 为 `sm_70/75/80/86/89/90`，而这块 sm_120
-  （Blackwell）的卡上 ASR 确实在 GPU 上跑通，因此不再当作风险项。
-  ⚠ **更正（2026-08-29）**：此处原写「**且无 PTX**」——那是**工具用法造成的假象**，
-  `--list-elf` 按定义**只列 ELF（SASS），不列 PTX**。构建缓存里
-  `CUDA_ARCH_LIST=7.0;7.5;8.0;8.6;8.9;9.0+PTX`，每个 `.cu` 的 nvcc 行都有
-  `compute_90,code=compute_90`——**PTX 是在的**，CT2 自己的 kernel 在 sm_120 上走
-  compute_90 PTX 的驱动 JIT。与 [`wt-refine-handoff.md`](wt-refine-handoff.md)
-  「含 sm_70–90 原生 SASS + sm_90 PTX」一致，**以那处为准**。
-  换**目标架构**（改编译参数）时仍要在真机验证，`ct2-patches/README.md` 里那条 `cuobjdump`
-  检查就是为此存在的。
-- **只有 Windows / CPython 3.12 / CUDA 12.8 一个组合。** wheel 是 CPython ABI 专属的
-  （`cp312` 只能装 Python 3.12），换任意一维都要重编重发。不需要单独的 CPU-only wheel：
+- **内嵌 GPU 架构：sm_70–90 原生 SASS，外加 compute_90 PTX**（owner 2026-08-20 确认新架构可用）。
+  构建用 `CUDA_ARCH_LIST=7.0;7.5;8.0;8.6;8.9;9.0+PTX`，所以 sm_120（Blackwell）这类更新的卡上，CT2 自己的
+  kernel 走 compute_90 PTX 的驱动 JIT，ASR 实测在 GPU 上跑通。⚠ 核对时别只看 `cuobjdump --list-elf`：它按定义
+  只列 ELF（SASS），不列 PTX，会让人误以为没有 PTX。换**目标架构**（改编译参数）时仍要在真机验证，
+  `ct2-patches/README.md` 里那条 `cuobjdump` 检查就是为此存在的。
+- **手工 wheel 只有 Windows / CPython 3.12 / CUDA 12.8 一个组合**，其余平台见上「CI 构建」。
+  wheel 是 CPython ABI 专属的（`cp312` 只能装 Python 3.12），换任意一维都要重编重发。
+  Windows 与 Linux 上不需要单独的 CPU-only wheel：
   `CUDA_DYNAMIC_LOADING=ON` 让同一个二进制在无驱动机器上也能 import 并走 CPU 路径
   （理由见 `ct2-patches/README.md`）。
 - **升级上游 CT2 时**，`ct2-patches/` 需要重新 rebase 并重测，这是该方案的已知成本。
@@ -220,10 +273,11 @@ uv pip compile pyproject.toml `
 ```
 
 运行时 marker 记的是锁的**内容**摘要（`lock_content_digest`：去掉 `#` 注释行、统一行尾），所以
-改头部注释或换一个 autocrlf 不同的 checkout 都不会被判成「依赖变了」。0.5.0 之前记的是整文件
-的 sha256，`environment.py` 的 `_LEGACY_LOCK_FILE_DIGESTS` 列着那一份锁的两种行尾形态，让旧安装
-升级时不重建——**下一次真的重新生成锁时把那个常量删掉**（重新生成本来就要重建，之后写入的就是
-内容摘要）。
+改头部注释或换一个 autocrlf 不同的 checkout 都不会被判成「依赖变了」。
+
+只加一个依赖时不必让 uv 把整份锁重解一遍：先把现有锁拷到临时文件，用上面的命令把 `--output-file`
+指向它（uv 会沿用里面已有的版本），逐包比对新旧版本号，确认只多出新依赖那一块，再把那一块贴进
+正式的锁、重新生成地区锁。
 
 改完 canonical lock **必须重新生成地区 lock**，否则两者会漂移：
 

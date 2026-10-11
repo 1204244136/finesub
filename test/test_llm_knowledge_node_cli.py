@@ -271,7 +271,10 @@ def test_revert_and_restore(tmp_path) -> None:
 
     rev = revert_revision(repo.store, edit_rev)
     assert rev == repo.store.current_rev()
-    assert "アリス" not in repo.entry_text(subject_id)
+    # the line is gone; what stays is the human-version comment (a revert is
+    # not a human endorsement, so the value the human wrote is still shown)
+    assert "- アリス" not in repo.entry_text(subject_id)
+    assert "<!-- 人改版" in repo.entry_text(subject_id)
     # reverting the revert brings the line back (compensation is symmetric)
     revert_revision(repo.store, rev)
     assert "アリス" in repo.entry_text(subject_id)
@@ -566,6 +569,7 @@ def test_rendered_follows_a_revert(tmp_path) -> None:
     assert "アリス" in path.read_text(encoding="utf-8")
 
     assert main(["--root", str(root), "revert", str(rev)]) == 0
-    assert "アリス" not in repo.entry_text(subject_id)
-    assert "アリス" not in path.read_text(encoding="utf-8")
+    # only the human-version comment remembers it (see human_marks.py)
+    assert "- アリス" not in repo.entry_text(subject_id)
+    assert "- アリス" not in path.read_text(encoding="utf-8")
 

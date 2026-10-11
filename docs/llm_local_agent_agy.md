@@ -10,7 +10,7 @@
 
 ## 1 定位与 catalog 行
 
-- 新 provider tier `LOCAL_AGY`，backend 仍是 `local_agent`，由 tier 选 driver（§2 已有的机制）。
+- 新 provider tier `LOCAL_AGY`，backend 仍是 `local_agent`，由 tier 选 driver（[§2 音频：MIME 被工具层拦住，必须容器化](#2-音频mime-被工具层拦住必须容器化) 已有的机制）。
 - Catalog 已加入 fact `local-agy-gemini-3_8-flash` 并路由 target `local-agy-media-gemini-3_8-flash`：CLI base id
   `gemini-3.8-flash`，`max_input_tokens=1048576`、`context_window=1048576`（单池，包络 983040）、
   `max_output_tokens=65536`、`quality_score=75`、
@@ -37,6 +37,10 @@
   `--agent`、`--sandbox`、`--effort` 与 `text|json|stream-json`。`stream-json` 有 `init`、
   `step_update`、终态 `result`，会话 id 可恢复；同一 conversation 连续两 turn 能保留历史，也能
   在第二 turn 重新读取已变化的 protocol 文件。
+- **起 agy 一律带 `AGY_CLI_DISABLE_AUTO_UPDATE=true`**（`local_agent.py` 的 `AGY_QUIET_ENV`，2026-09-29）：agy 至多
+  每 15 分钟查一次更新，由一个脱离控制台的助手进程跑 `agy --version`，它自己开一个**看得见的**控制台窗口，
+  `no_window()` 管不到（父进程有没有控制台都一样）。只有 `true` 管用，`1` 照样检查（实测 agy 1.2.13）。
+  owner 手动用 agy 时照常更新。
 
 ## 2 音频：MIME 被工具层拦住，必须容器化
 
@@ -53,7 +57,7 @@ ffmpeg -y -f lavfi -i color=c=black:s=16x16:r=0.05 -i input.flac \
 成本：音频 **≈32 tok/s**，外加**视觉帧数 × 每帧 token**。
 **估算继续按 32（owner 定，2026-08-14）**：它是上限侧的保守值，实际会因抖动与压缩低一些。
 一次实测供参考——986.589s 的生产剪辑，Gemini REST 返回 `prompt_audio_tokens=25,476`，
-即 25.82 tok/s（见 `llm_local_agent_experiments.md` §3.3）。**不要据此把估算改成 25.8**：上限用于包络才安全。
+即 25.82 tok/s（见 `llm_local_agent_experiments.md` [§3.3 生产尺寸纠错窗实测](llm_local_agent_experiments.md#33-生产尺寸纠错窗实测门槛确实被越过2026-08-14)）。**不要据此把估算改成 25.8**：上限用于包络才安全。
 
 owner 定的做法：**伪造视频就压成恰好一帧**，开销即一帧常量，可忽略不计。注意报告里的
 `r=0.05` 只是在 18.36s 素材上凑巧得到 1 帧，直接照搬会随片长膨胀（300s × 0.05 = 15 帧），
@@ -124,9 +128,9 @@ token），一次 `view_file` 读入。
 顺序**，模型答全了，但那种序列没看画面也能猜出来，**该结果作废**。改成 10 段乱序后逐字答对，
 再加严到**20 段乱序且颜色重复**（每段仅约 3.75 帧），仍然逐字答对。少量采样帧无法重建这种序列，
 所以整条时间轴都到了模型手里。**文本 `view_file` 的返回上限不适用于媒体**——那条上限此前记作
-「约 12k token」（`llm_local_agent_experiments.md` §3.2 的顺带观察），2026-08-22 按 transcript
+「约 12k token」（`llm_local_agent_experiments.md` [§3.2 缓存为什么没接上](llm_local_agent_experiments.md#32-缓存为什么没接上前缀太小不是路不通2026-08-14) 的顺带观察），2026-08-22 按 transcript
 核实为 **≈46k 字节/次且可续读**：回复自带「Content truncated: showing bytes 0-46080 of N … call
-this tool again with ContentOffset=46080」，见 §5。
+this tool again with ContentOffset=46080」，见 [§5 MCP 工具结果的内联上限](#5-mcp-工具结果的内联上限约-4k-字节超过即外置成文件无预览2026-08-22)。
 
 **计费口径：矛盾，且矛盾本身才是结论。** 同一个 `1.4.2` 字段（已用外部报告的逐行数据校验，
 6 行中 5 行逐字吻合）：
@@ -143,7 +147,7 @@ this tool again with ContentOffset=46080」，见 §5。
 
 **顺带一个固有现象**：我们创建的每一个 agy 会话，都会在首次回复之后立刻插入一条
 `CHECKPOINT`（"earlier parts … truncated"），**与内容大小无关**——纯文本、无 view_file 的会话
-同样有。它不阻止缓存（`llm_local_agent_experiments.md` §3.2 里命中的两次也有 checkpoint），但它会把媒体挪进
+同样有。它不阻止缓存（`llm_local_agent_experiments.md` [§3.2 缓存为什么没接上](llm_local_agent_experiments.md#32-缓存为什么没接上前缀太小不是路不通2026-08-14) 里命中的两次也有 checkpoint），但它会把媒体挪进
 `.tempmediaStorage` 并以 artifact 引用替代，值得在排查上下文问题时先想到。
 
 **单次调用内的工具循环里，媒体既不中途卸载、也不打断缓存**
@@ -222,8 +226,10 @@ Codex 是"如果它想读，它能读"，agy 是"我们必须把一个读文件�
 - 只传 `--sandbox`（即使保留 `request-review`）时，`view_file` 仍能读取 cwd 外的绝对路径；
   `init.tools` 还宣告约 50 个读写、shell、browser、MCP 与 subagent 工具。`--sandbox` 只约束终端，
   不是文件读取边界。
-- Declarative agent 的 `tools: [view_file]` 在主 agent 的 `init.tools` 中**没有**缩小工具集，不能单独
-  当安全边界。
+- Declarative agent 的 `tools: [view_file]` 不改变 `init.tools` 的宣告（文档生效与否都报全集），但文档生效时模型请求里
+  的工具确实变少：文档列出的那些，加上 agy 自带的 `manage_task`（capsule 2 个、native 4 个，2026-10-06 按会话库核）。它仍不能单独当安全边界：文档写错会被 agy
+  静默整份忽略、退回默认 agent（工具 project 的 `finesub-tool` 08-21 到 10-06 就是这样；现在 project 核对会报出来，见
+  [`llm_agent_tool_protocol.md`「6. 各 driver 接线」](llm_agent_tool_protocol.md#6-各-driver-接线)的 agy 一行）。
 - Workspace `.agents/hooks.json` 的 `PreToolUse` 可以在调用前 hard-deny。实测的 deny-by-default
   hook 能拒绝 `run_command`、cwd 外 `view_file`，也能在先 `realpath` 后拒绝藏在 workspace 内的
   junction 逃逸，同时允许真实位于 workspace 内的媒体。
@@ -246,6 +252,17 @@ sandbox 发车。媒体先复制/转换进本次 capsule，guard 对请求路径
 
 这与"知识库都是公开信息"无关——风险对象是用户磁盘上的其他文件，不是知识库内容。
 
+**agy 1.2.13 起 `view_file` 还要一条 `read_file` grant**（2026-09-29，在 agent-dispatch 上实测，gemini-3.7-flash
+与 claude opus；2026-09-30 finesub 真机复核：运行根放在临时目录外，capsule 调用照常通过）：hook 放行之后，agy 自己的权限检查还会拒掉 workspace（project 与 cwd）
+以外的读取，系统临时目录除外，拒法与 [§6.2](#62-read_url_content-还要一条-permission-grant2026-08-30-实测补上)
+一样：整个 turn 提前结束，stderr 同时含 `permission` 与 `headless`。从 checkout 运行时 capsule 域在临时目录下，
+所以碰不到；managed 域（用户数据目录）和显式指定的根不在，tool-session 读的 assignment 根又在 project 与 cwd
+之外。所以每个 agy project 都授予 `read_file(*)`（`AGY_READ_PERMISSION_RULES`）；读取边界仍是上面的 guard。
+
+⚠ **custom agent 文档不加 `excludeDefaultComponents`**（owner 2026-09-30）：这个键没公开，agy 遇到不认的 agent 文档内容会
+静默整份失效；近亲键 `inheritCustomizations` 会关掉 hook，而 hook 就是上面这条读边界，`/hooks` 核对看不出它被关。收益只是
+少些用户全局规则的干扰。官方公开这个键、并承诺不影响 hooks 时可以重新评估。
+
 ## 5 MCP 工具结果的内联上限：约 4k 字节，超过即外置成文件、无预览（2026-08-22）
 
 agy 对**大的 MCP 工具回复**不截断也不预览，而是整个写到
@@ -254,7 +271,7 @@ agy 对**大的 MCP 工具回复**不截断也不预览，而是整个写到
 `tmp/agy_result_size_probe.py` 等三个哨兵探针 + brain transcript 对账）：回复 ≤3,639 **字节**内联
 可见，≥4,248 字节一律只剩文件路径——单位是回复的 UTF-8 大小，与字符数、行数无关（中文 3000 字
 一页 9k 字节被外置，ASCII 单行 6000 字符反而可见）。模型还会用 `read_context(ref="invalid")` 套出
-合法 ref、再用 `offset` 只取小页，所以哨兵实验必须对照 transcript 而不是只看答案。配合 §4 的 hook（只放行 `call_mcp_tool`），模型既读不了那个
+合法 ref、再用 `offset` 只取小页，所以哨兵实验必须对照 transcript 而不是只看答案。配合 [§4 准入硬门：view_file 的读取边界](#4-准入硬门view_file-的读取边界) 的 hook（只放行 `call_mcp_tool`），模型既读不了那个
 文件，也就**完全看不见** protocol 与 payload——2026-08-22 第一次 4 窗 canary 正是这样失败的：模型
 `submit` 了 `test`、用猜的 ref 反复 `read_context`，两条会话烧掉 19 万 uncached + 81 万 cached
 input 才耗尽预算。
@@ -284,7 +301,7 @@ driver 只在工具会话的**本次 invocation** 进程环境里设（`ClaudeCo
 200k token（2026-08-22）**——模型上下文才是真天花板，放宽没有代价；这些值没有实测过各家的真实上限。两家都不写项目级或用户级
 配置文件（`.claude/settings.json`、`.codex/config.toml`），与协议总原则一致。
 
-另一条顺带观察：agy 在会话**第一步**就把 bootstrap 压成 CHECKPOINT 摘要（与长度无关，§3 已记），
+另一条顺带观察：agy 在会话**第一步**就把 bootstrap 压成 CHECKPOINT 摘要（与长度无关，[§3 视频](#3-视频分辨率不可调现有-token-公式失真) 已记），
 所以 bootstrap 里的规则必须短、祈使、可被摘要保留。
 
 ## 6 原生搜索：第二个 project（2026-08-15 打通）
@@ -308,7 +325,7 @@ URL 一旦允许联网就由模型决定），`view_file` 仍按 realpath+common
 
 ### 6.1 tool-session 也要一对 project（2026-08-30 补齐）
 
-上面那一对只服务 **capsule** 路。**tool-session** 路（§4 的第三种 project
+上面那一对只服务 **capsule** 路。**tool-session** 路（[§4 准入硬门：view_file 的读取边界](#4-准入硬门view_file-的读取边界) 的第三种 project
 `.finesub-tool-<slot>`）在 2026-08-30 之前只有一个不带检索授权的变体，于是：
 
 - 研究轮没有媒体，按传输规则走 tool-session；
@@ -332,7 +349,7 @@ URL 一旦允许联网就由模型决定），`view_file` 仍按 realpath+common
 「被拒」换成「不敢用」。所以 `agent_tool_worker_v1.md` / `agent_tool_worker_session_v1.md`
 第 4 条带 `$retrieval_exception` 占位，授权时嵌入
 `fragment_agent_tool_retrieval_v1.md`。**嵌在同一句里而不是另起一段**：agy 会在会话第一步
-把 bootstrap 压成 CHECKPOINT 摘要（§3），另起的段落可能被摘掉。
+把 bootstrap 压成 CHECKPOINT 摘要（[§3 视频](#3-视频分辨率不可调现有-token-公式失真)），另起的段落可能被摘掉。
 
 ### 6.2 `read_url_content` 还要一条 permission grant（2026-08-30 实测补上）
 
@@ -374,7 +391,7 @@ conversation handle 即产物里的 `execution_attempts[].session_id`；每个�
 
 **证实过的事**（真机，2026-08-15）：
 - agent document 不是安全边界——`--agent` 指向一个只声明 `view_file` 的文档时，`system.init`
-  依然列出全部 56 个工具。这正是 §4 说"第 2 道才是真正的守卫"的原因，也是为什么这里必须动
+  依然列出全部 56 个工具（init 的计数不是模型实际看到的工具集，文档生效时请求里的工具会变少）。这正是 [§4 准入硬门：view_file 的读取边界](#4-准入硬门view_file-的读取边界) 说"第 2 道才是真正的守卫"的原因，也是为什么这里必须动
   hook 而不是只改文档。
 - hook payload 带 `toolCall{name,args}`、`modelName`、`conversationId`、`workspacePaths`，
   **不带 agent 名**；guard 的 cwd 恒为 `<project>/.agents`。所以"按 agent 名分流"和"按 capsule
@@ -382,12 +399,27 @@ conversation handle 即产物里的 `execution_attempts[].session_id`；每个�
 - 端到端：driver 以 `native_search=True` 跑通，真实检索并返回正确答案，
   `search_events` 记到一行 `item.completed`/`web_search`。
 
-**已知缺口：agy 不报来源 URL。** 整条事件流里没有任何 http 链接（连终止 `result` 事件也没有），
-只有 `tool_info.parameters.query`。所以 `urls` 一律为空，不伪造。后果是 **agy 的 native 证据比
-Codex/Claude 薄一档**：那两家有逐 call 的 URL provenance，agy 只能证明"查了什么"，不能证明
-"看了哪些页"。拿 native 和 local 做检索质量对照时这条是硬约束——local 有完整 URL ledger
+**已知缺口：agy 的搜索不报来源 URL**（2026-10-01 在 agy 1.2.14 上复查，仍然如此）。`search_web` 那一步的事件只有
+`tool_info.parameters.query`，搜到了哪些结果不在流里，所以这类行的 `urls` 为空，不伪造；模型用 `read_url_content`
+真正打开的页面，URL 就在调用参数里，会记进 `urls`。后果是 **agy 的 native 证据比 Codex/Claude 薄一档**：那两家
+每次搜索都带结果 URL，agy 只能证明「查了什么、打开了哪几页」，不能证明「搜到了什么」。拿 native 和 local 做检索质量对照时这条是硬约束——local 有完整 URL ledger
 （且 fetch 被硬门限制在本 task 已搜过的 URL 上），两臂在证据可审计性上并不对称。
 
-**另一个真机教训**：agy 的 Gemini 系列**必须**带 `--effort`（`low|medium|high`），不带直接
-"invalid model selection" 硬失败；Claude 系列则相反，带了就失败（§2 的 `thinking = false`）。
-两条都由 `_agy_model_takes_effort` 单点处理。
+**另一个真机教训**：agy 的每个模型都**必须**带 `--effort`（`low|medium|high`），不带直接
+"invalid model selection" 硬失败——Gemini 一直如此，Claude 从 5.5 起也是（2026-10-03，agy 1.2.16；1.1.x 时的
+`claude-opus-4-6-thinking` 相反，带了就失败）。agy 没有 `xhigh`，`[llm].local_agent_reasoning_effort` 填它时按 `high` 发。
+都由 `_agy_effort` 单点处理。
+
+## 7 答案通道本身不可靠：约四分之一的回答是畸形的（2026-09-02）
+
+与媒体、`--effort`、工作目录都无关：26 次调用里 6 次回答畸形——4 次把思考过程（thought）当成回答
+漏出来、1 次空回答、1 次退化解码。判一次回答好坏，先看它开头是不是思考过程。
+
+- **空回答**有防线：它按传输失败处理，换到链上的下一个目标（不在 agy 上原地重试）。
+- **thought 泄漏**（回答以 `thought\n` 开头，后接英文推理）：HTTP 成功、`status=SUCCESS`、回答非空，挡它的是纠错的
+  输出契约。测试钉住了四种形态：只有推理、推理里夹不完整草稿、推理里提到 `<translated>` 而把后面的正式答案吞进块里
+  （误拒，方向安全）——这三种都拒收、进修复轮；推理写在块外、后面跟完整答案的放行（块外文字不算产物，owner 2026-10-01）。
+  拒收时校验错误第一条是「上一次交回的是推理过程，只交答案」，让修复轮对准原因（`output_protocol.LEAKED_THOUGHT_ERROR`）；
+  `api` 档的 agy 没有续得上的会话，不接修复上下文，那里只能盲重试，这句提示到不了模型。
+  driver 只在调用记录上打 `answer_shape: thought_leak`，**不**改失败分类：判成 transient 会丢掉这条会话、换到链上下一个
+  目标且记进额度账，比续会话的修复轮更贵。工具会话不看最终文本（答案走 `submit`）。

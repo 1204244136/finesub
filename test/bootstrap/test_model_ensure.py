@@ -83,6 +83,28 @@ def test_weights_already_there_cost_a_directory_check(cache: Path, tmp_path) -> 
     assert calls == []
 
 
+def test_a_snapshot_short_of_a_listed_file_is_fetched_again(cache: Path, tmp_path) -> None:
+    """Interrupted between two files: the revision is non-empty and nothing is `.incomplete`.
+
+    A `from_pretrained` loader would fetch the rest lazily; a consumer that opens files by path
+    (the diarization backends) cannot, so the fast path must not call this done.
+    """
+
+    snapshot = cache / CACHE_DIR / "snapshots" / REVISION
+    snapshot.mkdir(parents=True)
+    (snapshot / "README.md").write_text("card", encoding="utf-8")
+    calls: list[str] = []
+
+    def fake_download(model_id: str, environment) -> None:
+        calls.append(model_id)
+        _land_the_weights(cache)
+
+    model_ensure.ensure_hf_model("whisper", data_root=tmp_path / "data", download=fake_download)
+
+    assert calls == ["whisper"]
+    assert model_ensure.pinned_snapshot_dir("whisper") == snapshot
+
+
 def test_a_missing_model_is_fetched_and_then_marked(cache: Path, tmp_path) -> None:
     def fake_download(model_id: str, environment) -> None:
         _land_the_weights(cache)
@@ -306,6 +328,26 @@ def test_a_model_the_manifest_never_describes_keeps_its_old_behaviour(
     assert calls == []
 
 
+def test_the_snapshot_directory_is_handed_over_only_when_every_file_is_there(cache: Path) -> None:
+    """For a consumer that opens the files itself (the diarization backends load TorchScript by
+    path): the pinned revision's directory, and only once every manifest file is there at size."""
+
+    assert model_ensure.pinned_snapshot_dir("whisper") is None
+    _land_the_weights(cache)
+    assert model_ensure.pinned_snapshot_dir("whisper") == cache / CACHE_DIR / "snapshots" / REVISION
+
+    (cache / CACHE_DIR / "snapshots" / REVISION / "model.bin").write_bytes(BODY[:-1])
+    assert model_ensure.pinned_snapshot_dir("whisper") is None, "a truncated file is not a model"
+
+
+def test_the_snapshot_directory_is_the_pinned_revision_not_any(cache: Path) -> None:
+    other = cache / CACHE_DIR / "snapshots" / "fedcba9876543210"
+    other.mkdir(parents=True)
+    (other / "model.bin").write_bytes(BODY)
+
+    assert model_ensure.pinned_snapshot_dir("whisper") is None
+
+
 def test_a_landed_snapshot_is_loadable_without_the_network(cache: Path) -> None:
     """What lets a loader pass `local_files_only=True` and skip the hub."""
 
@@ -460,3 +502,35 @@ def test_the_cache_root_is_the_one_the_hub_itself_resolved(variables) -> None:
     # The hand-written ladder is what an install without `huggingface_hub`
     # falls back to, so it has to reach the same place.
     assert Path(fallback_says) == Path(hub_says)
+
+
+@pytest.mark.parametrize("listed_only, patterns", [(False, None), (True, ["model.bin"])])
+def test_the_fetch_takes_the_whole_repository_unless_the_entry_says_listed_only(
+    monkeypatch, listed_only, patterns
+) -> None:
+    """A `from_pretrained` loader reads files the manifest never lists (tokenizers, configs), so
+    the whole snapshot is the default. `listedOnly` is for a repository carrying far more than we
+    open -- NVIDIA's Nemotron-3 ships a .nemo, a GGUF and demo media beside the two files we load."""
+    huggingface_hub = pytest.importorskip("huggingface_hub")
+    from dataclasses import replace
+
+    calls = []
+    monkeypatch.setattr(model_ensure, "entry_for", lambda _id: replace(_entry(), listed_only=listed_only))
+    monkeypatch.setattr(huggingface_hub, "snapshot_download",
+                        lambda repo, **kwargs: calls.append((repo, kwargs)))
+    assert model_ensure.main(["whisper"]) == 0
+    assert calls == [("acme/weights", {"revision": REVISION, "allow_patterns": patterns})]
+
+
+def test_the_manifest_reads_listed_only_as_a_strict_boolean(tmp_path, monkeypatch) -> None:
+    from finesub_bootstrap import model_manifest
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"models": {
+        "a": {"repo": "x/a", "revision": "r", "listedOnly": True},
+        "b": {"repo": "x/b", "revision": "r", "listedOnly": "yes"},
+        "c": {"repo": "x/c", "revision": "r"},
+    }}), encoding="utf-8")
+    monkeypatch.setenv(model_manifest.MANIFEST_ENVIRONMENT, str(manifest))
+    loaded = model_manifest.load_manifest()
+    assert [loaded[k].listed_only for k in "abc"] == [True, False, False]

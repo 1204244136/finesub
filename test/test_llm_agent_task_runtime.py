@@ -1019,3 +1019,127 @@ def test_the_doc_table_still_matches_the_constants() -> None:
     # The margin is what makes the ceiling large enough to be worth having.
     assert CONVERSATIONAL_WATCH_SECONDS < MAX_WATCH_SECONDS
     assert CONVERSATION_WATCH_MARGIN_SECONDS == 120.0
+
+
+def _reads_validator(candidate, view):
+    reads = view["observed"]["kb_reads"]
+    if not any(row["entry"] == "甲组" and not row["sections"] for row in reads):
+        return ValidationResult.repairable("read it first", metadata={"observed_dependent": True})
+    return ValidationResult.accepted(candidate)
+
+
+def _reads_runtime(tmp_path, **kwargs):
+    runtime = _start(
+        tmp_path, [_task("first", validator_id="reads")], validators={"reads": _reads_validator},
+        **kwargs,
+    )
+    claimed = runtime.next_task(
+        assignment_id="assignment-1", worker_id="worker-1", request_id="claim",
+        expected_control_generation=1,
+    )
+    return runtime, claimed["task"]["lease_generation"]
+
+
+def _lease(runtime, generation: int) -> dict:
+    return dict(
+        assignment_id="assignment-1", task_id="first", worker_id="worker-1",
+        lease_generation=generation,
+    )
+
+
+def _read(runtime, generation: int, *, sections: bool = False) -> None:
+    runtime.record_kb_read(
+        **_lease(runtime, generation), entry="甲组", category="style", sections=sections
+    )
+
+
+def _submit(runtime, generation: int, request_id: str) -> dict:
+    return runtime.submit(
+        **_lease(runtime, generation), request_id=request_id, input_hash="sha256:first",
+        candidate={"answer": "x"},
+    )
+
+
+def test_the_kb_read_ledger_reaches_the_validator_and_its_verdict_is_not_cached(tmp_path) -> None:
+    """auto-style-gaps plan A1: the window validator judges "the picked style
+    was read in full" from the answering context's ledger. The runtime hands
+    it the manifest plus ``observed``; a rejection that depends on that ledger
+    is not cached against the candidate, or the same answer could never pass
+    after the read it lacked."""
+
+    runtime, lease = _reads_runtime(tmp_path)
+    assert _submit(runtime, lease, "s1")["status"] == "repairable"
+    _read(runtime, lease, sections=True)
+    assert _submit(runtime, lease, "s2")["status"] == "repairable"  # a sections read is not the whole style
+    _read(runtime, lease)
+    _read(runtime, lease)  # deduplicated
+    assert _submit(runtime, lease, "s3")["status"] != "repairable"  # same candidate, judged afresh
+    # What the harness folds: the rows that last judgment saw.
+    assert runtime.kb_read_events(assignment_id="assignment-1", task_id="first") == [
+        {"entry": "甲组", "category": "style", "sections": True},
+        {"entry": "甲组", "category": "style", "sections": False},
+    ]
+    assert runtime.kb_read_events(assignment_id="assignment-1", task_id="missing") == []
+
+
+@pytest.mark.parametrize("scope", ["task", "assignment"])
+def test_a_read_before_a_conversation_reset_does_not_count(tmp_path, scope) -> None:
+    """The picked style has to be in front of the conversation that answers:
+    a reset is a new context, and the read from before it is gone with it."""
+
+    runtime, lease = _reads_runtime(tmp_path, session_scope=scope)
+    _read(runtime, lease)
+    runtime.reset_conversation(**_lease(runtime, lease), request_id="reset", reason="lost the handle")
+    verdict = _submit(runtime, lease, "s1")
+    assert verdict["status"] == "repairable" and verdict["validation_errors"] == ["read it first"]
+    assert runtime.kb_read_events(assignment_id="assignment-1", task_id="first") == []
+    _read(runtime, lease)
+    assert _submit(runtime, lease, "s2")["status"] != "repairable"
+
+
+def test_a_read_under_an_earlier_lease_does_not_count(tmp_path) -> None:
+    """A new lease is a new context (task scope): it starts with an empty
+    ledger, `kb_read` rows included."""
+
+    now = [100.0]
+    runtime, first = _reads_runtime(tmp_path, clock=lambda: now[0], lease_ttl_seconds=300)
+    _read(runtime, first)
+    now[0] = 5000.0  # the lease expires; the task is claimed again
+    revived = runtime.status(assignment_id="assignment-1", worker_id="worker-1")
+    claimed = runtime.next_task(
+        assignment_id="assignment-1", worker_id="worker-1", request_id="claim-2",
+        expected_control_generation=revived["control_generation"],
+    )
+    second = claimed["task"]["lease_generation"]
+    assert second != first
+    verdict = _submit(runtime, second, "s1")
+    assert verdict["status"] == "repairable" and verdict["validation_errors"] == ["read it first"]
+
+
+def test_a_checkpoint_keeps_the_reads_of_its_conversation(tmp_path) -> None:
+    runtime, lease = _reads_runtime(tmp_path, session_scope="assignment")
+    _read(runtime, lease)
+    runtime.checkpoint_conversation(
+        **_lease(runtime, lease), request_id="turn-1", conversation_epoch=1,
+        conversation_handle="conversation-1", turn_generation=1,
+        parent_turn_identity="sha256:turn-1",
+    )
+    assert _submit(runtime, lease, "s1")["status"] != "repairable"
+
+
+def test_the_kb_read_ledger_rides_out_on_the_execution_attempt(tmp_path) -> None:
+    """The harness half of the read-check reads the same ledger after the
+    session is gone: every tool-session form folds it onto the attempt."""
+
+    from types import SimpleNamespace
+
+    from finesub.llm.agent.agent_session_host import fold_task_ledgers
+
+    runtime, lease = _reads_runtime(tmp_path)
+    _read(runtime, lease)
+    _submit(runtime, lease, "s1")
+    result = SimpleNamespace(content="", execution_attempt={}, normalized_events=())
+    folded = fold_task_ledgers(runtime, result, assignment_id="assignment-1", task_id="first")
+    assert folded.execution_attempt["kb_reads"] == [
+        {"entry": "甲组", "category": "style", "sections": False}
+    ]

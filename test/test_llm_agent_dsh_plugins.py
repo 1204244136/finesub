@@ -35,7 +35,7 @@ def _fresh_state():
 
 def _driver() -> DshLocalAgentDriver:
     driver = DshLocalAgentDriver(
-        DshDriverConfig(model="deepseek-official/deepseek-v4-flash")
+        DshDriverConfig(model="deepseek-official/deepseek-flash")
     )
     driver._resolved_command = ("node.exe", "bin.js")
     return driver
@@ -144,7 +144,7 @@ def test_without_the_policy_a_missing_inventory_only_warns(
     _stub_dumps(monkeypatch, composed=None)
     driver = DshLocalAgentDriver(
         DshDriverConfig(
-            model="deepseek-official/deepseek-v4-flash", deny_unknown_plugins=False
+            model="deepseek-official/deepseek-flash", deny_unknown_plugins=False
         )
     )
     driver._resolved_command = ("node.exe", "bin.js")
@@ -242,6 +242,36 @@ def test_the_plugins_measured_to_add_nothing_this_driver_needs_are_off() -> None
     assert not disabled & {"commands", "plan-mode", "tools", "fs-sandbox", "tool-fs"}
 
 
+def test_the_plugins_dsh_0_1_5_added_are_denied_by_name_not_only_by_drift() -> None:
+    """Read on 2026-09-12, so a 0.1.5 install carries no drift warning.
+
+    Seven are denied outright: the storage four write under the user's
+    `$DSH_HOME`, and the three API extensions attach vendor metadata (the
+    plugin inventory is on by default) or upload the session log. The eighth,
+    `web-fetch-http`, backs `web_fetch` and follows `tool-web` per call instead
+    (a native round may fetch) -- see the dsh driver tests. All eight are in
+    the snapshot, so they read as vetted rather than unknown.
+    """
+
+    config = DshDriverConfig()
+    denied = {
+        "deepseek-llm-api-extensions",
+        "plugin-package-inventory-deepseek",
+        "session-log-deepseek",
+        "session-projection-cache",
+        "storage",
+        "storage-domain",
+        "storage-json",
+    }
+    assert denied <= set(config.disabled_tool_plugins)
+    assert "web-fetch-http" not in config.disabled_tool_plugins
+    assert denied | {"web-fetch-http"} <= set(config.expected_plugin_ids)
+    # The older bundle still composes these two, so neither list may drop them.
+    assert {"tool-str-replace-editor", "tool-subagent-report"} <= set(
+        config.expected_plugin_ids
+    )
+
+
 # --- blocking, not just noticing ---------------------------------------------
 
 
@@ -258,7 +288,7 @@ def _patch_disables(tmp_path: Path, **config_overrides) -> list[str]:
     )
     driver = DshLocalAgentDriver(
         DshDriverConfig(
-            model="deepseek-official/deepseek-v4-flash", **config_overrides
+            model="deepseek-official/deepseek-flash", **config_overrides
         )
     )
     driver._resolved_command = ("node.exe", "bin.js")

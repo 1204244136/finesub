@@ -125,6 +125,28 @@ python -m finesub.speech.recognition.cli.align out/input/vad.json \
    重解（干净且覆盖达标即采纳）；仍不足则回到 greedy，把首个 interval 剥离
    为独立窗口、其余合为后窗重解，后窗覆盖率仍低就继续剥离（收敛于逐
    interval）。救援结果仅在覆盖时长严格增加时替换原结果。
+   不支持 beam 的后端（不声明 `beam` 能力，见 [`asr-backends.md`](asr-backends.md)）跳过 beam 那一级，
+   直接进剥离，计数 `beam_rescue_skipped`；CTranslate2 后端支持 beam，行为不变。
+   ⚠ **不存在「覆盖率低于阈值就删组」这条路**：救援不改善即保留原结果。
+   ⚠ **这两族计数不是一回事**：`abnormal_groups` / `isolated_intervals` 是第 5 条的
+   **异常输出隔离**，`beam_rescue_attempted` / `beam_rescue_accepted` /
+   `coverage_peels` / `coverage_rescue_*` 才是本条的救援阶梯。把前者读成后者，
+   排查方向就会走上一条并不存在的删除路径。
+   ⚠ **`recovery` 计数不随 checkpoint 恢复**，所以某个键在产物里缺席只能读成
+   「**现存记录未显示触发**」，不能读成「一次都没触发」——续跑之前发生的事不留在计数里。
+   逐组覆盖率（下条）是**会**恢复的，要回答这类问题看它。
+
+   **逐组覆盖率落盘（2026-09-07）。** 上面这个比值每个 group 都算过，但达标就被丢掉，
+   于是「某句话丢在一个覆盖率健康的组里」事后什么都查不到。现在每组落一条到
+   `metadata.asr_align.asr_coverage`：`start` / `end` / `intervals` / `speech_sec` /
+   `covered_sec` / `ratio` / `required_sec`，加救援之后的 `rescued_covered_sec` /
+   `rescued_ratio`。**达标的组也落**——只落异常组等于没修这条。判定逻辑一个字没动
+   （`_coverage_of` 只是把「算」从「判」里拆出来）。这份账本**随 ASR checkpoint 走**，
+   理由同语言审计的抽样账本：不恢复的话续跑后只剩后半段，而且看不出少了。
+   账本是 checkpoint schema 的一部分（`checkpoint.SCHEMA_VERSION` 因此升到 3）：没有它的
+   partial 一律判失效、从头重跑，而不是续跑出一份缺了前半段的账本——旧格式向来是作废不迁移。
+   ⚠ **它量的是解码阶段**：组通过之后还有召回、词首修正、分句、stabilize 丢弃，
+   最终字幕里的缺口不一定在这里出现。
 7. 对正常结果未覆盖且累计不少于 5 秒的 complement 做临时 recall ASR；短于
    `0.25` 秒的 complement 碎屑不参与（孤立碎屑单独解码必然幻觉，也不计入
    5 秒阈值）。
@@ -136,8 +158,7 @@ python -m finesub.speech.recognition.cli.align out/input/vad.json \
 
 ## 语言票翻转重解（`--lang-redecode`，默认 auto）
 
-2026-08-19 新增（`speech/recognition/lang_redecode.py`）。方案原稿与逐轮实验编年在本地
-`docs/archive/speech-quality-plan.md`；**现行行为、取舍与待办以本节为准**。
+2026-08-19 新增（`speech/recognition/lang_redecode.py`）。方案原稿与逐轮实验编年在维护者的本地归档里；**现行行为、取舍与待办以本节为准**。
 
 ### 根因：前文污染下的窗内崩塌，不是语言检测漂移
 
@@ -189,7 +210,7 @@ aligned metadata `asr_align.lang_redecode`。默认 `auto`（依赖可用即运�
 
 `referee_device` 依次问五件事。它们曾经是同一个问题——「ASR 在不在 CUDA 上」——而 2026-09-02
 ASR 阶段改由 CTranslate2 决定自己的设备之后，那个合并不再成立
-（[stage-device-plan.md](plans/stage-device-plan.md)）：
+（策略与能力怎么拆开，见 [`gpu-profiles.md`](gpu-profiles.md) 的「`cpu`：档位是策略，不是能力」一节）：
 
 | # | 问题 | 谁回答 | 答否时 |
 | --- | --- | --- | --- |
@@ -604,6 +625,15 @@ fw-refine 的 `detect_disfluencies` 默认开启（实测解码零成本）：at
   段内非 interval 首词同守卫钳到 hint（无额外 lead）。hint 对 gold 重偏早家族
   覆盖 7/27——它是子集信号，主修复力量是上面的能量门控删除。
 
+⚠ **收尾时段起点取「全部词起点的 min」，不是 `words[0]`，也不是只往一个方向。**
+`_clamp_word` 判断「要不要跟着挪段起点」时比的是**被它挪动的那一个词的旧起点**
+（`segment.start == word 旧 start`），分不清「这个词定义了段起点」和「这个词只是与定义者
+并列」。disfluency 的 `merge` 恰好会留下一个**零时长残词**与后词并列在同一坐标上：后词被
+钳走、段起点跟着走、残词留在原地——段于是不再包含自己的第一个词。2026-09-06 一次带阶段名
+的溯源在 `BV15R8i6TEnS` 上抓到现行犯（seg 138 段 `449.535` / 词 `449.081`，一条 conf 0.918、
+stabilize 无 tag 的**正常字幕**），修法是把收尾循环写成 `segment["start"] = min(所有词起点)`。
+全片影响面实测 **434 段里 1 段**（就是它），其余逐位不变。
+
 标定与误伤审计（gold n=61：quiet_frac 分离 filled 0.70 / 词头 0.00、删除 0/25 词头
 误删、调整后误差中位 ~10ms vs 融合基线 223ms）见 docs/wt-refine-validation.md。
 独立 `python -m finesub.speech.recognition.cli.align` 无能量轨：门控必不通过，全部块融合回退（=plain 行为 + span 标注）。
@@ -628,5 +658,5 @@ python -m pytest -q test/test_asr_and_text_utils.py test/test_intervals.py \
 掉出计划的计入 `prefetch_wasted`。计数：`prefetch_hits/misses/decoded/wasted/too_long`，
 phase `asr.prefetch`（含编码与回放）与 `asr.decode_batch`（只含批 generate）。
 
-12 份产物实测（`bench-baselines.md` 二十二）：B=4/8 文本与词时间在第十节门槛内，端到端 **1.06×**
+12 份产物实测（`bench-baselines.md` [二十二 A1 组批本体落地与扫描](bench-baselines.md#二十二a1-组批本体落地与扫描门槛没过默认仍关两个模型的-batch-各档定值)）：B=4/8 文本与词时间在第十节门槛内，端到端 **1.06×**
 不到 1.15× 的下限，B=16 文本一致率不过——所以默认 1，opt-in 时取 4。

@@ -4,6 +4,7 @@ import importlib.util
 import os
 from pathlib import Path
 import re
+import sys
 
 import pytest
 
@@ -49,9 +50,8 @@ def _packaged_install(root: Path, monkeypatch, version: str = "0.3.2") -> Path:
 def _managed_data_root(tmp_path, monkeypatch) -> Path:
     """Point the managed data root at a scratch directory, whatever the OS.
 
-    The product is Windows-only, but the tests also run on Linux (CI), where
-    ``default_data_root`` hangs the same layout off ``~/.finesub`` instead of
-    ``%LOCALAPPDATA%\\FineSub``.
+    The tests run on Windows, Linux and macOS (CI), and ``default_data_root``
+    hangs the same layout off each platform's own convention.
     """
 
     local_app_data = tmp_path / "LocalAppData"
@@ -60,6 +60,8 @@ def _managed_data_root(tmp_path, monkeypatch) -> Path:
     monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
     if os.name == "nt":
         return local_app_data.resolve() / "FineSub"
+    if sys.platform == "darwin":
+        return home.resolve() / "Library" / "Application Support" / "FineSub"
     return home.resolve() / ".finesub"
 
 
@@ -349,6 +351,7 @@ def test_cleanup_names_the_same_artifacts_the_pipeline_derives() -> None:
     in a list of things we do remove.
     """
 
+    from finesub.speech.diarization.evidence import evidence_path
     from finesub.stages import default_pipeline_paths
     from finesub_bootstrap import artifacts
 
@@ -360,6 +363,9 @@ def test_cleanup_names_the_same_artifacts_the_pipeline_derives() -> None:
         Path(paths.vad_json),
         Path(paths.vad_energy_npz),
         Path(paths.aligned_json),
+        # The clustering's evidence sidecar: reproducible from the audio, unlike the timeline
+        # it sits beside, so it is cleaned while -diar.json is kept.
+        evidence_path(paths.diar_json),
         Path(paths.raw_srt),
         Path(paths.translated_srt),
         Path(paths.metadata_json),
@@ -396,6 +402,43 @@ def test_cleanup_names_the_same_artifacts_the_pipeline_derives() -> None:
         ).resolve()
         not in removable
     )
+
+
+def test_every_pipeline_path_is_either_removable_or_a_record() -> None:
+    """Enumerate the fields rather than list them, so a new one cannot hide.
+
+    The test above builds its expected set by hand, which is exactly how
+    `-diar.json` got past it: a new `PipelinePaths` field was in neither list and
+    nothing noticed, because nothing asked about fields it had not been told of.
+    """
+
+    from finesub.stages import PipelinePaths, default_pipeline_paths
+    from finesub_bootstrap import artifacts
+
+    delivered = Path("C:/tasks/clip-260811-2205-abc123/clip.srt")
+    paths = default_pipeline_paths("C:/media/clip.wav", delivered)
+    removable = set(artifacts.removable_artifacts(delivered))
+    stem = delivered.with_suffix("")
+    records = {
+        stem.with_name(f"{stem.name}{suffix}").resolve()
+        for suffix in artifacts.RECORD_SUFFIXES
+    }
+    directories = {"task_artifact_dir"}
+
+    unclassified = [
+        field
+        for field in PipelinePaths._fields
+        if field not in directories
+        and Path(getattr(paths, field)).resolve() not in removable | records
+    ]
+    assert not unclassified, f"classify these in finesub_bootstrap.artifacts: {unclassified}"
+    assert not removable & records, "a record must never be in the list of things we delete"
+    # The bootstrap restates the judge's suffix (it may not import the pipeline);
+    # the field and the reader must agree with it.
+    from finesub.speech.diarization.judgments import SIDECAR_SUFFIX, sidecar_path
+
+    assert SIDECAR_SUFFIX in artifacts.RECORD_SUFFIXES
+    assert sidecar_path(paths.stable_json) == paths.speaker_judge_json
 
 
 def test_runtime_modules_do_not_infer_root_from_parent_depth() -> None:

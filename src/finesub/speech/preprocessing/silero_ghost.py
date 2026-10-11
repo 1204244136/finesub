@@ -36,6 +36,8 @@ import torch
 
 from . import energy
 from ..runtime.device import resolve_device
+from ..runtime.native_paths import load_torchscript
+from ..runtime.support_levels import note_accelerated_stage
 
 SILERO_HOP = 512  # samples; silero's native frame step at 16 kHz
 SILERO_CONTEXT = 64  # samples of the previous frame silero prepends to each one
@@ -54,11 +56,18 @@ def _model():
         # silero_vad/model.py calls torch.set_num_threads(1) at import time.
         # That is a process-global setting and it never restores it, so every
         # later torch op in this run would be single-threaded.
+        # Importing anything under `silero_vad` runs its package __init__,
+        # which imports that module.
         threads = torch.get_num_threads()
         try:
-            from silero_vad import load_silero_vad
+            from importlib import resources
 
-            _MODEL = load_silero_vad()
+            # Located the way `load_silero_vad()` locates it, but loaded
+            # through a file object: its own loader hands the path string to
+            # libtorch, which misreads non-ASCII paths (see native_paths).
+            archive = resources.files("silero_vad.data").joinpath("silero_vad.jit")
+            with resources.as_file(archive) as path:
+                _MODEL = load_torchscript(path, map_location="cpu").eval()
         finally:
             torch.set_num_threads(threads)
     return _MODEL
@@ -81,7 +90,9 @@ def _tf32_disabled():
 
 
 def resolve_silero_device(device: str) -> str:
-    return resolve_device(device or "cpu", context="the silero assist")
+    resolved = resolve_device(device or "cpu", context="the silero assist")
+    note_accelerated_stage("the silero assist", resolved)
+    return resolved
 
 
 class SileroProbStream:

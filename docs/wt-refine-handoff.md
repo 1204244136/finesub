@@ -67,13 +67,16 @@
 - [`fw_refine.py`](../src/finesub/speech/recognition/fw_refine.py)：WT 分词、confidence、path signals、
   disfluency 与边界事件；
 - [`transcribe.py`](../src/finesub/speech/recognition/transcribe.py)：backend 参数、异常候选和原时间轴映射；
+- [`asr_backend.py`](../src/finesub/speech/recognition/asr_backend.py)：解码选项的唯一声明与后端契约
+  （2026-09-17），`RefinedWhisperModel` 收到未声明的选项直接报错，补丁缺 refine 轨迹或语气词权重时在
+  加载模型时报错；契约说明见 [`asr-backends.md`](asr-backends.md)；
 - [`vad_asr_stage.py`](../src/finesub/speech/recognition/vad_asr_stage.py)：`vad-asr` 阶段编排与 metadata；
 - [`segmentation.py`](../src/finesub/speech/postprocessing/segmentation.py)：全局 DP 后将一个 event 只归属
   到一个输出 segment。
 
 ### patched CT2 侧
 
-- worktree：`C:\Users\Carl\Documents\Carl\projects\CTranslate2`
+- worktree：维护者本机与本仓并列的 `CTranslate2` checkout（不在本仓里）
 - branch：`codex/wt-refine-ct2-research`
 - upstream base：`v4.8.1` / `0d8bcd3`
 - tip：`dcc02ac`（`feat(whisper): accept per-sample real audio frames`）——multi-audio batch 的唯一

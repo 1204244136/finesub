@@ -35,6 +35,7 @@ class _FakeReferee:
 
     def __init__(self, device: str) -> None:
         self.requested_device = device
+        self.effective_device = device
         self.calls: list[tuple[str, object]] = []
 
     def set_context(self, context: str) -> None:
@@ -298,7 +299,7 @@ class TestTheReuseDoesNotDropIt:
 
 class TestTheTitleIsFetchedWhenTheContextNeedsIt:
     """`--asr-context` reads extra-info at `aligned`, four stages before
-    `run_full_correction` does. A gate that only knows about the correction
+    the correction task does. A gate that only knows about the correction
     layer leaves the default `finesub URL --asr-context terms` looking at a URL
     and a file path, with the title it is meant to match subjects from never
     fetched."""

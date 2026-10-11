@@ -606,3 +606,106 @@ def test_claude_raises_its_mcp_reply_limit_only_for_a_tool_session(tmp_path) -> 
     assert env["MAX_MCP_OUTPUT_TOKENS"] == "200000"
     assert env["CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS"] == "200000"
     assert "MAX_MCP_OUTPUT_TOKENS" not in driver._spawn_environment(mcp_server=None)
+
+
+# --- exit-on-accept ---------------------------------------------------------
+
+
+def test_the_completing_accept_is_logged_then_held(tmp_path, monkeypatch) -> None:
+    """docs §4 exit-on-accept: the reply that completes the assignment is
+    logged at once and held before it reaches the CLI, so the driver ends the
+    CLI before it can spend a request on "submitted". Nothing else is held."""
+
+    from finesub.llm.agent import agent_mcp_server
+
+    runtime = _runtime(tmp_path)
+    server = HarnessToolServer(
+        runtime,
+        assignment_id="assignment-1",
+        worker_id="worker-1",
+        session_id="s1",
+        instance_id="instance-1",
+        accepted_reply_hold_seconds=7.0,
+    )
+    log = tmp_path / "frames.jsonl"
+    slept: list = []
+
+    def fake_sleep(seconds):
+        logged = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        slept.append((seconds, logged[-1]["dir"]))
+
+    monkeypatch.setattr(agent_mcp_server.time, "sleep", fake_sleep)
+    frames = [
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "next_task", "arguments": {}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "submit", "arguments": {"payload": "bad"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+         "params": {"name": "submit", "arguments": {"payload": "good"}}},
+    ]
+    out = io.StringIO()
+    serve(
+        io.BytesIO("".join(json.dumps(f) + "\n" for f in frames).encode("utf-8")),
+        out,
+        server,
+        log_path=str(log),
+    )
+
+    assert slept == [(7.0, "out")]
+    replies = [json.loads(line) for line in out.getvalue().splitlines()]
+    # Still sent when nobody ends the process: a hold costs time, never the call.
+    assert json.loads(replies[-1]["result"]["content"][0]["text"])["status"] == "accepted"
+    assert server.take_reply_hold() == 0.0
+
+
+def test_a_tool_session_asks_for_exit_on_accept_from_the_driver_config(
+    tmp_path, monkeypatch
+) -> None:
+    from finesub.llm.agent.agent_mcp_server import ACCEPTED_REPLY_HOLD_ENV
+    from finesub.llm.agent.local_agent import ACCEPTED_REPLY_HOLD_SECONDS
+
+    _no_api(monkeypatch)
+
+    def agent(server):
+        _call(server, 1, "next_task")
+        _call(server, 2, "submit", payload="good")
+
+    for configured, expected in ((True, True), (False, False), (None, False)):
+        driver = _ToolUsingFakeDriver(agent)
+        if configured is not None:
+            driver.config = SimpleNamespace(model="", exit_on_accept=configured)
+        client = _client(driver, tmp_path / str(configured))
+        client.complete(
+            LLMRole.GENERAL_CAPABLE,
+            MESSAGES,
+            validator_spec={"id": "test-reject-bad", "params": {}},
+            max_repair_attempts=3,
+        )
+        (_messages, kwargs), = driver.calls
+        assert kwargs["exit_on_completion"] is expected
+        env = kwargs["mcp_server"]["env"]
+        if expected:
+            assert float(env[ACCEPTED_REPLY_HOLD_ENV]) == ACCEPTED_REPLY_HOLD_SECONDS
+        else:
+            assert ACCEPTED_REPLY_HOLD_ENV not in env
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        # owner 2026-09-30: Codex reports usage once, at the end, so `auto`
+        # leaves it off; the drivers that can rebuild usage turn it on.
+        ("auto", {"codex": False, "claude_code": True, "codebuddy": True, "agy": True, "dsh": False}),
+        ("on", {"codex": True, "claude_code": True, "codebuddy": True, "agy": True, "dsh": True}),
+        ("off", {"codex": False, "claude_code": False, "codebuddy": False, "agy": False, "dsh": False}),
+    ],
+)
+def test_exit_on_accept_resolves_per_driver(mode, expected) -> None:
+    from finesub.llm.routing.execution_policy import ExecutionSettings
+
+    settings = ExecutionSettings(local_agent_exit_on_accept=mode)
+    got = {
+        name: getattr(settings, f"{name}_driver_config")(model="m").exit_on_accept
+        for name in expected
+    }
+    assert got == expected

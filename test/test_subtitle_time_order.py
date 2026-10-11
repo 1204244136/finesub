@@ -261,59 +261,85 @@ def test_the_postprocess_pass_can_also_be_silenced(tmp_path: Path) -> None:
     assert [code for code in quiet.codes() if code.startswith("srt-")] == []
 
 
-def test_the_raw_srt_export_reports_one_finding_once(tmp_path: Path, monkeypatch) -> None:
-    """The end-to-end property, not just the flag that implements it.
+class _Notes(_Warnings):
+    """`_Warnings` that also keeps the stage summaries."""
 
-    Asserted on the real `_create_raw_srt` composition rather than on a
-    hand-rolled imitation of it, because the bug was in the composition: each
-    piece was individually correct.
-    """
+    def __init__(self) -> None:
+        super().__init__()
+        self.summaries: list[tuple[str, dict]] = []
 
-    # `_use_or_create` moved to `stages` with `run_pipeline` (multi-input refactor).
-    from finesub import stages as pipeline_module
+    def summary(self, stage: str, metrics) -> None:
+        self.summaries.append((stage, dict(metrics)))
 
-    stable = tmp_path / "clip-stable.json"
-    stable.write_text(
-        json.dumps(
-            {
-                "segments": [
-                    {
-                        "start": 0.0,
-                        "end": 1.0,
-                        "text": "\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341"
-                        "\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341"
-                        "\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341",
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    final = tmp_path / "clip-raw.srt"
-    temporary = final.with_name(f".{final.stem}.part{final.suffix}")
 
-    from finesub.subtitles import rendering as to_srt
-    from finesub.subtitles.model import warn_on_invalid_srt as warn
-    from finesub.subtitles.postprocess import (
-        TIMELINE_POSTPROCESS_PROFILES,
-        postprocess_srt_file,
+_WIDE = "\u4e00" * 30  # 30 weighted characters, over the 25 budget
+_WIDER = "\u4e00" * 47
+
+
+def _srt(*texts: str) -> str:
+    return "\n".join(
+        f"{n}\n00:00:{n - 1:02d},000 --> 00:00:{n:02d},000\n{text}\n"
+        for n, text in enumerate(texts, start=1)
     )
 
-    def create(destination: Path) -> Path:
-        produced = to_srt.convert_json_to_srt(
-            stable, output_path=destination, word=False, validate=False
-        )
-        for timeline_profile in TIMELINE_POSTPROCESS_PROFILES:
-            postprocess_srt_file(produced, profile=timeline_profile, validate=False)
-        produced = Path(produced)
-        warn(produced.read_text(encoding="utf-8"), where=str(final))
-        return produced
 
-    reporter = _Warnings()
+def test_line_width_is_silent_unless_the_caller_names_a_stage() -> None:
+    reporter = _Notes()
     with reporting_to(reporter):
-        pipeline_module._use_or_create(final, "raw SRT export", create)
+        warn_on_invalid_srt(_srt(_WIDE), where="clip-raw.srt")
 
-    budget = [message for code, message in reporter.entries if code == "srt-line-budget"]
-    assert len(budget) == 1, f"expected exactly one report, got {budget}"
-    assert str(final) in budget[0]
-    assert temporary.name not in budget[0], "the report must not name a scratch file"
+    assert reporter.entries == []
+    assert reporter.summaries == []
+
+
+def test_raw_line_width_lists_only_lines_far_over_the_budget() -> None:
+    """The raw SRT skips 26-35 and starts its bands at 36."""
+
+    reporter = _Notes()
+    with reporting_to(reporter):
+        warn_on_invalid_srt(
+            _srt(_WIDE, "\u4e00" * 36, _WIDER),
+            where="clip-raw.srt",
+            budget_stage="raw-srt",
+            budget_above=35,
+        )
+        warn_on_invalid_srt(
+            _srt(_WIDE), where="clip-raw.srt", budget_stage="raw-srt", budget_above=35
+        )
+
+    assert reporter.entries == []
+    ((stage, metrics),) = reporter.summaries  # nothing above 35 -> no second note
+    assert stage == "raw-srt"
+    ((label, value),) = metrics.items()
+    assert "35" in label
+    assert value == "36-40 字：2；46+ 字：3"
+
+
+def test_line_width_is_one_banded_summary_not_a_warning_per_line() -> None:
+    reporter = _Notes()
+    with reporting_to(reporter):
+        warn_on_invalid_srt(
+            _srt("short", _WIDE, "short", _WIDER),
+            where="clip.srt",
+            budget_stage="final-srt",
+        )
+
+    assert reporter.entries == []
+    ((stage, metrics),) = reporter.summaries
+    assert stage == "final-srt"
+    (value,) = metrics.values()
+    assert value == "26-30 字：2；46+ 字：4"
+
+
+def test_the_final_postprocess_reports_line_width_as_a_summary(tmp_path: Path) -> None:
+    from finesub.subtitles.postprocess import postprocess_srt_file
+
+    target = tmp_path / "clip.srt"
+    target.write_text(_srt("short", _WIDE), encoding="utf-8")
+
+    reporter = _Notes()
+    with reporting_to(reporter):
+        postprocess_srt_file(target, profile=0)
+
+    assert [code for code in reporter.codes() if code.startswith("srt-")] == []
+    assert [stage for stage, _ in reporter.summaries] == ["final-srt"]

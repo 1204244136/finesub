@@ -15,11 +15,15 @@ import pytest
 
 from finesub.llm.knowledge.base import KNOWLEDGE_CATEGORIES, load_entry_texts
 from finesub.llm.knowledge.maintain import main as maintain_main
-from finesub.llm.knowledge.node.edit import EditError, edit_subject, harvest_rendered_edits
-from finesub.llm.knowledge.node.model import CATEGORIES, MATCHABLE_CATEGORIES, STANDALONE_CATEGORIES
 from finesub.llm.knowledge.entries import EntrySelection, pin_style_entries
+from finesub.llm.knowledge.node.edit import EditError, edit_subject, harvest_rendered_edits
 from finesub.llm.knowledge.node.envelope import Binding
-from finesub.llm.knowledge.node.presets import preset_for_category
+from finesub.llm.knowledge.node.presets import (
+    CATEGORIES,
+    MATCHABLE_CATEGORIES,
+    STANDALONE_CATEGORIES,
+    preset_for_category,
+)
 from finesub.llm.knowledge.node.render import HandleMap, render_subject
 from finesub.llm.knowledge.node.proposals import translate_model_proposals
 from finesub.llm.knowledge.style import (
@@ -631,27 +635,28 @@ def test_one_resolver_answers_both_questions(tmp_path) -> None:
     assert fallback.names == ("配置里的",) and fallback.mode == "read"
 
 
-def test_style_is_on_by_default_but_only_if_the_default_entry_exists(tmp_path) -> None:
-    """Owner 2026-09-02: style is on by default and read-only by default, so a
-    base of house conventions applies without being asked for.
+def test_style_is_on_by_default_and_the_default_is_auto(tmp_path) -> None:
+    """Owner 2026-09-02: style is on by default and read-only by default.
+    Owner 2026-10-01 (auto-style-gaps plan C): nobody naming a style is
+    `auto` -- the model picks; with nothing to pick from, the orchestrator
+    records today's default (`default_style` when it exists, else none)
+    silently (`test_llm_auto_style`).
 
-    A fresh install has no `default_style`, and that must be silence rather
-    than an error — while a name the USER typed and got wrong stays loud."""
+    A name the USER typed and got wrong stays loud."""
 
     missing_config = tmp_path / "missing.toml"
 
-    # nothing in the store yet: the implicit default is dropped
     selection = resolve_style_selection(
         None, None, knowledge_root=tmp_path, config_path=missing_config
     )
-    assert selection.names == () and selection.mode == "read"
+    assert selection.auto and selection.names == () and selection.mode == "read"
 
     _new(tmp_path, "style", DEFAULT_STYLE_NAME)
     KnowledgeRepo.forget(tmp_path)
     selection = resolve_style_selection(
         None, None, knowledge_root=tmp_path, config_path=missing_config
     )
-    assert selection.names == (DEFAULT_STYLE_NAME,)
+    assert selection.auto and selection.names == ()
     assert selection.writable == ()  # read by default: on, but not learning
 
     # an explicitly named style that does not exist is still an error
@@ -706,9 +711,11 @@ def test_a_named_default_style_is_not_silently_dropped(tmp_path) -> None:
     assert from_config.names == (DEFAULT_STYLE_NAME,)
 
 
-def test_efficiency_turns_the_default_off_like_the_knowledge_switch(tmp_path) -> None:
-    """The cheapest shape reads nothing; a default that injects ~600 chars into
-    every window would quietly contradict that. Naming one still works."""
+def test_efficiency_reads_the_style_but_never_writes_it(tmp_path) -> None:
+    """owner 2026-10-01: efficiency injects the style like any difficulty and
+    caps the mode at read, as it caps the knowledge switch. `update` from the
+    config is a standing default for other runs and reads here; asked for on
+    the command line it is refused."""
 
     _new(tmp_path, "style", DEFAULT_STYLE_NAME)
     KnowledgeRepo.forget(tmp_path)
@@ -717,19 +724,30 @@ def test_efficiency_turns_the_default_off_like_the_knowledge_switch(tmp_path) ->
     default_on = resolve_style_selection(
         None, None, knowledge_root=tmp_path, config_path=missing_config
     )
-    assert default_on.names == (DEFAULT_STYLE_NAME,)
+    assert default_on.auto
 
+    # Efficiency does not pick (「已裁定」 7): `auto` that never asks -- the
+    # task's record, else the static default recorded as one (owner
+    # 2026-10-02; the orchestrator side is in `test_llm_auto_style`).
     efficiency = resolve_style_selection(
         None, None, knowledge_root=tmp_path, difficulty="efficiency",
         config_path=missing_config,
     )
-    assert efficiency.mode == "none" and efficiency.names == ()
+    assert (efficiency.mode, efficiency.auto, efficiency.ask) == ("read", True, False)
 
-    asked_for = resolve_style_selection(
-        DEFAULT_STYLE_NAME, "read", knowledge_root=tmp_path, difficulty="efficiency",
-        config_path=missing_config,
+    update_config = tmp_path / "update.toml"
+    update_config.write_text('[llm]\nstyle_mode = "update"\n', encoding="utf-8")
+    from_config = resolve_style_selection(
+        None, None, knowledge_root=tmp_path, difficulty="efficiency",
+        config_path=update_config,
     )
-    assert asked_for.names == (DEFAULT_STYLE_NAME,)  # explicit still wins
+    assert (from_config.mode, from_config.writable) == ("read", ())
+
+    with pytest.raises(StyleSelectionError, match="efficiency"):
+        resolve_style_selection(
+            None, "update", knowledge_root=tmp_path, difficulty="efficiency",
+            config_path=missing_config,
+        )
 
 
 def test_saying_no_style_is_not_the_same_as_saying_nothing(tmp_path) -> None:
@@ -746,20 +764,19 @@ def test_saying_no_style_is_not_the_same_as_saying_nothing(tmp_path) -> None:
     said_nothing = resolve_style_selection(
         None, "read", knowledge_root=tmp_path, config_path=missing_config
     )
-    assert said_nothing.names == (DEFAULT_STYLE_NAME,)
+    assert said_nothing.auto and said_nothing.names == ()
 
     for said_none in ("", (), []):
         selection = resolve_style_selection(
             said_none, "read", knowledge_root=tmp_path, config_path=missing_config
         )
-        assert selection.names == (), said_none
+        assert selection.names == () and not selection.auto, said_none
 
     # the config can say it too
     blank = tmp_path / "blank.toml"
     blank.write_text('[llm]\nstyle = ""\n', encoding="utf-8")
-    assert resolve_style_selection(
-        None, "read", knowledge_root=tmp_path, config_path=blank
-    ).names == ()
+    from_config = resolve_style_selection(None, "read", knowledge_root=tmp_path, config_path=blank)
+    assert from_config.names == () and not from_config.auto
 
 
 def _near_limit_sections(lines: int = 20, *, extra: list[str] | None = None) -> list:
@@ -781,15 +798,14 @@ def _fill_to_budget(repo, subject) -> None:
     edit_subject(repo, subject, _entry_text(_near_limit_sections()))
 
 
-def test_over_budget_an_entry_may_only_shrink(tmp_path) -> None:
-    """The per-section caps bound a line and a section; this bounds the whole
-    entry's injected projection.
+def test_an_oversized_style_is_written_and_cut_on_injection(tmp_path) -> None:
+    """`max_entry_tokens` is an injection cap, not a write rule (owner
+    2026-10-02): a style past it takes more lines, and the prompt block cuts
+    it by lines to the cap, saying what was left out."""
 
-    ⚠ It is monotone, not a plain refusal: fixing an oversized entry is itself
-    a write, so refusing every write would lock it at its worst size and leave
-    the model no move (owner 2026-09-02)."""
-
-    from finesub.llm.knowledge.node.render import entry_prompt_tokens, over_budget_marker
+    from finesub.llm.knowledge.node.render import entry_prompt_tokens
+    from finesub.llm.knowledge.style import render_style_block
+    from finesub.llm.token_budget import HeuristicTokenCounter
 
     _new(tmp_path, "style", "某组")
     repo = _repo(tmp_path)
@@ -798,41 +814,50 @@ def test_over_budget_an_entry_may_only_shrink(tmp_path) -> None:
     assert budget == 6000
 
     _fill_to_budget(repo, subject)
-    used = entry_prompt_tokens(repo.store, subject.local_id)
-    assert used > budget, used
+    assert entry_prompt_tokens(repo.store, subject.local_id) > budget
+    # growing it is no longer refused (it used to be: "只能改短")
+    longer = _near_limit_sections()
+    longer[2][1][-1] += "多"  # a 反例 line, still within its section's 200 chars
+    assert edit_subject(repo, subject, _entry_text(longer)).changed
 
-    # the entry says so where the update/repair task reads it
-    marker = over_budget_marker(repo.store, subject.local_id, "style")
-    assert "只能压缩" in marker and str(budget) in marker
-
-    # adding is refused...
-    with pytest.raises(EditError, match="超注入预算"):
-        edit_subject(repo, subject, _entry_text(
-            _near_limit_sections(extra=["[再来一条] 短的"])
-        ))
-    # ...and so is making a line longer
-    with pytest.raises(EditError, match="只能改短"):
-        longer = _near_limit_sections()
-        longer[0][1][0] += "再多一个字"
-        edit_subject(repo, subject, _entry_text(longer))
-
-    # compressing is the way out, and it works
-    report = edit_subject(repo, subject, _entry_text([
-        ("约定", [f"[规则{i:02d}] 短的" for i in range(20)]),
-    ]))
-    assert report.changed
-    assert entry_prompt_tokens(repo.store, subject.local_id) <= budget
-    assert over_budget_marker(repo.store, subject.local_id, "style") == ""
+    block = render_style_block(tmp_path, ["某字幕组"])  # the edit renamed it
+    body = block.split("<style", 1)[1].split("</style>", 1)[0]
+    assert HeuristicTokenCounter().count_text(body) <= budget
+    assert "## 约定" in body  # cut by lines, from the tail: the conventions stay
+    assert "未完整注入" in block and "反例" in block.split("</style>", 1)[1]
 
 
-def test_a_category_without_a_budget_is_unbounded(tmp_path) -> None:
-    """Only `style` declares one; the proper-noun entries grow with their
-    subject and must not inherit a cap nobody set for them."""
+def test_every_category_caps_injection_alike() -> None:
+    for category in ("common", "streamer", "style"):
+        assert preset_for_category(category).max_entry_tokens == 6000
 
-    from finesub.llm.knowledge.node.render import over_budget_marker
 
-    _new(tmp_path, "common", "某游戏", intro="一个游戏")
-    repo = _repo(tmp_path)
-    subject = repo.subjects("common")[0]
-    assert preset_for_category("common").max_entry_tokens is None
-    assert over_budget_marker(repo.store, subject.local_id, "common") == ""
+def test_efficiency_does_not_pick_a_style(tmp_path) -> None:
+    """auto-style-gaps plan 「已裁定」 7: efficiency is the cheapest form. A
+    configured `style = "auto"` (a standing default for other runs) is the old
+    default there; an explicit `--style auto` is refused, the same shape as its
+    cap on `--style-mode`."""
+
+    _new(tmp_path, "style", DEFAULT_STYLE_NAME)
+    KnowledgeRepo.forget(tmp_path)
+    auto_config = tmp_path / "auto.toml"
+    auto_config.write_text('[llm]\nstyle = "auto"\n', encoding="utf-8")
+
+    configured = resolve_style_selection(
+        None, None, knowledge_root=tmp_path, difficulty="efficiency", config_path=auto_config
+    )
+    assert configured.auto and not configured.ask and configured.names == ()
+    elsewhere = resolve_style_selection(None, None, knowledge_root=tmp_path, config_path=auto_config)
+    assert elsewhere.auto and elsewhere.ask
+
+    with pytest.raises(StyleSelectionError, match="efficiency"):
+        resolve_style_selection(
+            "auto", None, knowledge_root=tmp_path, difficulty="efficiency",
+            config_path=tmp_path / "missing.toml",
+        )
+    # A named style is unaffected.
+    named = resolve_style_selection(
+        DEFAULT_STYLE_NAME, None, knowledge_root=tmp_path, difficulty="efficiency",
+        config_path=tmp_path / "missing.toml",
+    )
+    assert named.names == (DEFAULT_STYLE_NAME,)

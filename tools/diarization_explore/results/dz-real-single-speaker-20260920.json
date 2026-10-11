@@ -1,0 +1,410 @@
+{
+ "single": [
+  {
+   "file": "kaguya60",
+   "people": 1,
+   "seconds": 118.7,
+   "tracks": 6,
+   "shares": [
+    0.347,
+    0.226,
+    0.21,
+    0.168,
+    0.047,
+    0.002
+   ],
+   "log_bayes": 2575.152334785187,
+   "embeddings": 1859,
+   "per_embedding": 1.385235252708546
+  },
+  {
+   "file": "saki_audio",
+   "people": 1,
+   "seconds": 117.4,
+   "tracks": 5,
+   "shares": [
+    0.821,
+    0.088,
+    0.063,
+    0.016,
+    0.012
+   ],
+   "log_bayes": 520.6356901556101,
+   "embeddings": 1596,
+   "per_embedding": 0.3262128384433647
+  },
+  {
+   "file": "yui",
+   "people": 0,
+   "seconds": 87.8,
+   "tracks": 9,
+   "shares": [
+    0.372,
+    0.296,
+    0.264,
+    0.026,
+    0.016,
+    0.011,
+    0.008,
+    0.005,
+    0.002
+   ],
+   "log_bayes": 7152.2087612450705,
+   "embeddings": 2587,
+   "per_embedding": 2.764672887995775
+  },
+  {
+   "file": "monte_cristo_003",
+   "people": 1,
+   "seconds": 69.0,
+   "tracks": 2,
+   "shares": [
+    0.993,
+    0.007
+   ],
+   "log_bayes": -3.637978807091713e-12,
+   "embeddings": 1200,
+   "per_embedding": -3.031649005909761e-15
+  },
+  {
+   "file": "monte_cristo_005",
+   "people": 1,
+   "seconds": 86.3,
+   "tracks": 1,
+   "shares": [
+    1.0
+   ],
+   "log_bayes": 0.0,
+   "embeddings": 1250,
+   "per_embedding": 0.0
+  },
+  {
+   "file": "monte_cristo_017",
+   "people": 1,
+   "seconds": 118.6,
+   "tracks": 1,
+   "shares": [
+    1.0
+   ],
+   "log_bayes": 0.0,
+   "embeddings": 1888,
+   "per_embedding": 0.0
+  }
+ ],
+ "onetonton": [
+  {
+   "file": "onetonton-01",
+   "people": 3,
+   "clusters": 4,
+   "log_bayes": 6071.093351184012,
+   "embeddings": 2488,
+   "per_embedding": 2.440150060765278
+  },
+  {
+   "file": "onetonton-02",
+   "people": 3,
+   "clusters": 4,
+   "log_bayes": 7312.420771234327,
+   "embeddings": 2720,
+   "per_embedding": 2.688389989424385
+  },
+  {
+   "file": "onetonton-03",
+   "people": 3,
+   "clusters": 4,
+   "log_bayes": 6180.856557029674,
+   "embeddings": 2166,
+   "per_embedding": 2.8535810512602375
+  },
+  {
+   "file": "onetonton-04",
+   "people": 3,
+   "clusters": 4,
+   "log_bayes": 6987.2185485370355,
+   "embeddings": 2581,
+   "per_embedding": 2.7071749510023384
+  },
+  {
+   "file": "onetonton-05",
+   "people": 3,
+   "clusters": 4,
+   "log_bayes": 6628.130141788606,
+   "embeddings": 2473,
+   "per_embedding": 2.680198197245696
+  },
+  {
+   "file": "onetonton-06",
+   "people": 3,
+   "clusters": 4,
+   "log_bayes": 6347.543867543085,
+   "embeddings": 2296,
+   "per_embedding": 2.7646096984072672
+  },
+  {
+   "file": "onetonton-07",
+   "people": 3,
+   "clusters": 4,
+   "log_bayes": 5719.339145714657,
+   "embeddings": 2132,
+   "per_embedding": 2.6826168600913025
+  },
+  {
+   "file": "onetonton-08",
+   "people": 3,
+   "clusters": 5,
+   "log_bayes": 5285.868294460182,
+   "embeddings": 2180,
+   "per_embedding": 2.424710226816597
+  },
+  {
+   "file": "onetonton-09",
+   "people": 3,
+   "clusters": 5,
+   "log_bayes": 7237.768288471605,
+   "embeddings": 2525,
+   "per_embedding": 2.8664428865234077
+  },
+  {
+   "file": "onetonton-10",
+   "people": 3,
+   "clusters": 4,
+   "log_bayes": 7995.747927640645,
+   "embeddings": 2608,
+   "per_embedding": 3.065854266733376
+  },
+  {
+   "file": "onetonton-11",
+   "people": 3,
+   "clusters": 4,
+   "log_bayes": 6228.025781949214,
+   "embeddings": 2181,
+   "per_embedding": 2.8555826602243073
+  },
+  {
+   "file": "onetonton-12",
+   "people": 3,
+   "clusters": 4,
+   "log_bayes": 5943.557543286734,
+   "embeddings": 2223,
+   "per_embedding": 2.673665111689939
+  },
+  {
+   "file": "onetonton-13",
+   "people": 3,
+   "clusters": 4,
+   "log_bayes": 7563.4067683550675,
+   "embeddings": 2561,
+   "per_embedding": 2.953302135242119
+  },
+  {
+   "file": "onetonton-14",
+   "people": 3,
+   "clusters": 4,
+   "log_bayes": 6758.958476492386,
+   "embeddings": 2509,
+   "per_embedding": 2.69388540314563
+  },
+  {
+   "file": "onetonton-15",
+   "people": 3,
+   "clusters": 5,
+   "log_bayes": 6351.173067438453,
+   "embeddings": 2404,
+   "per_embedding": 2.6419189132439485
+  }
+ ],
+ "hina": [
+  {
+   "file": "hina-10",
+   "people": 0,
+   "clusters": 23,
+   "log_bayes": 4416.744526940893,
+   "embeddings": 4088,
+   "per_embedding": 1.0804169586450325
+  },
+  {
+   "file": "hina-11",
+   "people": 0,
+   "clusters": 13,
+   "log_bayes": 7785.517817741726,
+   "embeddings": 2639,
+   "per_embedding": 2.9501772708380924
+  },
+  {
+   "file": "hina-13",
+   "people": 0,
+   "clusters": 8,
+   "log_bayes": 8787.089327821013,
+   "embeddings": 4094,
+   "per_embedding": 2.146333494826823
+  },
+  {
+   "file": "hina-14",
+   "people": 0,
+   "clusters": 9,
+   "log_bayes": 7081.380814954275,
+   "embeddings": 3472,
+   "per_embedding": 2.0395682070720835
+  },
+  {
+   "file": "hina-15",
+   "people": 0,
+   "clusters": 8,
+   "log_bayes": 4946.658928408848,
+   "embeddings": 3165,
+   "per_embedding": 1.562925411819541
+  },
+  {
+   "file": "hina-16",
+   "people": 0,
+   "clusters": 8,
+   "log_bayes": 6100.194585329882,
+   "embeddings": 3646,
+   "per_embedding": 1.6731197436450582
+  },
+  {
+   "file": "hina-17",
+   "people": 0,
+   "clusters": 9,
+   "log_bayes": 4150.96488656968,
+   "embeddings": 2069,
+   "per_embedding": 2.0062662574043886
+  },
+  {
+   "file": "hina-18",
+   "people": 0,
+   "clusters": 10,
+   "log_bayes": 7091.109407263961,
+   "embeddings": 3254,
+   "per_embedding": 2.1791977281081625
+  },
+  {
+   "file": "hina-19",
+   "people": 0,
+   "clusters": 12,
+   "log_bayes": 4478.133706438661,
+   "embeddings": 2648,
+   "per_embedding": 1.6911381066611257
+  },
+  {
+   "file": "hina-20",
+   "people": 0,
+   "clusters": 6,
+   "log_bayes": 6004.9631844345495,
+   "embeddings": 2230,
+   "per_embedding": 2.692808602885448
+  },
+  {
+   "file": "hina-21",
+   "people": 0,
+   "clusters": 17,
+   "log_bayes": 5290.9468138087905,
+   "embeddings": 2598,
+   "per_embedding": 2.036546117709311
+  },
+  {
+   "file": "hina-22",
+   "people": 0,
+   "clusters": 10,
+   "log_bayes": 6110.225443777512,
+   "embeddings": 2889,
+   "per_embedding": 2.1149966922040537
+  },
+  {
+   "file": "hina-23",
+   "people": 0,
+   "clusters": 10,
+   "log_bayes": 5687.951491715219,
+   "embeddings": 2559,
+   "per_embedding": 2.2227243031321686
+  },
+  {
+   "file": "hina-24",
+   "people": 0,
+   "clusters": 6,
+   "log_bayes": 6072.556366301236,
+   "embeddings": 3035,
+   "per_embedding": 2.0008422953216596
+  },
+  {
+   "file": "hina-25",
+   "people": 0,
+   "clusters": 6,
+   "log_bayes": 5626.305243835872,
+   "embeddings": 2430,
+   "per_embedding": 2.315351952195832
+  },
+  {
+   "file": "hina-26",
+   "people": 0,
+   "clusters": 13,
+   "log_bayes": 6479.54588797169,
+   "embeddings": 4014,
+   "per_embedding": 1.614236643739833
+  },
+  {
+   "file": "hina-27",
+   "people": 0,
+   "clusters": 5,
+   "log_bayes": 4637.46081145302,
+   "embeddings": 2491,
+   "per_embedding": 1.8616863956053875
+  },
+  {
+   "file": "hina-28",
+   "people": 0,
+   "clusters": 8,
+   "log_bayes": 6535.080391605814,
+   "embeddings": 3086,
+   "per_embedding": 2.1176540478307886
+  },
+  {
+   "file": "hina-29",
+   "people": 0,
+   "clusters": 9,
+   "log_bayes": 5800.236190386364,
+   "embeddings": 2771,
+   "per_embedding": 2.0931924180391066
+  },
+  {
+   "file": "hina-30",
+   "people": 0,
+   "clusters": 7,
+   "log_bayes": 7620.990108316277,
+   "embeddings": 3768,
+   "per_embedding": 2.0225557612304343
+  },
+  {
+   "file": "hina-31",
+   "people": 0,
+   "clusters": 7,
+   "log_bayes": 7683.58826661561,
+   "embeddings": 4489,
+   "per_embedding": 1.7116480879072422
+  },
+  {
+   "file": "hina-32",
+   "people": 0,
+   "clusters": 7,
+   "log_bayes": 3785.2864643145367,
+   "embeddings": 1946,
+   "per_embedding": 1.9451626229776653
+  },
+  {
+   "file": "hina-33",
+   "people": 0,
+   "clusters": 7,
+   "log_bayes": 6004.769131079047,
+   "embeddings": 3076,
+   "per_embedding": 1.9521356082831751
+  },
+  {
+   "file": "hina-34",
+   "people": 0,
+   "clusters": 7,
+   "log_bayes": 8719.388512537116,
+   "embeddings": 4481,
+   "per_embedding": 1.9458577354468012
+  }
+ ]
+}

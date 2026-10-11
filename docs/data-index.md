@@ -16,6 +16,7 @@
 | **本地素材、产物、基线的逐条清单**（含怎么重建） | **`data/index.md`**（本地，不进 git） |
 | 原始媒体逐条清单 | `assets/index.md`（本地） |
 | 人工精修字幕对照组：清单、口径、读数 | `data/manually-refined-subs/<系列>/` 各自的 `README.md` / `analysis.md`（本地）；判读规则见 [`knowledge.md`](knowledge.md)「精修字幕怎么读」 |
+| **带说话人标注的多人精修轴** | `data/refined-multi/<系列>/`（本地）——ASS 的**样式名就是逐行说话人**；解析与结构测量 `tools/diarization_explore/refined_ass.py`，读数与限制在 [`diarization-findings.md`](diarization-findings.md) 11.3 |
 | 跟踪的标注数据的规范与打分口径 | 各自 `tools/*/README.md` 与下方第一节点名的文档 |
 
 **`data/` 与 `out/`、`tmp/` 的区别**：后两者是产物目录，随时可能被整目录删掉重跑；
@@ -62,7 +63,7 @@
 它们**没跑过 `split_segments`**（`metadata.asr_align` 无 `segment_split` 键）——这对
 分割研究反而是优点（段起点即接缝本体，`bench-baselines.md` 19.7 靠的就是这点），
 但没有 `whisper_segment_start` 词标记、没有 `qwen_verify` 证据、没有电平档位标记。
-**要量今天的管线行为，用当前管线基线（`data/index.md` 第二节），不要用这批。**
+**要量今天的管线行为，用当前管线基线（本地 `data/index.md`「二、当前管线基线」），不要用这批。**
 
 ### 异常 group 语料 · `tools/wt_refine_validation/manifest.json`
 
@@ -90,7 +91,7 @@
 | --- | --- | --- |
 | GPU 档位显存标定（复测口径为 entry/standard/high 三档） | [`gpu-profiles.md`](gpu-profiles.md) | 换卡必须重测（机器特性）；5070 Ti 复测记于 2026-09-01 一节。后加的 `standard_large_vram` 与 `cpu` 不需要各自标定，理由在该文开头 |
 | BS-Roformer 推理效率 E0–E16（AMP / 编译路径 / worker 阶梯 / torch 2.11 迁移 / roofline / demix runner） | [`separator-optimization.md`](separator-optimization.md) | 产物已删，**素材与工具可重建**——见下。**分三段读**：E0–E10 取自 torch 2.9.0；E11–E13 在生产钉版 2.11.0 上，仍是 RTX 5060 Ti；**E14 起换机（RTX 5070 Ti），绝对时间不可跨段比较** |
-| 块产物固定 FLAC 的四 run 对照、以及交付形态（16k 单声道 / 档位）的取舍实测（2026-08-18） | [`separator-optimization.md`](separator-optimization.md)「块产物固定为 FLAC」 | 素材可再生，命令见 `data/index.md` 第四节；四 run 共约 1 分钟 |
+| 块产物固定 FLAC 的四 run 对照、以及交付形态（16k 单声道 / 档位）的取舍实测（2026-08-18） | [`separator-optimization.md`](separator-optimization.md)「块产物固定为 FLAC」 | 素材可再生，命令见 本地 `data/index.md`「四、已清理的实验产物与怎么重建」；四 run 共约 1 分钟 |
 | WT 分片并发曲线、损失分解 | [`wt-parallelism.md`](wt-parallelism.md) | **实现已删**，只作历史 |
 | fw-refine vs wt 迁移验收（5 素材 / 50.6 分钟） | [`wt-refine-port.md`](wt-refine-port.md) | 产物在 `out/acceptance/`，可复核 |
 | batch size × 模型 × beam 的成本矩阵 | [`wt-refine-port.md`](wt-refine-port.md) | 需重跑；口径见文中「口径边界」 |
@@ -98,7 +99,7 @@
 | large-v3 vs turbo 异常率（310 窗口） | [`wt-refine-port.md`](wt-refine-port.md) | 需重跑；**未记 per-window 配对**，做不了配对检验 |
 | 人声分离占语音段 72% | [`wt-refine-port.md`](wt-refine-port.md) | 单素材单次，被游戏负载影响过——绝对值不可信，比例可参考 |
 | 救援阶梯取舍（2h12m 素材） | [`asr-align.md`](asr-align.md) | 需重跑 |
-| 语言票翻转重解：根因实验、采纳判据三例、referee 常驻显存与开销（2026-08-19） | [`asr-align.md`](asr-align.md)「语言票翻转重解」 | 输入是 `out/reference/` 的 8 份产物（仍在，清单在本地 `data/index.md` 第三节），**实验脚本未存档**；相似度绝对值须用实现内置的 `SequenceMatcher.ratio` 重测。**一个真外语负例都没有**——标定所需的素材清单在该节「待标定」。方案原稿与逐轮编年在本地 `archive/speech-quality-plan.md` |
+| 语言票翻转重解：根因实验、采纳判据三例、referee 常驻显存与开销（2026-08-19） | [`asr-align.md`](asr-align.md)「语言票翻转重解」 | 输入是 `out/reference/` 的 8 份产物（仍在，清单在本地 `data/index.md`「三、未跟踪的本地素材」），**实验脚本未存档**；相似度绝对值须用实现内置的 `SequenceMatcher.ratio` 重测。**一个真外语负例都没有**——标定所需的素材清单在该节「待标定」。方案原稿与逐轮编年在本地归档（`docs/archive/`，不随公开快照发布） |
 | 精修合并软门槛标定 | [`merge-calibration.md`](merge-calibration.md) | 需重跑 |
 
 

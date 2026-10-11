@@ -5,11 +5,7 @@ from __future__ import annotations
 from typing import Callable, Mapping, Protocol
 
 from .sessions.correction import CorrectionSessionAdapter
-from .sessions.fast_round import FastRound1SessionAdapter
-from .sessions.query import QuerySessionAdapter
-from .sessions.research import ResearchR1SessionAdapter, ResearchR2SessionAdapter
-from .sessions.research_tools import ResearchR2AgentSearchAdapter
-from .sessions.search_judge import SearchJudgeSessionAdapter
+from .sessions.task_flow import PrepareTaskSessionAdapter, WindowRequestSessionAdapter
 
 
 class SessionAdapter(Protocol):
@@ -26,12 +22,8 @@ class SessionAdapter(Protocol):
 
 SESSIONS: dict[str, Callable[[], SessionAdapter]] = {
     "correction": CorrectionSessionAdapter,
-    "query": QuerySessionAdapter,
-    "research-r1": ResearchR1SessionAdapter,
-    "research-r2": ResearchR2SessionAdapter,
-    "research-r2-tools": ResearchR2AgentSearchAdapter,
-    "search-judge": SearchJudgeSessionAdapter,
-    "fast-round1": FastRound1SessionAdapter,
+    "prepare-task": PrepareTaskSessionAdapter,
+    "correction-request": WindowRequestSessionAdapter,
 }
 
 
@@ -46,11 +38,7 @@ def get_session(name: str) -> SessionAdapter:
 
 def list_sessions() -> Mapping[str, str]:
     return {
-        "correction": "纠错窗口 R2（复用冻结的 R1 search/extract 等注入）",
-        "query": "每窗查询轮（search queries / window notes / entry requests）",
-        "research-r1": "背景调查 R1（queries / notes / 词条请求）",
-        "research-r2": "背景调查 R2（background context 组装）",
-        "research-r2-tools": "背景调查 R2：模型自选 query，harness 执行 Exa 检索/抓取（有台账）",
-        "search-judge": "搜索循环 judge 轮（停机 / 消化 / 词条决策）",
-        "fast-round1": "fast 模式合一轮（query + research 融合）",
+        "correction": "纠错窗口的交付轮（复用冻结的 search/extract 等注入）",
+        "prepare-task": "准备任务的首条消息（请求批或直接交付；--agentic 看工具会话形态）",
+        "correction-request": "纠错窗口的首条消息（retrieval=local 带请求通道；--agentic 看工具会话形态）",
     }

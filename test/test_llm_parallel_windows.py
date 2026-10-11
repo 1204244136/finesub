@@ -285,7 +285,9 @@ def test_parallel_resume_keeps_the_first_runs_entry_set(tmp_path, monkeypatch) -
     session entry set, not recompute a shrunken one from the pending windows."""
 
     art = tmp_path / "artifacts"
-    setattr_correction(monkeypatch, "load_index_text", lambda root, kind: "idx")
+    setattr_correction(
+        monkeypatch, "load_index_texts", lambda root: {"streamer": "idx", "common": "idx"}
+    )
     setattr_correction(
         monkeypatch,
         "load_entry_texts",

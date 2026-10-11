@@ -1,0 +1,10 @@
+{
+ "turn_rows": 575,
+ "found": 43,
+ "overlap_rows": 686,
+ "overlap_called": 7,
+ "plain_rows": 3311,
+ "plain_called": 37,
+ "cut_error_median": 0.2599999999999818,
+ "cut_error_p90": 1.0560000000001004
+}

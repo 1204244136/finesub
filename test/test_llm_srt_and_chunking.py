@@ -451,7 +451,6 @@ def test_research_audit_separates_unset_cap_from_disabled_cap(tmp_path) -> None:
     common = dict(
         stable_json=stable,
         extra_info="",
-        search_rounds=0,
         collect_task_feedback=False,
         audio_duration=1200.0,
     )
@@ -563,9 +562,26 @@ def test_srt_validation_uses_weighted_display_length() -> None:
     latin = "1\n00:00:00,000 --> 00:00:01,000\n" + "a" * 30 + "\n"
     cjk = "1\n00:00:00,000 --> 00:00:01,000\n" + "中" * 17 + "\n"
 
-    assert not validate_srt_text(latin, max_line_chars=16).warnings
-    result = validate_srt_text(cjk, max_line_chars=16)
-    assert any(
-        "17 weighted characters; limit is 16" in warning
-        for warning in result.warnings
-    )
+    assert not validate_srt_text(latin, max_line_chars=16).over_budget
+    assert validate_srt_text(cjk, max_line_chars=16).over_budget == [(1, 17.0)]
+
+
+def test_a_segment_with_two_long_lines_is_one_entry_at_its_longest_line() -> None:
+    two = "1\n00:00:00,000 --> 00:00:01,000\n" + "中" * 30 + "\n" + "中" * 40 + "\n"
+
+    assert validate_srt_text(two).over_budget == [(1, 40.0)]
+
+
+def test_over_budget_segments_are_banded_and_empty_bands_dropped() -> None:
+    from finesub.subtitles.model import over_budget_buckets
+
+    found = [(3, 25.5), (7, 30.0), (9, 30.5), (12, 45.0), (15, 45.5), (20, 60.0)]
+
+    assert over_budget_buckets(found) == [
+        ("26-30", [3, 7]),
+        ("31-35", [9]),
+        ("41-45", [12]),
+        ("46+", [15, 20]),
+    ]
+    assert over_budget_buckets([]) == []
+    assert over_budget_buckets(found, above=35) == [("41-45", [12]), ("46+", [15, 20])]

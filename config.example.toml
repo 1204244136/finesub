@@ -16,8 +16,9 @@ tavily = true
 # "direct"=强制直连并忽略环境变量。下载不受它影响,见 docs/manual/model-routing.md。
 # proxy = "http://127.0.0.1:7890"
 # 本机 agent（Codex / Claude Code / Antigravity）怎么用：**换预设，不是换档位**。
-# 出厂只有 agy / agy-hybrid 两个预设把 agent 排进了模型组，见 docs/manual/agent.md：
+# 出厂只有 agy / agy-hybrid / agy-fast 三个预设把 agent 排进了模型组，见 docs/manual/agent.md：
 # preset = "agy-hybrid"   # 免费 API 打头、agy 兜底；想只走订阅就写 "agy"
+# 很长的输入只想粗纠一遍：fast / agy-fast，通常按次用命令行 --llm-preset 选，不写进这里
 #
 # execution_policy 是一道闸门，只能往外拦、不能往里加，所以光设它不会让 agent 跑起来：
 #   agent-text-preferred (默认)  谁都不拦，顺序完全由预设绑的模型组决定
@@ -32,15 +33,27 @@ execution_policy = "agent-text-preferred"
 # docs/manual/agent.md 分两步跑。
 local_agent_timeout_seconds = 1680
 # 留空/省略时按任务格子的抽象 thinking，经每个 agent 模型的 catalog 映射发出
-# （Codex 走 model_reasoning_effort，Claude Code 走 --effort）。
-# 仅在需要全局压过模型映射时启用：low / medium / high / xhigh。
+# （Codex 走 model_reasoning_effort，Claude Code 与 agy 走 --effort）。
+# 仅在需要全局压过模型映射时启用：low / medium / high / xhigh（agy 没有 xhigh，按 high 发）。
 # 压不过 catalog 里 thinking = false 的行——那不是"用默认档"，是"这个模型不收
-# 这个参数"（例如 agy 的 Claude 系列把档位烘进了模型名），硬塞会被 CLI 拒绝发车。
+# 这个参数"，硬塞会被 CLI 拒绝发车。agy 例外：它的每个模型都收这个参数，所以对 agy 的各行都照发。
 # local_agent_reasoning_effort = "high"
 # Old Codex CLIs that cannot ignore user config/rules are rejected by default.
 local_agent_allow_unisolated_user_config = false
 # Compatibility override for old CLIs whose user config has an unsupported tier.
 # local_agent_service_tier = "fast"
+# 同时运行的 agent CLI 进程上限（整机一个数，下限 1，默认 4）；要不低于批量的
+# --max-parallel-tasks，见 docs/manual/agent.md。
+# local_agent_max_parallel = 4
+#
+# 翻译风格（知识库 style 条目）：默认用哪一套、怎么用。见 docs/manual/knowledge.md。
+# style = "某字幕组"
+# style_mode = "read"   # none 不用 / read 只用 / update 还让它学
+#
+# 纠错窗口的两档重试（命令行指定值优先）：一条会话内的修复次数，
+# 用尽后换全新会话的次数。见 docs/manual/tuning.md。
+# max_retries_per_window = 5
+# max_replacements_per_window = 1
 
 # --- 自定义模型与预设（model routing v2 §10；全部可选） ----------------------
 # 分工（2026-08-12）：**模型事实进 catalog，编排进本文件**。
@@ -54,7 +67,7 @@ local_agent_allow_unisolated_user_config = false
 # 覆盖用的 catalog 只需写你要说的那几列（表头声明列，留空取默认值）：
 #
 #   fact_id|provider_tier|provider_kind|base_url|api_model_id|max_input_tokens
-#   ds-flash|deepseek|openai_compat|https://api.deepseek.com|deepseek-v4-flash|128000
+#   ds-flash|deepseek|openai_compat|https://api.deepseek.com|deepseek-flash|128000
 #
 # 必填只有 fact_id / provider_tier / api_model_id / max_input_tokens——窗口按
 # max_input_tokens 切，填错每一窗都炸，所以它没有乐观默认；其余留空即取默认
@@ -70,13 +83,13 @@ local_agent_allow_unisolated_user_config = false
 # 与 catalog 按 fact_id 覆盖同一套规则；每次覆盖启动时会打印一行提示，
 # 看到不认识的名字就是 id 拼错了。
 #
-# 预设把 7 个任务组 × 3 档 difficulty 的格子绑到模型组；不写 [llm].preset 时
+# 预设把 4 个任务组 × 3 档 difficulty 的格子绑到模型组；不写 [llm].preset 时
 # 用随包发布的 default 预设。没绑的 intermediate/efficiency 格先在你的预设内向
 # 更高一档回落（difficulty 只换 prompt 不换模型）；某任务组一格都没绑才整组回落
 # 到 default 预设。一切都是命名表（没有 [[数组表]]），设置面板写入器可继续编辑。
 #
 # 自定义 endpoint 第一版只做纯文本（媒体仍 Gemini 独占）：把纯文本强模型用在
-# 有音视频素材上的方式是 --correction-media text（查询轮继续吃剪辑）。
+# 有音视频素材上的方式是 --media text（纠错窗是唯一读媒体的任务）。
 # 注意：retrieval=native 需要绑定的组里有能联网的成员。出厂由付费 3.8 / 3.7 Flash 接地；
 # 免费 3.x 完全不能联网，纯免费档跑 native 会在启动校验处报错——要么开付费档，要么
 # 显式绑定打包的 gemini-native-search 组（含免费 2.5 Flash，但它低于纠错/知识下限）。
@@ -95,7 +108,7 @@ local_agent_allow_unisolated_user_config = false
 #                                   # 名，自动包成单成员组（内部叫
 #                                   # target:<名字>）。同名时模型组优先。
 #                                   # 用 Codex/Claude Code 也走这条：
-#                                   # local-codex-completion-gpt-5_6-luna 等
+#                                   # local-codex-completion-gpt-6-luna 等
 # "knowledge/quality" = "my-corr"      # 注意：第三方模型进 knowledge 组时，
 #                                   # 其产物 provenance 不可审计，不得作为
 #                                   # 知识库更新的唯一证据来源
@@ -163,7 +176,36 @@ max_window_subtitle_tokens = 10000
 # Left commented on purpose, same as [segmentation] above.
 # enabled = false
 
+[postprocess]
+# The timeline pass on the rendered SRT (the raw export and the final file).
+# end_extend_seconds: push every subtitle end later by this much, never past the
+# next subtitle's start or the audio end. flash_gap_seconds: then close gaps
+# shorter than this to the next start. Both >= 0, default 0.3. Takes effect at
+# rendering: delete *-raw.srt (re-rendered from *-stable.json) and/or the final
+# <name>.srt (re-rendered from *-translated.srt, translation kept).
+#
+# Left commented on purpose, same as [segmentation] above.
+# end_extend_seconds = 0.5
+# flash_gap_seconds = 0.3
+
+[share]
+# 共享知识库的地址。不写就用内置的共享库；命令行 --remote 优先。
+# 见 docs/manual/knowledge.md「和别人共用一个知识库」。
+# remote = "https://你的地址"
+# 你自己那个库的维护者给的公钥：拉那个库时只认这把钥匙签的快照。不写就记住第一次拉到的签名钥匙。
+# 内置的共享库不受它影响，始终用随程序发布的公钥。
+# 见 docs/manual/share-server.md「签名密钥」。
+# signing_key = "<公钥>"
+
 [cli]
 # 命令跑完后,若 PyPI 上有更新的正式版就在 stderr 提醒一行(不自动升级)。
 # 每天最多查一次,失败静默,装完第一次运行不提醒。等价开关:FINESUB_NO_UPDATE_CHECK=1。
 # update_check = false
+
+[runtime]
+# 什么时候把运行环境和依赖锁逐个文件对照:auto(新装或升级后、成功跑完一次之前每次都查,失败后也查)
+# / on(每次转写前)/ off(不自动查)。见 docs/manual/resources.md「运行环境的核对与重建」。
+# integrity_check = "auto"
+# 对不上时是否自动按锁重建。自己往运行环境里装了东西、不想被去掉时设 false;
+# 需要额外的包更好的办法是环境变量 FINESUB_EXTRA_PYTHONPATH。
+# auto_repair = true

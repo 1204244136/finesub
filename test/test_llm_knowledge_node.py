@@ -255,7 +255,10 @@ def test_presets_load() -> None:
         "本名", "别名", "人设", "外观",
     ]
     common = preset_for_category("common")
-    assert not common.strict_sections and common.section("任意分类").body_kinds == ("term",)
+    # 自由节收两种行体（owner 2026-09-07）：术语行装需要独立匹配/定名的专名，
+    # 自由句装帮助翻译但不值得独立成词的简短事实。
+    assert not common.strict_sections
+    assert common.section("任意分类").body_kinds == ("term", "note")
     with pytest.raises(ValueError):
         preset_for_category("translation")
     # the frozen v1 preset is a separate file and keeps the old shape
@@ -280,7 +283,11 @@ def test_preset_loader_rejects_instead_of_coercing() -> None:
     from finesub.llm.knowledge.node.presets import PresetError, parse_preset
 
     base = {
-        "name": "x", "version": 2,
+        # `blurb` and `matchable` carry no default on the version-2 path: a
+        # category that cannot describe itself, or that lands on the matching
+        # surface because someone forgot a line, is the expensive direction.
+        "name": "x", "version": 2, "blurb": "测试用", "matchable": True,
+        "index_header": "# x 索引",
         "sections": [{"name": "档案", "body_kinds": ["note"],
                       "labels": [{"name": "本名", "core": True, "note": "n"}]}],
     }

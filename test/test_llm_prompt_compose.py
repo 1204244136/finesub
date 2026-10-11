@@ -7,14 +7,11 @@ from finesub.llm.routing.config import CapabilityTier
 from finesub.llm.routing.profiles import resolve_profile
 from finesub.llm.prompt_compose import (
     PROMPT_VERSION,
-    compose_correction_query_system,
     compose_correction_system,
     compose_correction_user,
-    compose_fast_round1_system,
     compose_repair_turns,
     load_prompt_template,
 )
-from finesub.llm.prompts import build_fast_round1_messages
 
 
 class FakeTokenCounter:
@@ -38,8 +35,8 @@ def _window():
     return plan_correction_windows(segments, counter=FakeTokenCounter())[0]
 
 
-def test_prompt_version_bumped_to_v82() -> None:
-    assert PROMPT_VERSION == "zh-subtitle-correction-csv-v82"
+def test_prompt_version_bumped_to_v88() -> None:
+    assert PROMPT_VERSION == "zh-subtitle-correction-csv-v93"
 
 
 def test_variant_default_matches_tier_and_unknown_raises() -> None:
@@ -355,16 +352,6 @@ def test_mm_high_adds_video_addendum() -> None:
     assert "原始音频" in system
 
 
-def test_evidence_pack_mode_swaps_usage_fragment() -> None:
-    normal = compose_correction_system(resolve_profile("audio", "local", "quality"))
-    evidence = compose_correction_system(
-        resolve_profile("audio", "local", "quality"), evidence_pack_mode=True
-    )
-
-    assert normal != evidence
-    assert "Evidence Pack" in evidence
-
-
 def test_correction_user_reminders_follow_modality() -> None:
     kwargs = dict(
         general_context_json="{}",
@@ -391,110 +378,21 @@ def test_correction_user_reminders_follow_modality() -> None:
     assert "共有 **17 条输入字幕**" in text_user
 
 
-def test_query_round_system_text_variant_drops_audio() -> None:
-    audio = compose_correction_query_system(
-        resolve_profile("audio", "local", "quality"), search_queries_rules="RULES"
-    )
-    text = compose_correction_query_system(
-        resolve_profile("text", "local", "quality"), search_queries_rules="RULES"
-    )
-
-    assert "原始音频剪辑" in audio
-    assert "结合音频听清" in audio
-    assert "原始音频剪辑" not in text
-    assert "本次任务没有音频" in text
-    assert "发音相似度" in text
-    assert "RULES" in text
-
-
-def test_fast_round1_system_variants_and_messages() -> None:
-    audio = compose_fast_round1_system(
-        resolve_profile("audio", "local", "quality"), search_queries_rules="RULES"
-    )
-    video = compose_fast_round1_system(
-        resolve_profile("video", "local", "quality"), search_queries_rules="RULES"
-    )
-    text = compose_fast_round1_system(
-        resolve_profile("text", "local", "quality"), search_queries_rules="RULES"
-    )
-
-    assert "快速模式" in audio
-    assert "整段原始音频的剪辑" in audio
-    assert "视频画面" in video
-    assert "整段原始音频" not in text
-    assert "<analysis_notes>" in audio
-    assert "<requested_entries>" in audio
-    assert "单独上限为 8 条" in audio
-    assert "共享 12 条总上限" in audio
-    assert "keep 优先于 requested" in audio
-    assert "2000 token" in audio
-
-    messages = build_fast_round1_messages(
-        window=_window(),
-        audio_file_label="clip 0001",
-        extra_info="来源：https://example.test",
-        streamer_index="- 主播A | 别名 | 简介",
-        common_index="- 游戏B [游戏] | Game B | 简介",
-        max_search_queries=8,
-        use_search_contract=True,
-        profile=resolve_profile("audio", "local", "quality"),
-    )
-    system = messages[0]["content"]
-    user = messages[1]["content"]
-    assert "<research_contract>" in system
-    assert "主播A" in user
-    assert "游戏B" in user
-    assert "<asr_result>" in user
-    assert "https://example.test" in user
-    assert '"current_asr_csv"' not in user
-    assert "\\n" not in user.split("<asr_result>", 1)[1].split("</asr_result>", 1)[0]
-
-
 def test_user_prompts_end_with_task_recap() -> None:
     """Every user template restates the task goal after the bulk input (plan A
     recap): the last paragraph must carry the 最后提醒 marker."""
 
-    from finesub.llm.chunking import SubtitleWindow
-    from finesub.llm.prompts import (
-        build_correction_csv_messages,
-        build_correction_query_messages,
-        build_research_round1_messages,
-        build_research_round2_messages,
-        build_search_loop_messages,
-    )
+    from finesub.llm.prepare_prompts import build_prepare_task_messages
+    from finesub.llm.prompts import build_correction_csv_messages
 
     window = _window()
     user_texts = {
         "correction": build_correction_csv_messages(window=window)[1]["content"],
-        "query": build_correction_query_messages(window=window)[1]["content"],
-        "research1": build_research_round1_messages(transcript="1|你好\n")[1]["content"],
-        "research2": build_research_round2_messages(transcript="1|你好\n")[1]["content"],
-        "loop": build_search_loop_messages(
-            round_index=0, max_rounds=2, is_final_round=False
-        )[1]["content"],
-        "fast1": build_fast_round1_messages(window=window)[1]["content"],
+        "prepare": build_prepare_task_messages(transcript="1|你好\n")[1]["content"],
     }
     for name, text in user_texts.items():
         tail = text.strip()[-800:]
         assert "最后提醒" in tail, name
-
-
-def test_query_round_prompts_expose_indices_and_entry_requests() -> None:
-    from finesub.llm.prompts import build_correction_query_messages
-
-    messages = build_correction_query_messages(
-        window=_window(),
-        streamer_index="- 主播A | エーちゃん | 测试",
-        common_index="- 游戏B [游戏] | B游 | 测试",
-        profile=resolve_profile("audio", "local", "quality"),
-    )
-    system = messages[0]["content"]
-    user = messages[1]["content"]
-
-    assert "<requested_entries>" in system
-    assert "上限 8 条" in system
-    assert "主播A | エーちゃん" in user
-    assert "游戏B [游戏]" in user
 
 
 def test_reasoning_clause_is_neutral_across_the_switches() -> None:
@@ -589,9 +487,17 @@ def test_every_shipped_combination_renders_without_leftovers() -> None:
 def test_index_injection_and_entry_requests_share_one_predicate() -> None:
     """No index to read -> no rules telling the model to read it."""
 
-    from finesub.llm.prompts import build_correction_query_messages
+    from finesub.llm.request_prompts import build_window_task_messages
     from finesub.llm.chunking import SubtitleSegment, SubtitleWindow
     from finesub.llm.token_budget import CorrectionBudget
+
+    def opening(**kwargs):
+        return build_window_task_messages(
+            request_channel=True,
+            window=window,
+            profile=resolve_profile("text", "local", "quality"),
+            **kwargs,
+        )
 
     window = SubtitleWindow(
         chunk_id="0001",
@@ -608,27 +514,16 @@ def test_index_injection_and_entry_requests_share_one_predicate() -> None:
         clip_end=10.0,
     )
 
-    with_kb = build_correction_query_messages(
-        window=window, streamer_index="# 甲\n", common_index="# 乙\n"
-    )[0]["content"]
+    with_kb = opening(knowledge_indexes={"streamer": "# 甲\n", "common": "# 乙\n"})[0]["content"]
     assert "<requested_entries>" in with_kb
+    assert "<streamer_index>" in with_kb and "<common_index>" in with_kb
 
-    # knowledge off (or an empty knowledge root): the round used to keep the
-    # request rules while facing a "（空）" index.
-    without_kb = build_correction_query_messages(window=window)[0]["content"]
+    # knowledge off (or an empty knowledge root): no request rules, and no
+    # empty index shown to a turn that has no rules for it.
+    without_kb = opening(knowledge_indexes={})[0]["content"]
     assert "<requested_entries>" not in without_kb
-    assert "知识库词条请求规则" not in without_kb
-
-    # The knowledge-owned *input sections* follow the same predicate: no empty
-    # index/carried blocks shown to a round that has no rules for them.
-    user_without_kb = build_correction_query_messages(window=window)[1]["content"]
-    for marker in ("<streamer_index>", "<common_index>", "<carried_entries>", "剩余额度"):
-        assert marker not in user_without_kb, marker
-    user_with_kb = build_correction_query_messages(
-        window=window, streamer_index="# 甲\n", common_index="# 乙\n"
-    )[1]["content"]
-    for marker in ("<streamer_index>", "<common_index>", "<carried_entries>", "剩余额度"):
-        assert marker in user_with_kb, marker
+    for marker in ("<streamer_index>", "<common_index>"):
+        assert marker not in without_kb, marker
 
 
 def test_slot_registry_picks_the_first_matching_rule() -> None:
@@ -655,7 +550,9 @@ def test_slot_registry_picks_the_first_matching_rule() -> None:
     )
 
     assert fragment("keep_entries", ("audio", "local", "quality")) != ""
-    assert fragment("keep_entries", ("text", "none", "quality")) == ""
+    # A readable base gives none/native an entries-only request channel.
+    assert fragment("keep_entries", ("text", "none", "quality")) != ""
+    assert fragment("keep_entries", ("text", "none", "quality"), knowledge_enabled=False) == ""
     assert fragment(
         "keep_entries", ("audio", "local", "quality"), knowledge_enabled=False
     ) == ""

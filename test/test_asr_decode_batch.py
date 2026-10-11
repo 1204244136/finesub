@@ -35,6 +35,22 @@ class TestResolver:
             resources.ASR_DECODE_BATCH_BY_TIER["high"]
         )
 
+    def test_a_given_profile_is_not_resolved_a_second_time(self, monkeypatch) -> None:
+        """The ASR stage already resolved one, and resolving again asked the
+        driver a second time -- without knowing the user had asked for the CPU,
+        which is how `--device cpu` was still told its card sat idle."""
+
+        def fail(*args, **kwargs):
+            raise AssertionError("the tier was resolved a second time")
+
+        monkeypatch.setattr(resources, "get_resource_profile", fail)
+        profile = resources.RESOURCE_PROFILES["high"]
+
+        assert (
+            resources.resolve_asr_decode_batch(None, profile=profile)
+            == profile.asr_decode_batch
+        )
+
     def test_an_explicit_value_beats_the_profile(self) -> None:
         assert resources.resolve_asr_decode_batch(4, gpu_tier="entry") == 4
         assert resources.resolve_asr_decode_batch("8", gpu_tier="entry") == 8

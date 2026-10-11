@@ -572,11 +572,9 @@ def test_window_media_ref_is_the_only_place_the_policy_is_read(
 
     import finesub.llm.client as client_module
     import finesub.llm.media_upload as media_upload
-    from finesub.llm.stages import fast_session
     from finesub.llm.stages.correction import run as correction_run
 
     assert correction_run.window_media_ref is media_upload.window_media_ref
-    assert fast_session.window_media_ref is media_upload.window_media_ref
 
     clip = tmp_path / "window.mp4"
     clip.write_bytes(b"clip")

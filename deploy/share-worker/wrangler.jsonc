@@ -1,0 +1,10 @@
+{
+  "name": "finesub-share",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "durable_objects": {
+    "bindings": [{ "name": "INBOX", "class_name": "ShareInbox" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ShareInbox"] }],
+  "observability": { "enabled": true }
+}

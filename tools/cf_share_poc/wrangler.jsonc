@@ -1,0 +1,10 @@
+{
+  "name": "finesub-share-poc",
+  "main": "src/entry.py",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["python_workers"],
+  "durable_objects": {
+    "bindings": [{ "name": "STORE", "class_name": "StorePoc" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["StorePoc"] }]
+}

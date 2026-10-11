@@ -1,0 +1,1048 @@
+{
+  "rows": [
+    {
+      "episode": 1,
+      "people": 3,
+      "sortformer": {
+        "fixed": 0.9123933753816721,
+        "crossfit": 0.9123933753816721,
+        "f1": 0.7300209511979694,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1392.0,
+          "merges": 266,
+          "labels": 594.0,
+          "abstained": 3
+        },
+        "terms": {
+          "move": 132.0,
+          "delete": 164.0,
+          "add": 260.0,
+          "duplicate": 38.0,
+          "merge": 798.0,
+          "total": 1392.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.910525260510653,
+        "crossfit": 0.910525260510653,
+        "f1": 0.8364155080265638,
+        "naming": {
+          "tracks": 4,
+          "leading": 3,
+          "over_floor": 3,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 3,
+          "3": 3,
+          "10": 3
+        },
+        "cost": {
+          "total": 1356.0,
+          "merges": 267,
+          "labels": 555.0,
+          "abstained": 2
+        },
+        "terms": {
+          "move": 156.0,
+          "delete": 193.0,
+          "add": 206.0,
+          "duplicate": 0.0,
+          "merge": 801.0,
+          "total": 1356.0
+        }
+      }
+    },
+    {
+      "episode": 2,
+      "people": 3,
+      "sortformer": {
+        "fixed": 0.8682258572338971,
+        "crossfit": 0.8682258572338971,
+        "f1": 0.757427713264185,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1894.0,
+          "merges": 359,
+          "labels": 817.0,
+          "abstained": 10
+        },
+        "terms": {
+          "move": 228.0,
+          "delete": 232.0,
+          "add": 314.0,
+          "duplicate": 43.0,
+          "merge": 1077.0,
+          "total": 1894.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9273176231693335,
+        "crossfit": 0.9273176231693335,
+        "f1": 0.8673996518677195,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 3,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 3,
+          "10": 3
+        },
+        "cost": {
+          "total": 1768.0,
+          "merges": 362,
+          "labels": 682.0,
+          "abstained": 6
+        },
+        "terms": {
+          "move": 174.0,
+          "delete": 269.0,
+          "add": 236.0,
+          "duplicate": 3.0,
+          "merge": 1086.0,
+          "total": 1768.0
+        }
+      }
+    },
+    {
+      "episode": 3,
+      "people": 3,
+      "sortformer": {
+        "fixed": 0.9121842969268686,
+        "crossfit": 0.9121842969268686,
+        "f1": 0.7581477780633802,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1124.0,
+          "merges": 215,
+          "labels": 479.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 126.0,
+          "delete": 159.0,
+          "add": 158.0,
+          "duplicate": 36.0,
+          "merge": 645.0,
+          "total": 1124.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9531357337529066,
+        "crossfit": 0.9526900887955156,
+        "f1": 0.9100562883727908,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 3,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 3,
+          "10": 3
+        },
+        "cost": {
+          "total": 1048.0,
+          "merges": 215,
+          "labels": 403.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 92.0,
+          "delete": 175.0,
+          "add": 134.0,
+          "duplicate": 2.0,
+          "merge": 645.0,
+          "total": 1048.0
+        }
+      }
+    },
+    {
+      "episode": 4,
+      "people": 3,
+      "sortformer": {
+        "fixed": 0.799789382593631,
+        "crossfit": 0.799789382593631,
+        "f1": 0.6315982368144261,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1796.0,
+          "merges": 304,
+          "labels": 884.0,
+          "abstained": 3
+        },
+        "terms": {
+          "move": 334.0,
+          "delete": 269.0,
+          "add": 234.0,
+          "duplicate": 47.0,
+          "merge": 912.0,
+          "total": 1796.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9347246490289306,
+        "crossfit": 0.9347246490289306,
+        "f1": 0.8015096619089624,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1538.0,
+          "merges": 304,
+          "labels": 626.0,
+          "abstained": 0
+        },
+        "terms": {
+          "move": 148.0,
+          "delete": 252.0,
+          "add": 200.0,
+          "duplicate": 26.0,
+          "merge": 912.0,
+          "total": 1538.0
+        }
+      }
+    },
+    {
+      "episode": 5,
+      "people": 3,
+      "sortformer": {
+        "fixed": 0.8929003512694926,
+        "crossfit": 0.8929003512694926,
+        "f1": 0.7943131567117914,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1524.0,
+          "merges": 292,
+          "labels": 648.0,
+          "abstained": 6
+        },
+        "terms": {
+          "move": 186.0,
+          "delete": 222.0,
+          "add": 234.0,
+          "duplicate": 6.0,
+          "merge": 876.0,
+          "total": 1524.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9125180432370191,
+        "crossfit": 0.9125180432370191,
+        "f1": 0.840462450895039,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 3,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 3,
+          "10": 3
+        },
+        "cost": {
+          "total": 1432.0,
+          "merges": 293,
+          "labels": 553.0,
+          "abstained": 2
+        },
+        "terms": {
+          "move": 130.0,
+          "delete": 232.0,
+          "add": 190.0,
+          "duplicate": 1.0,
+          "merge": 879.0,
+          "total": 1432.0
+        }
+      }
+    },
+    {
+      "episode": 6,
+      "people": 3,
+      "sortformer": {
+        "fixed": 0.9095060911746875,
+        "crossfit": 0.9095060911746875,
+        "f1": 0.8377512014457422,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1480.0,
+          "merges": 283,
+          "labels": 631.0,
+          "abstained": 3
+        },
+        "terms": {
+          "move": 152.0,
+          "delete": 263.0,
+          "add": 198.0,
+          "duplicate": 18.0,
+          "merge": 849.0,
+          "total": 1480.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9205694283666838,
+        "crossfit": 0.9210297117027731,
+        "f1": 0.8537854154158663,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 3,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 3,
+          "10": 3
+        },
+        "cost": {
+          "total": 1461.0,
+          "merges": 283,
+          "labels": 612.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 160.0,
+          "delete": 276.0,
+          "add": 174.0,
+          "duplicate": 2.0,
+          "merge": 849.0,
+          "total": 1461.0
+        }
+      }
+    },
+    {
+      "episode": 7,
+      "people": 3,
+      "sortformer": {
+        "fixed": 0.8948152605521639,
+        "crossfit": 0.8948152605521639,
+        "f1": 0.7592174199592963,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1263.0,
+          "merges": 232,
+          "labels": 567.0,
+          "abstained": 4
+        },
+        "terms": {
+          "move": 184.0,
+          "delete": 206.0,
+          "add": 162.0,
+          "duplicate": 15.0,
+          "merge": 696.0,
+          "total": 1263.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9191559229285424,
+        "crossfit": 0.9099663935391039,
+        "f1": 0.840970985922118,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1188.0,
+          "merges": 234,
+          "labels": 486.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 124.0,
+          "delete": 202.0,
+          "add": 152.0,
+          "duplicate": 8.0,
+          "merge": 702.0,
+          "total": 1188.0
+        }
+      }
+    },
+    {
+      "episode": 8,
+      "people": 3,
+      "sortformer": {
+        "fixed": 0.7968346301107138,
+        "crossfit": 0.7968346301107138,
+        "f1": 0.6134740081678959,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1678.0,
+          "merges": 290,
+          "labels": 808.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 312.0,
+          "delete": 211.0,
+          "add": 238.0,
+          "duplicate": 47.0,
+          "merge": 870.0,
+          "total": 1678.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9241164502435125,
+        "crossfit": 0.9241164502435125,
+        "f1": 0.8263691482805277,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1403.0,
+          "merges": 289,
+          "labels": 536.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 118.0,
+          "delete": 190.0,
+          "add": 216.0,
+          "duplicate": 12.0,
+          "merge": 867.0,
+          "total": 1403.0
+        }
+      }
+    },
+    {
+      "episode": 9,
+      "people": 3,
+      "sortformer": {
+        "fixed": 0.8834223646257139,
+        "crossfit": 0.8834223646257139,
+        "f1": 0.7498288319661681,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1474.0,
+          "merges": 283,
+          "labels": 625.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 210.0,
+          "delete": 167.0,
+          "add": 232.0,
+          "duplicate": 16.0,
+          "merge": 849.0,
+          "total": 1474.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9317591517968252,
+        "crossfit": 0.9317591517968252,
+        "f1": 0.8134880442854404,
+        "naming": {
+          "tracks": 5,
+          "leading": 5,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 5,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1392.0,
+          "merges": 282,
+          "labels": 546.0,
+          "abstained": 2
+        },
+        "terms": {
+          "move": 140.0,
+          "delete": 205.0,
+          "add": 184.0,
+          "duplicate": 17.0,
+          "merge": 846.0,
+          "total": 1392.0
+        }
+      }
+    },
+    {
+      "episode": 10,
+      "people": 3,
+      "sortformer": {
+        "fixed": 0.9275857921391879,
+        "crossfit": 0.9275857921391879,
+        "f1": 0.8423744509282898,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1395.0,
+          "merges": 261,
+          "labels": 612.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 148.0,
+          "delete": 221.0,
+          "add": 212.0,
+          "duplicate": 31.0,
+          "merge": 783.0,
+          "total": 1395.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9452507634823204,
+        "crossfit": 0.9452507634823204,
+        "f1": 0.8959573931276661,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 3,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 3,
+          "10": 3
+        },
+        "cost": {
+          "total": 1343.0,
+          "merges": 261,
+          "labels": 560.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 106.0,
+          "delete": 279.0,
+          "add": 172.0,
+          "duplicate": 3.0,
+          "merge": 783.0,
+          "total": 1343.0
+        }
+      }
+    },
+    {
+      "episode": 11,
+      "people": 3,
+      "sortformer": {
+        "fixed": 0.9207730843904927,
+        "crossfit": 0.9207730843904927,
+        "f1": 0.8390042238946334,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1254.0,
+          "merges": 248,
+          "labels": 510.0,
+          "abstained": 5
+        },
+        "terms": {
+          "move": 120.0,
+          "delete": 179.0,
+          "add": 198.0,
+          "duplicate": 13.0,
+          "merge": 744.0,
+          "total": 1254.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9409623272060026,
+        "crossfit": 0.9403053541574573,
+        "f1": 0.8902762646101352,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 3,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 3,
+          "10": 3
+        },
+        "cost": {
+          "total": 1227.0,
+          "merges": 250,
+          "labels": 477.0,
+          "abstained": 0
+        },
+        "terms": {
+          "move": 106.0,
+          "delete": 223.0,
+          "add": 148.0,
+          "duplicate": 0.0,
+          "merge": 750.0,
+          "total": 1227.0
+        }
+      }
+    },
+    {
+      "episode": 12,
+      "people": 3,
+      "sortformer": {
+        "fixed": 0.8741463796820216,
+        "crossfit": 0.8741463796820216,
+        "f1": 0.7223754791491638,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1490.0,
+          "merges": 285,
+          "labels": 635.0,
+          "abstained": 0
+        },
+        "terms": {
+          "move": 190.0,
+          "delete": 191.0,
+          "add": 244.0,
+          "duplicate": 10.0,
+          "merge": 855.0,
+          "total": 1490.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9422424391160025,
+        "crossfit": 0.9422424391160025,
+        "f1": 0.8904250136624469,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 3,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 3,
+          "10": 3
+        },
+        "cost": {
+          "total": 1379.0,
+          "merges": 285,
+          "labels": 524.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 116.0,
+          "delete": 211.0,
+          "add": 196.0,
+          "duplicate": 1.0,
+          "merge": 855.0,
+          "total": 1379.0
+        }
+      }
+    },
+    {
+      "episode": 13,
+      "people": 3,
+      "sortformer": {
+        "fixed": 0.907927965697572,
+        "crossfit": 0.907927965697572,
+        "f1": 0.7407714623266533,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1483.0,
+          "merges": 284,
+          "labels": 631.0,
+          "abstained": 3
+        },
+        "terms": {
+          "move": 152.0,
+          "delete": 232.0,
+          "add": 212.0,
+          "duplicate": 35.0,
+          "merge": 852.0,
+          "total": 1483.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.93156006103861,
+        "crossfit": 0.9304995350574621,
+        "f1": 0.8703023086596919,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 3,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 3,
+          "10": 3
+        },
+        "cost": {
+          "total": 1393.0,
+          "merges": 285,
+          "labels": 538.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 104.0,
+          "delete": 263.0,
+          "add": 170.0,
+          "duplicate": 1.0,
+          "merge": 855.0,
+          "total": 1393.0
+        }
+      }
+    },
+    {
+      "episode": 14,
+      "people": 3,
+      "sortformer": {
+        "fixed": 0.6454463511724298,
+        "crossfit": 0.6205616102195634,
+        "f1": 0.5290147981888023,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 2118.0,
+          "merges": 294,
+          "labels": 1236.0,
+          "abstained": 2
+        },
+        "terms": {
+          "move": 542.0,
+          "delete": 162.0,
+          "add": 348.0,
+          "duplicate": 184.0,
+          "merge": 882.0,
+          "total": 2118.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9155854167655015,
+        "crossfit": 0.915059796695548,
+        "f1": 0.8436968886480771,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 3,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 3,
+          "10": 3
+        },
+        "cost": {
+          "total": 1420.0,
+          "merges": 294,
+          "labels": 538.0,
+          "abstained": 0
+        },
+        "terms": {
+          "move": 138.0,
+          "delete": 259.0,
+          "add": 140.0,
+          "duplicate": 1.0,
+          "merge": 882.0,
+          "total": 1420.0
+        }
+      }
+    },
+    {
+      "episode": 15,
+      "people": 3,
+      "sortformer": {
+        "fixed": 0.8911403108798971,
+        "crossfit": 0.8911403108798971,
+        "f1": 0.787997235381351,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1550.0,
+          "merges": 318,
+          "labels": 596.0,
+          "abstained": 3
+        },
+        "terms": {
+          "move": 158.0,
+          "delete": 193.0,
+          "add": 228.0,
+          "duplicate": 17.0,
+          "merge": 954.0,
+          "total": 1550.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9258777406642985,
+        "crossfit": 0.9258777406642985,
+        "f1": 0.7694999791628598,
+        "naming": {
+          "tracks": 5,
+          "leading": 5,
+          "over_floor": 5,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 5,
+          "3": 5,
+          "10": 5
+        },
+        "cost": {
+          "total": 1478.0,
+          "merges": 318,
+          "labels": 524.0,
+          "abstained": 0
+        },
+        "terms": {
+          "move": 110.0,
+          "delete": 212.0,
+          "add": 184.0,
+          "duplicate": 18.0,
+          "merge": 954.0,
+          "total": 1478.0
+        }
+      }
+    }
+  ],
+  "paired": {
+    "fixed": {
+      "mean": 5.988063449844671,
+      "ci95": [
+        3.0318868834573456,
+        9.73973006345973
+      ],
+      "better": 14,
+      "n": 15
+    },
+    "B3 F1": {
+      "mean": 11.048653702574386,
+      "ci95": [
+        7.102152436445122,
+        15.313661708385707
+      ],
+      "better": 14,
+      "n": 15
+    },
+    "leading tracks": {
+      "mean": 0.06666666666666667,
+      "ci95": [
+        -0.13333333333333333,
+        0.26666666666666666
+      ],
+      "better": 1,
+      "n": 15
+    },
+    "tracks >= 30 s": {
+      "mean": -0.6,
+      "ci95": [
+        -0.8666666666666667,
+        -0.26666666666666666
+      ],
+      "better": 10,
+      "n": 15
+    },
+    "tracks for 95%": {
+      "mean": -0.6,
+      "ci95": [
+        -0.8666666666666667,
+        -0.3333333333333333
+      ],
+      "better": 9,
+      "n": 15
+    },
+    "leading >= 3 rows": {
+      "mean": -0.6,
+      "ci95": [
+        -0.8666666666666667,
+        -0.26666666666666666
+      ],
+      "better": 10,
+      "n": 15
+    },
+    "leading >= 10 rows": {
+      "mean": -0.6,
+      "ci95": [
+        -0.8666666666666667,
+        -0.26666666666666666
+      ],
+      "better": 10,
+      "n": 15
+    },
+    "edit cost": {
+      "mean": -139.26666666666668,
+      "ci95": [
+        -232.20333333333332,
+        -72.4
+      ],
+      "better": 15,
+      "n": 15
+    },
+    "label part": {
+      "mean": -140.86666666666667,
+      "ci95": [
+        -233.40166666666667,
+        -73.8
+      ],
+      "better": 15,
+      "n": 15
+    }
+  },
+  "script": "ef879db6bbb1dab2c92992d1675c7162ccf77d404ca390e94167e9b9a5972719"
+}

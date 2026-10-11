@@ -55,11 +55,11 @@ agent 会把相关任务的字幕、参数、LLM 问答记录与运行日志打�
 ## 它是怎么找到这些的
 
 `agent-tasks/` 下一个子目录一件事，每份说明开头写着「用户说什么话时该读它」。agent 读仓库根的
-`CLAUDE.md`（或 `agent-tasks/README.md`）就能看到清单，再按你的话去匹配。
+`AGENTS.md`（或 `agent-tasks/README.md`）就能看到清单，再按你的话去匹配。
 
 因此该方式**无需安装或配置**，也不依赖特定工具的「技能」功能。你也可以直接要求 agent「读一下
 `agent-tasks/run-audit/SKILL.md`，然后按其执行」，效果相同。
 
 如需新增任务：按 [`agent-tasks/README.md`](../../agent-tasks/README.md) 中的约定编写一份即可。
 
-（`agent-tasks/` 下另有一份**维护者专用**的说明——版本发布——不随仓库公开，此处不再展开。）
+（`agent-tasks/` 下另有几份**维护者专用**的说明，不随仓库公开，此处不再展开。）

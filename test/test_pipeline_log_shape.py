@@ -55,6 +55,42 @@ def _run(tmp_path, monkeypatch, *, level: str, output=None) -> str:
     return stream.getvalue()
 
 
+def test_the_raw_srt_reports_only_far_over_lines_as_one_banded_summary(
+    tmp_path, monkeypatch
+) -> None:
+    """Through the real `run_pipeline`: the raw stage's own `warn_on_invalid_srt` call.
+
+    Segment 1 is 30 weighted characters (over the 25 budget, under the raw
+    threshold of 35), segment 2 is 40, segment 3 is 47.
+    """
+
+    def to_srt(input_path, **kwargs):
+        cue = "{n}\n00:00:{a:02d},000 --> 00:00:{b:02d},000\n{text}\n"
+        body = "\n".join(
+            cue.format(n=n, a=n * 3, b=n * 3 + 2, text="\u4e00" * length)
+            for n, length in enumerate((30, 40, 47), start=1)
+        )
+        Path(kwargs["output_path"]).write_text(body, encoding="utf-8")
+        return Path(kwargs["output_path"])
+
+    source = tmp_path / "input.wav"
+    source.write_bytes(b"fake")
+    _fakes(monkeypatch)
+    monkeypatch.setattr(stages.to_srt, "convert_json_to_srt", to_srt)
+    stream = io.StringIO()
+    with reporting_to(TerminalReporter(stream, level="normal", isatty=False)):
+        pipeline.run_pipeline(source, output_path=tmp_path / "out" / "final.srt")
+    shown = stream.getvalue()
+
+    assert "Warning" not in shown
+    lines = [line for line in shown.splitlines() if "摘要" in line and "单行超" in line]
+    assert len(lines) == 1, shown
+    assert "原始字幕摘要" in lines[0]
+    assert "36-40 字：2" in lines[0]
+    assert "46+ 字：3" in lines[0]
+    assert "26-30" not in lines[0] and "1、" not in lines[0]
+
+
 def test_a_clean_run_shows_four_stages_and_one_result(tmp_path, monkeypatch) -> None:
     shown = _run(tmp_path, monkeypatch, level="normal")
 

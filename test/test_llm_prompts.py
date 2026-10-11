@@ -3,18 +3,14 @@ from __future__ import annotations
 import re
 from dataclasses import replace as dataclass_replace
 
+import pytest
+
 from finesub.llm.chunking import SubtitleSegment, plan_correction_windows
 from finesub.llm.prompts import (
     ContextPack,
     PROMPT_TEMPLATE_DIR,
-    PROMPT_VERSION,
     build_correction_csv_messages,
-    build_correction_query_messages,
-    build_fast_round1_messages,
     build_knowledge_update_messages,
-    build_research_round1_messages,
-    build_research_round2_messages,
-    build_search_loop_messages,
 )
 from finesub.llm.prompt_artifacts import write_prompt_artifacts
 from finesub.subtitles.metrics import weighted_char_count
@@ -50,153 +46,6 @@ def _segments() -> list[SubtitleSegment]:
     ]
 
 
-def test_research_round1_prompt_covers_indices_and_search() -> None:
-    messages = build_research_round1_messages(
-        transcript="--- window 0001 ---\n1|こんにちは\n",
-        extra_info="来源：https://example.test/video",
-        streamer_index="- 主播A | エーちゃん | 测试主播",
-        common_index="- 游戏B [游戏] | Game B | 测试游戏",
-    )
-    system = messages[0]["content"]
-    user = messages[1]["content"]
-
-    assert "第一轮" in system
-    assert "requested_entries" in system
-    assert "<keep_entries>" in system
-    assert "<analysis_notes>" in system
-    assert "<search_queries>" in system
-    assert "最多 8 条" in system
-    assert "按重要性从高到低排列" in system
-    assert "单独上限 8 条" in system
-    assert "共享 12 条总上限" in system
-    assert "keep 优先于 requested" in system
-    assert "没有联网搜索能力" in system
-    assert "不逐句翻译" in system
-    assert "音似" in system
-    assert "不能因为预计输出较长" in system
-    assert "<research_contract>" not in system
-    assert "<streamer_index>" in user
-    assert "主播A" in user
-    assert "游戏B" in user
-    assert "https://example.test/video" in user
-    assert "--- window 0001 ---" in user
-
-
-def test_research_round1_prompt_swaps_in_contract_fragment_for_multi_round() -> None:
-    messages = build_research_round1_messages(
-        transcript="1|こんにちは\n",
-        max_search_queries=10,
-        use_search_contract=True,
-    )
-    system = messages[0]["content"]
-
-    assert "<research_contract>" in system
-    assert "<analysis_notes>" in system
-    assert '"priority"' in system
-    assert "out_of_scope" in system
-    assert "第 0 轮" in system
-    assert "最多 $max_queries 条" not in system
-    assert "最多 10 条" in system
-
-
-def test_research_round2_prompt_injects_entries_and_search_results() -> None:
-    messages = build_research_round2_messages(
-        transcript="--- window 0001 ---\n1|こんにちは\n",
-        extra_info="",
-        entry_details_text="# 主播A\n\n## 档案\n\n关西腔。",
-        search_results="--- query: 游戏B ---\nprovider: tavily\n- wiki (https://example.test)\n  恐怖游戏",
-        collect_task_feedback=True,
-    )
-    system = messages[0]["content"]
-    user = messages[1]["content"]
-
-    assert "第二轮" in system
-    assert "general_context" in system
-    assert "window_contexts" in system
-    assert "<context_pack>" in system
-    assert "不能再发起新的搜索" in system
-    assert "不逐句翻译" in system
-    assert "不逐句判断" in system
-    assert "google_search" not in system
-    assert "# 主播A" in user
-    assert "关西腔" in user
-    assert "<search_results>" in user
-    assert "恐怖游戏" in user
-    assert "<round1_notes>" in user
-    assert "稳定源字幕序号" in system
-    assert "可引用 transcript 中的源序号" in system
-    assert "本窗口局部字幕序号" not in system
-
-
-def test_research_round2_prompt_swaps_in_evidence_pack_fragment() -> None:
-    messages = build_research_round2_messages(
-        transcript="1|こんにちは\n",
-        round1_notes="主播在玩游戏B（待定）。",
-        search_results="## 结论\nF1 confirmed：BOSS 官方名「王」",
-        use_evidence_pack=True,
-    )
-    system = messages[0]["content"]
-    user = messages[1]["content"]
-
-    assert "Evidence Pack" in system
-    assert "Research Contract" in system
-    assert "不能再发起新的搜索" in system
-    assert "主播在玩游戏B（待定）。" in user
-    assert "BOSS 官方名「王」" in user
-
-
-def test_search_loop_prompt_covers_contract_progress_and_decision() -> None:
-    messages = build_search_loop_messages(
-        round_index=1,
-        max_rounds=3,
-        is_final_round=False,
-        background="主播在玩游戏B（待定）。",
-        contract_json='{"goal": "查证游戏B"}',
-        executed_queries=["游戏B 剧情"],
-        progress_log="## 搜索轮 0\nF1: partial 候选名",
-        search_results="--- query: 游戏B BOSS ---\n- wiki",
-        previous_requested_entries=["主播A"],
-        previous_kept_entries=["游戏B"],
-        previous_contract_json='{"goal": "发起时查证游戏B"}',
-        previous_search_queries=["F1|游戏B BOSS >> 查官方名"],
-        previous_extract_urls=["https://example.test/wiki >> 查角色段落"],
-        followup_query_cap=4,
-    )
-    system = messages[0]["content"]
-    user = messages[1]["content"]
-
-    assert "<progress_update>" in system
-    assert "<evidence_pack>" in system
-    assert "<search_queries>" in system
-    assert "<extract_urls>" in system
-    assert "one-shot" in system
-    assert "银鸦" in system
-    assert "有相关性的资料宁多勿漏" in system
-    assert "priority" in system
-    assert "仍然可以继续查" in system
-    assert "不得超过 4 条" in system
-    assert "第 1 轮" in user
-    assert "查证游戏B" in user
-    assert "游戏B 剧情" in user
-    assert "F1: partial 候选名" in user
-    assert "<current_research_contract>" in user
-    assert "<previous_requested_entries>\n主播A" in user
-    assert "<previous_kept_entries>\n游戏B" in user
-    assert "发起时查证游戏B" in user
-    assert "F1|游戏B BOSS >> 查官方名" in user
-    assert "https://example.test/wiki >> 查角色段落" in user
-    assert user.index("<previous_search_request>") < user.index("<search_results>")
-    assert "本轮必须输出" not in user
-
-    final_messages = build_search_loop_messages(
-        round_index=2,
-        max_rounds=3,
-        is_final_round=True,
-        followup_query_cap=4,
-    )
-    assert "本轮必须输出 `<evidence_pack>` 收尾" in final_messages[1]["content"]
-
-
 def test_correction_prompt_forbids_omitting_long_singles_or_translated() -> None:
     window = plan_correction_windows(_segments(), counter=FakeTokenCounter())[0]
     messages = build_correction_csv_messages(window=window)
@@ -206,48 +55,6 @@ def test_correction_prompt_forbids_omitting_long_singles_or_translated() -> None
     assert "<singles>" not in combined
     assert "translated 必须给出完整终稿" in combined
     assert "严格保持标签、header、9 列字段与顺序" in combined
-
-
-def test_correction_query_prompt_requests_search_queries_only() -> None:
-    window = plan_correction_windows(
-        _segments(),
-        counter=FakeTokenCounter(),
-    )[0]
-    messages = build_correction_query_messages(
-        window=window,
-        context_pack=ContextPack.from_dict(
-            {
-                "general_context": {"global_summary": "主播正在玩游戏。"},
-                "window_contexts": [{
-                    "window_id": window.chunk_id,
-                    "first_source_id": "1",
-                    "last_source_id": "2",
-                    "context": "本窗口在打 BOSS。",
-                }],
-            }
-        ).with_source_order(["1", "2"]),
-        audio_file_label="clip.wav",
-        previous_advice="BOSS 名固定译为「王」。",
-    )
-    system = messages[0]["content"]
-    user = messages[1]["content"]
-
-    assert "搜索请求代理" in system
-    assert "<search_queries>" in system
-    assert "<window_notes>" in system
-    assert "待定" in system
-    assert "最多 8 条" in system
-    assert "不纠错、不翻译" in system
-    assert "此前所有窗口的累积建议" in user
-    assert "主播正在玩游戏。" in user
-    assert "本窗口在打 BOSS。" in user
-    assert "BOSS 名固定译为「王」。" in user
-    assert "<asr_result>" in user
-    asr = _direct_input_block(user, "asr_result")
-    assert asr.splitlines()[0] == "local_id|start|duration|gap|text"
-    assert asr.splitlines()[1].startswith("1|")
-    assert '"current_asr_csv"' not in user
-    assert "\\n2|" not in asr
 
 
 def test_context_pack_matches_source_coverage_after_split() -> None:
@@ -471,7 +278,7 @@ def test_basic_a_prompt_locks_singles_and_style_rules() -> None:
     user = messages[1]["content"]
     assert user.index("通用背景知识和术语") < user.index("本窗口待处理 ASR")
     assert "<search_results>" in user
-    assert "<pre_round_notes>" in user
+    assert "<pre_round_notes>" not in user  # empty in the task flow: not shown (cold read P044)
     assert "此前所有窗口的累积建议" in user
     assert (
         "type|position|start|duration|gap|corrected_text|translation|conf|char_count|note"
@@ -533,14 +340,14 @@ def test_correction_prompt_renders_preceding_context_with_negative_times() -> No
     assert "p1" not in _direct_input_block(user, "asr_result")
 
 
-def test_correction_prompt_injects_query_round_notes_when_provided() -> None:
+def test_correction_prompt_injects_window_notes_when_provided() -> None:
     window = plan_correction_windows(
         _segments(),
         counter=FakeTokenCounter(),
     )[0]
     messages = build_correction_csv_messages(
         window=window,
-        query_round_notes="本窗口疑似在打BOSS，BOSS名待定。",
+        window_notes="本窗口疑似在打BOSS，BOSS名待定。",
     )
     user = messages[1]["content"]
 
@@ -583,36 +390,12 @@ def test_correction_prompt_can_request_task_update_feedback() -> None:
     assert "不要提出翻译风格、prompt 或 harness 修改建议" in system
 
 
-def test_fast_round1_feedback_uses_window_local_source_ids() -> None:
-    window = plan_correction_windows(
-        _segments(),
-        counter=FakeTokenCounter(),
-    )[0]
-    messages = build_fast_round1_messages(
-        window=window,
-        collect_task_feedback=True,
-    )
-    system = messages[0]["content"]
-
-    assert "本窗口局部字幕序号" in system
-    assert "harness 会映射回稳定源字幕行号" in system
-    assert "可引用 transcript 中的源序号" not in system
-
-
 def test_prompt_templates_are_loaded_from_src_package() -> None:
     assert PROMPT_TEMPLATE_DIR.name == "prompt_templates"
     assert PROMPT_TEMPLATE_DIR.parent.name == "llm"
     expected = {
-        "research_round1_v2.md",
-        "research_round1_user_v2.md",
-        "research_round2_v2.md",
-        "research_round2_user_v2.md",
         "correction_main_v1.md",
         "correction_user_v2.md",
-        "correction_query_v2.md",
-        "correction_query_user_v1.md",
-        "fast_round1_v1.md",
-        "fast_round1_user_v1.md",
         "fragment_corr_role_audio_v1.md",
         "fragment_corr_role_text_v1.md",
         "fragment_corr_role_video_v1.md",
@@ -626,10 +409,6 @@ def test_prompt_templates_are_loaded_from_src_package() -> None:
         "fragment_search_queries_output_v1.md",
         "fragment_query_style_v1.md",
         "fragment_search_results_usage_v1.md",
-        "fragment_search_contract_output_v1.md",
-        "fragment_evidence_pack_usage_v1.md",
-        "search_loop_v1.md",
-        "search_loop_user_v1.md",
         "knowledge_update_artifacts_only_v1.md",
         "knowledge_update_refined_v1.md",
         "knowledge_update_user_v1.md",
@@ -666,13 +445,12 @@ def test_knowledge_update_artifacts_only_prompt_never_mentions_mistakes() -> Non
     # Design G: the artifacts_only prompt must not define/mention the mistake
     # block at all (the harness ignores a stray one and never applies it).
     assert "mistake_proposals" not in system
-    assert "add_mistake" not in system
+    assert "add_mistake" not in system and "add_mistake" not in user
     # harness_notes has been removed from knowledge update; prompt iteration
     # is now fully owned by session_replay.
     assert "<harness_notes>" not in system
     assert "--- window 0001" in user
     assert "星野灯" in user
-    assert PROMPT_VERSION in user
     assert "<common_mistakes>" not in user
     assert "<good_examples>" not in user
 
@@ -716,7 +494,7 @@ def test_knowledge_update_refined_prompt_covers_style_and_noise() -> None:
 
 def test_correction_prompt_injects_the_style_block() -> None:
     """The slot that used to carry the curated mistake list now carries the
-    style entry the run named (`docs/plans/translation-style-plan.md` §2.5)."""
+    style entry the run named (`docs/knowledge.md`, 「style 类别」)."""
 
     window = plan_correction_windows(
         _segments(),
@@ -738,23 +516,9 @@ def test_write_prompt_artifacts_writes_plan_and_prompts(tmp_path) -> None:
         "model_limits": {"output_limit": 1},
         "research_messages": [
             [
-                {"role": "system", "content": "研究一系统"},
-                {"role": "user", "content": "研究一用户"},
+                {"role": "system", "content": "准备系统"},
+                {"role": "user", "content": "准备用户"},
             ],
-            [
-                {"role": "system", "content": "研究二系统"},
-                {"role": "user", "content": "研究二用户"},
-            ],
-        ],
-        "correction_query_messages": [
-            [
-                {"role": "system", "content": "查询系统"},
-                {"role": "user", "content": "查询用户"},
-            ],
-        ],
-        "search_loop_example_messages": [
-            {"role": "system", "content": "loop系统"},
-            {"role": "user", "content": "loop用户"},
         ],
         "correction_messages": [
             [
@@ -771,13 +535,8 @@ def test_write_prompt_artifacts_writes_plan_and_prompts(tmp_path) -> None:
     write_prompt_artifacts(artifacts, tmp_path)
 
     assert (tmp_path / "plan.json").read_text(encoding="utf-8")
-    assert "loop系统" not in (tmp_path / "plan.json").read_text(encoding="utf-8")
-    assert (tmp_path / "research-round1.txt").read_text(encoding="utf-8")
-    assert (tmp_path / "research-round2.txt").read_text(encoding="utf-8")
-    assert "loop用户" in (
-        tmp_path / "research-search-loop-example.txt"
-    ).read_text(encoding="utf-8")
-    assert (tmp_path / "correction-0001-query.txt").read_text(encoding="utf-8")
+    assert "准备系统" not in (tmp_path / "plan.json").read_text(encoding="utf-8")
+    assert "准备用户" in (tmp_path / "research-prepare.txt").read_text(encoding="utf-8")
     assert (tmp_path / "correction-0001.txt").read_text(encoding="utf-8")
     assert "basic纠错系统" in (
         tmp_path / "correction-0001-basic-tier.txt"
@@ -825,9 +584,95 @@ def test_prompt_artifacts_carry_the_style_block(tmp_path) -> None:
     assert '<style name="default_style">' in system
     assert "[自称转换] 说话者用自己名字自指时改用「我」" in system
 
-    # ...and the CLI resolves the selection BEFORE the dry-run branch, so both
-    # faces get the same names
-    source = inspect.getsource(correction_translation._main_impl)
-    assert source.index("cli_style = resolve_style_selection") < source.index(
+    # ...and the task resolves the selection BEFORE it renders the plan, so the
+    # plan and the run get the same names
+    source = inspect.getsource(correction_translation._run_task)
+    assert source.index("style_selection = resolve_style_selection") < source.index(
         "build_prompt_artifacts("
     )
+
+
+def test_the_dry_run_shows_the_preparation_prompt_this_run_would_send(
+    tmp_path, monkeypatch
+) -> None:
+    """`build_prompt_artifacts` promises the prompt the run sends. The window
+    half branched on the strategy; the preparation half did not -- and the
+    production default (an agent preset plus `--media audio`) is exactly the
+    split where they differ: a clip makes the window batched while the
+    text-only preparation task can be agentic. A user reading the dry run then
+    saw "ask for a batch and wait for the fill" for a task that really fetches
+    for itself."""
+
+    import json
+
+    from finesub.llm import prompt_artifacts
+    from finesub.llm.routing.profiles import resolve_profile
+
+    stable_json = tmp_path / "clip-stable.json"
+    stable_json.write_text(
+        json.dumps({"segments": [{"id": "1", "start": 0.0, "end": 1.0, "text": "一。"}]}),
+        encoding="utf-8",
+    )
+    strategies = {"research": "agentic", "correction": "batched"}
+    monkeypatch.setattr(
+        prompt_artifacts,
+        "resolve_execution_strategy",
+        lambda profile, **kw: (strategies[kw.get("task_group", "correction")], "stub"),
+    )
+    artifacts = prompt_artifacts.build_prompt_artifacts(
+        stable_json=stable_json,
+        counter=FakeTokenCounter(),
+        profile=resolve_profile("audio", "local", "quality"),
+        knowledge_indexes={},
+        knowledge_enabled=False,
+    )
+
+    prepare_system = artifacts["research_messages"][0][0]["content"]
+    assert "由你自行取得" in prepare_system
+    assert "获取缺失输入（本任务没有回填轮" in prepare_system or "本任务没有回填轮" in prepare_system
+    # ...while the window, which carries the clip, still shows the batched shape.
+    window_system = artifacts["correction_messages"][0][0]["content"]
+    assert "获取缺失输入" in window_system and "由你自行取得" not in window_system
+
+
+@pytest.mark.parametrize("strategy", ["batched", "agentic"])
+def test_dry_run_shows_the_none_window_the_run_sends(tmp_path, monkeypatch, strategy) -> None:
+    """window-kb-request-channel plan, acceptance 7a: the dry run (the product
+    default) and the run read the same `task_graph.window_flow`, so a `none`
+    window with a readable base shows its entries-only channel -- or, agentic,
+    the knowledge-only tool note -- and the preparation task its pruning keep
+    at the request-capable cap."""
+
+    import json
+
+    from finesub.llm import prompt_artifacts
+    from finesub.llm.routing.profiles import resolve_profile
+    from finesub.llm.stages import task_graph
+
+    stable_json = tmp_path / "clip-stable.json"
+    stable_json.write_text(
+        json.dumps({"segments": [{"id": "1", "start": 0.0, "end": 1.0, "text": "一。"}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        task_graph, "resolve_execution_strategy", lambda profile, **kw: (strategy, "stub")
+    )
+    monkeypatch.setattr(
+        prompt_artifacts, "resolve_execution_strategy", lambda profile, **kw: ("batched", "stub")
+    )
+    artifacts = prompt_artifacts.build_prompt_artifacts(
+        stable_json=stable_json,
+        counter=FakeTokenCounter(),
+        profile=resolve_profile("text", "none", "quality"),
+        knowledge_indexes={"streamer": "- 主播A | | 测试主播", "common": ""},
+    )
+    window_system = artifacts["correction_messages"][0][0]["content"]
+    assert "搜索 query 输出规则" not in window_system
+    assert "`web_search`" not in window_system
+    if strategy == "batched":
+        assert "获取缺失输入（同一任务内" in window_system and "<requested_entries>" in window_system
+    else:
+        assert "由你自行取得" in window_system and "`kb_search`" in window_system
+    assert "<keep_entries>" in window_system
+    prepare_system = artifacts["research_messages"][0][0]["content"]
+    assert "<keep_entries>" in prepare_system and "单独上限 8 条" in prepare_system

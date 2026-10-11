@@ -39,7 +39,9 @@ finesub --resume-batch             # 接着跑上一个没跑完的批
 finesub setup        # 只预装运行环境，不跑任务
 finesub setup --dirs-only          # 只登记大文件位置，不下载任何东西
 finesub setup --data-dir D:\FineSub --dirs-only   # 非交互场景直接指定
+finesub setup --repair             # 按依赖锁重建运行环境，装完逐个文件核对内容
 finesub doctor       # 查看运行环境状态与各路径（跑完整健康探针，需数秒）
+finesub doctor --verify-hashes     # 连运行环境里每个文件的内容一起核对（约二十秒）
 finesub agent-clean  # 清理当前域保留的本地 Agent 失败现场（不安装/启动运行环境）
 finesub agent-ping   # 逐个问一遍装好的 agent CLI 还答不答话（会花一点额度）
 finesub agent-join   # 打印一段提示词，让你自己的 agent 接手一次等待中的运行

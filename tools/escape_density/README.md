@@ -1,8 +1,8 @@
 # escape_density — 转义判据与 char_count 阈值的标定
 
-两个一次性测量，支撑 `docs/plans/nonoka-downstream-findings-plan.md` 第十二节的两条阈值。
+两个一次性测量，支撑纠错输出里转义判据与 `char_count` 系统性偏差的两条阈值（取舍依据在维护者的本地计划里，不随公开快照发布）。
 结论已经沉淀进代码（`finesub.text.looks_escaped` 与
-`finesub.llm.output_protocol.SYSTEMATIC_CHAR_COUNT_SHARE`）与那份计划——⚠ **两条曾经存在的
+`finesub.llm.output_protocol.SYSTEMATIC_CHAR_COUNT_SHARE`）——⚠ **两条曾经存在的
 转义阈值最后都被删了**，所以这里的数字读起来是「为什么没有阈值」而不是「阈值定在哪」；
 脚本留在这里，
 是因为**下次重新标定不该从头写**，而且一个不能复现的数字按 `docs/bench-discipline.md`

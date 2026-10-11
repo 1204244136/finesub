@@ -187,20 +187,19 @@ class CorrectionSessionAdapter:
             audio_label = ""
         return build_correction_csv_messages(
             window=window,
-            # See sessions/query.py: bind the window's own rows so the pack's
-            # source-interval lookup resolves.
+            # Bind the window's own rows so the pack's source-interval lookup
+            # resolves.
             context_pack=ContextPack.from_dict(fixture.context_pack).with_source_order(
                 [segment.id for segment in window.segments]
             ),
             audio_file_label=audio_label,
             previous_advice=fixture.previous_advice,
-            query_round_notes=fixture.window_notes,
+            window_notes=fixture.window_notes,
             search_results=fixture.search_results,
             entry_details=fixture.entry_details,
             extra_style=fixture.extra_style,
             style_block=fixture.style_block,
             task_update_feedback=fixture.task_update_feedback,
-            evidence_pack_mode=fixture.evidence_pack_mode,
             profile=profile,
             tier=tier,
             variant=variant,

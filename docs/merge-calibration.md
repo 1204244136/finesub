@@ -2,7 +2,7 @@
 
 从八组精修字幕 vs raw ASR 的离线标定中抽出的**仍有效**参考——数值是保守先验，
 不是脱离语义的硬分类器；生产契约以当前 `PROMPT_VERSION` 与变体 fragment 为准
-（见 `llm_prompts.md`、`prompt-iterate.md` §4）。
+（见 `llm_prompts.md`、`prompt-iterate.md` [§4 当前合并口径（prompt 层）](prompt-iterate.md#4-当前合并口径prompt-层)）。
 
 时间轴判定以 **raw ASR** 的 gap / 跨度为准（精修 SRT 常 re-time，只作译文/语义参考）。
 
@@ -46,4 +46,4 @@
 | reasoning 里口述 `` `<translated>` `` 标签名 | 旧「首开→首闭」提取会污染校验；生产用 nesting-aware 顶层块提取，prompt 要求用「终稿块」等指代、勿写尖括号字面量 |
 
 离线 gold / 非对称代价评分（overmerge > undermerge 等）属迭代床专用材料，留在本地
-`docs/report/`；不要把压缩率或 validation-ok 当成质量分。
+`docs/reports/`；不要把压缩率或 validation-ok 当成质量分。

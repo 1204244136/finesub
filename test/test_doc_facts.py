@@ -64,3 +64,74 @@ def test_the_enumerating_list_still_points_at_real_documents() -> None:
     assert missing == [], (
         "these are in TIER_ENUMERATING_DOCS but do not exist: " + ", ".join(missing)
     )
+
+
+#: The user-facing document that spells out how one CodeBuddy login's
+#: allowances are divided. Narrow on purpose, same reasoning as the tier list:
+#: a document that merely mentions `hy3` is not enumerating anything.
+CODEBUDDY_POOL_DOC = "docs/manual/agent.md"
+
+
+def _codebuddy_pool_members() -> dict[str, list[str]]:
+    from finesub.llm.routing.model_catalog import default_model_catalog
+
+    members: dict[str, list[str]] = {}
+    for entry in default_model_catalog():
+        if entry.provider_tier != "LOCAL_CODEBUDDY":
+            continue
+        members.setdefault(entry.effective_quota_pool, []).append(entry.api_model_id)
+    return members
+
+
+def test_the_manual_names_every_model_line_on_each_codebuddy_allowance() -> None:
+    """A row that changes allowance has to change this paragraph too.
+
+    The failure this exists for is on record: the manual said "每条模型线各有
+    各的额度" and "每一行都记了独立的额度池" for a month after that stopped being
+    true -- the paid rows share one credit balance, and only the two free lines
+    are metered apart. Prose that describes a *structure* rots silently; the
+    part of it that a guard can hold is the membership, which is enumerable
+    from the catalog and has to grow with it.
+    """
+
+    text = (REPOSITORY_ROOT / CODEBUDDY_POOL_DOC).read_text(encoding="utf-8")
+    members = _codebuddy_pool_members()
+
+    assert len(members) >= 2, (
+        "this guard assumes the tier has several allowances; if that changed, "
+        "the paragraph it guards needs rewriting rather than this assertion "
+        "relaxing"
+    )
+    missing = sorted(
+        model
+        for models in members.values()
+        for model in models
+        if f"`{model}`" not in text
+    )
+    assert missing == [], (
+        f"{CODEBUDDY_POOL_DOC} explains how the CodeBuddy allowances are "
+        "divided but never names " + ", ".join(missing)
+        + " -- model_catalog.psv's quota_pool column is the source of truth"
+    )
+
+
+def test_the_manual_does_not_claim_one_allowance_per_codebuddy_row() -> None:
+    """The specific sentence that was wrong, kept out by name.
+
+    Membership alone cannot catch it: a paragraph can name all five models and
+    still describe the wrong structure around them. This is the one claim that
+    was actually made and actually false, so it is worth a line -- not a
+    general attempt to read the prose.
+    """
+
+    text = (REPOSITORY_ROOT / CODEBUDDY_POOL_DOC).read_text(encoding="utf-8")
+    members = _codebuddy_pool_members()
+    rows = sum(len(models) for models in members.values())
+
+    if len(members) == rows:
+        return  # one pool per row really is the structure; the claim is fine
+    for claim in ("每条模型线各有各的额度", "每一行都记了独立的额度池"):
+        assert claim not in text, (
+            f"{CODEBUDDY_POOL_DOC} still says {claim!r}, but the catalog gives "
+            f"{rows} rows only {len(members)} allowances"
+        )

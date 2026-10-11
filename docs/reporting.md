@@ -6,8 +6,7 @@
 CLI 终端、落盘 run 日志是三个不同的渲染面（桌面 worker 曾是第四个），绕过 reporter 的一行
 `print` 只会到达其中一个，而且通常不是需要它的那个。
 
-历史与取舍（为什么是这八个事件、为什么砍掉 `on_stage`）在本地
-`docs/archive/cli-bootstrap-logging-download-plan.md` §4——它不随仓库发布。
+历史与取舍（为什么是这八个事件、为什么砍掉 `on_stage`）在维护者的本地归档里，不随仓库发布。
 
 ## 1. 事件契约
 
@@ -59,7 +58,7 @@ failed(stage, message)
 | Renderer | 用在哪 |
 | --- | --- |
 | `TerminalReporter` | CLI 终端。TTY 上同一条进度原地重画，非 TTY 只在跨 10% 或阶段变化时新增一行 |
-| `FileReporter` | 落盘 run 日志，**恒定 verbose**，见 §6。全仓只有 `pipeline.py`（前台单源那条路）一处构造 |
+| `FileReporter` | 落盘 run 日志，**恒定 verbose**，见 [§6 落盘的 run 日志](#6-落盘的-run-日志)。全仓只有 `pipeline.py`（前台单源那条路）一处构造 |
 | `FanOutReporter` | 终端 + 文件。任一 renderer 抛异常不影响运行——上报是旁白，不是工作 |
 
 **多源批是唯一需要行前缀的场景**：多个任务共用一个终端，可原地重画的进度行会被最后说话的
@@ -85,12 +84,15 @@ failed(stage, message)
   「环境变量在某条路上失效」（2026-08-30 实测：统一入口把未指定提前解析成 `normal`，环境变量
   对所有路径都失灵了）。
 - 第三方降噪**不在分离器适配层，而是整次运行**（`reporting.quieted_libraries`，由前端在
-  `main()` 里进入）。两条通道两种处理：**logging 抬到 WARNING 而不是静音**（分离器的
-  `CUDAExecutionProvider not available` 要留），**tqdm 直接禁用**（进度条写进日志文件永远
+  `main()` 里进入）。两条通道两种处理：**logging 抬到 WARNING 而不是静音**（分离器自己的警告要留；
+  唯一例外是 `<X>ExecutionProvider not available in ONNXruntime`：它只说 ONNX 模型，我们的 Roformer 走 torch，
+  这条对我们是假话，由适配层在构造前挂过滤器丢掉），**tqdm 直接禁用**（进度条写进日志文件永远
   只是噪声，何况 pipeline 自己会画）。`verbose` 两者都不动。
-- logger 名按**模块**而非包命名（`separator` / `common_separator` / `mdxc_separator`，不是
-  `audio_separator`），而且 `Separator.__init__` 的 `log_level` 参数会覆盖构造前设好的级别，
-  所以必须在构造时直接告诉它。这两点是实跑才发现的——单测曾用了和代码同一个错误猜测。
+- 分离库自己的 logger 叫 `audio_separator.separator.separator`（`getLogger(__name__)`）；日志行里那个
+  `separator` 是 formatter 的 `%(module)s`，不是 logger 名。它在 `Separator.__init__` 里给自己设级别，
+  构造前抬 logger 级别没有用，所以必须在构造时把 `log_level` 直接告诉它。测第三方 logger 时，名字要从库的
+  发出点取（`Separator.__module__`，或直接调用它的 `configure_cuda`），不能和实现共用一个字面量，否则
+  名字猜错测试也是绿的。
 - 默认只维护一条 FineSub 进度：完成 block / 总 block、并发数、已用时间。并发 future 完成时
   就更新计数，不等按输出顺序 merge。block 内没有稳定 callback 时**不伪造平滑百分比**，用同
   一行 heartbeat 更新已用时间。
@@ -137,7 +139,7 @@ failed(stage, message)
 ## 5. LLM 段
 
 单列有两个原因：主体是**新增上报点**而不是转换现有 `print`，以及它有三个线程池
-（`parallel.py` 的纠错与查询轮、`clip_prefetch.py` 的剪辑预取）而 reporter 绑定是线程局部的。
+（`parallel.py` 的请求回合与交付轮、`clip_prefetch.py` 的剪辑预取）而 reporter 绑定是线程局部的。
 
 **阶段边界不归这一层**：`stages.py` 已为每个阶段（含 `translated-srt`）发过 `stage_started`，
 再发一次会重开阶段行并重置进度节流。
@@ -148,12 +150,14 @@ failed(stage, message)
 | `progress("translated-srt", …, unit="windows", detail=chunk_id)` | 每个窗口单元完成（`stages/correction/progress.py`）。单位用英文，与既有阶段的 `blocks`／`intervals` 一致 | normal |
 | `debug("correction window attempt", …)` | `attempts.py` 每次重试 | debug |
 | `debug("correction window validation failed", …)` | 进入修复轮时 | debug |
-| `debug("llm api call", {model, tier, key, code, sec, n, why?})` | `llm_runtime._record_api_attempt`——**每次 REST 调用一条**，成功与失败同一处。`chat_complete` 是三种 transport 的唯一收口，所以这一个点覆盖全部 API 后端。`why` 只在失败时出现，写的是**端点自己回的那句话**（截 200 字符）——裸一个 `429` 分不出「这把 key 今天用完了」和「慢一点」 | debug |
+| `debug("llm api call", {model, tier, key, code, sec, n, why?, over_soft?})` | `llm_runtime._record_api_attempt`——**每次 REST 调用一条**，成功与失败同一处。`chat_complete` 是三种 transport 的唯一收口，所以这一个点覆盖全部 API 后端。`why` 只在失败时出现，写的是**端点自己回的那句话**（截 200 字符）——裸一个 `429` 分不出「这把 key 今天用完了」和「慢一点」。`over_soft` 只在这次调用超过软超时才出现 | debug |
+| `llm-api-soft-timeout` / `llm-api-late-response` | 一次 API 调用过了**软超时**仍未返回时发前一条（连接不断，继续等到硬超时）；它**之后**真的返回了（成功或出错）再发后一条，写超出软超时多少秒、总耗时与返回码。两条成对，读到「still waiting」的人能查到结局；硬超时断开的那次只记 `NO_RESPONSE_TIMEOUT`，不发后一条。时限怎么算见 `llm_harness_behavior.md`「API 调用的两段超时」 | normal |
 | `debug("agent call", {driver, model, code, sec, episode})` | `local_agent._report_attempt`，由 `_run_episode` 的 `finish_attempt` 调用——**每次本地 agent CLI 调用一条**，同样成功与失败同一处 | debug |
 | `debug("web search request", {provider, status, for, sec, retry})` | `web_search.WebSearchClient._report_request`，由 `_try_pool` 调用——检索与抽取、逐条与成批的**唯一**公共路径 | debug |
 | `debug("rate limit wait", {scope, seconds})` | 上报点在 `rate_limit.py`：`scope` 只有它内部知道，且能同时盖到 `llm_runtime.py` 两个调用点 | debug |
-| `debug("research round", …)` | `research.py` / `search_loop.py` 每轮 | debug |
+| `debug("research-chunked", {chunks, cap_tokens, fan_out})` | `research.py` 超长素材分块调查的扇出 | debug |
 | `warning(…)` | **举例，不是词表**：知识库仓库不可用、worktree/缺 git 跳过知识库更新、key 池超建议值、target 不支持视频而降级 | normal |
+| `config-unknown-key` | `finesub.settings` 读 `config.toml` 时，注册表管的节（`[postprocess]`、`[segmentation]`、`[vad]`、`[separator]`、`[stabilize]`、`[chunking]`、`[share]`、`[llm]`）里出现没人读的键或子表——多半是拼错，而拼错的键静默无效。`[llm]` 里模型路由读的 `preset`、`presets`、`model_groups`、`preferred_targets`（以及只为报「已迁走」而读的 `providers`、`models`）算认得；写在预设之外的 `[llm.bindings]` 这类会被点名（bindings 属于某个预设）。列出这一节认得的键。每进程每键一次，**送达了才算说过**（没绑 reporter 的工作线程会吞掉它） | normal |
 | `gemini-upload-retry` / `gemini-upload-failed` | Files API 上传的重试（与模型调用的重试预算分开）：每次重试一条，写阶段（`upload`/`state_poll`/`token_poll`）、attempt/max 与等待秒数；只在重试过之后仍失败才发 `failed` 那条。正文只写异常类型或 HTTP 状态，**不写** resumable session URL（它是 capability token）与 key | normal |
 | 内容过滤阶梯 | 判据看 `LadderOutcome`：`level <= 0` 且 `dropped_units` 空＝纯重试通过发 `debug`；**丢了注入单元**（证据/词条，不是源字幕）发 `warning` | 两者皆有 |
 | `summary("translated-srt", …)` | 阶段收尾。报窗口、拆窗、调用、重试、修复轮、内容过滤恢复次数与按 tier 的调用数 | normal |

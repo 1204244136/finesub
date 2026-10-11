@@ -1,4 +1,4 @@
-"""Relative links between tracked docs must resolve, and `§N` must land.
+"""Relative links between tracked docs must resolve; `§N` and `#anchors` must land.
 
 Moving a doc silently breaks every relative link inside it -- the file still
 renders, the link just goes nowhere, and nothing in a text repo notices. It
@@ -19,6 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 import subprocess
+from urllib.parse import unquote
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,10 +36,12 @@ CODE = re.compile(r"```.*?```|~~~.*?~~~|`[^`\n]*`", re.DOTALL)
 LINE_ANCHOR = re.compile(r":\d+$")
 
 #: Directories a link may point into without the target having to exist in the
-#: tree being checked: either untracked local material, or -- for the two
-#: `docs/` ones -- notes tracked on `dev` but stripped from the public snapshot
-#: by `scripts/publish-main.ps1`, where this same test runs on the gate branch.
-LOCAL_ONLY = ("assets/", "docs/archive/", "docs/report/", "knowledge/", "out/", "data/")
+#: tree being checked: either untracked local material, or -- for the three
+#: `docs/` ones -- material tracked on `dev` but stripped from the public
+#: snapshot by `scripts/publish-main.ps1`, where this same test runs on the gate
+#: branch. `test_publish_filter` holds every `docs/` prefix in `$PrivatePaths`
+#: to an entry here, so the two lists cannot drift apart.
+LOCAL_ONLY = ("assets/", "docs/archive/", "docs/plans/", "docs/reports/", "knowledge/", "out/", "data/")
 
 
 def _tracked_markdown() -> list[Path]:
@@ -58,8 +61,9 @@ def _tracked_markdown() -> list[Path]:
     names = [name for name in listing.stdout.decode("utf-8").split("\0") if name]
     # LOCAL_ONLY again, now as "not ours to scan" -- the two readings coincide,
     # and a third copy of the list would be a third thing to keep in step.
-    # `docs/archive/` and `docs/report/` are tracked on `dev` so worktrees and
-    # fresh clones carry them, and stripped from the public snapshot: they
+    # All three `docs/` entries (`archive/`, `plans/`, `reports/`) are tracked
+    # on `dev` so worktrees and fresh clones carry them, and stripped from the
+    # public snapshot: they
     # exist here and not on `main`, while one test run has to reach the same
     # verdict on both. Scanning them would let a dangling link inside a
     # historical note fail CI on the gate branch, where the files are gone.
@@ -73,7 +77,8 @@ SECTION = re.compile(r"§\s?(\d+(?:\.\d+)*)")
 #: `## 3.2 …` / `### 4.1、…`
 HEADING = re.compile(r"^#{1,6}\s+(\d+(?:\.\d+)*)[.、 ]")
 #: A `.md` path named as a link or in backticks; both are used to say "that doc".
-DOC_HINT = re.compile(r"\[[^\]]*\]\(([^)]+\.md)\)|`([A-Za-z0-9_./-]+\.md)`")
+#: A link that also carries a `#fragment` names its document just the same.
+DOC_HINT = re.compile(r"\[[^\]]*\]\(([^)#]+\.md)(?:#[^)]*)?\)|`([A-Za-z0-9_./-]+\.md)`")
 #: How far back a document name can sit and still own the number after it.
 #: The window also always reaches the start of the current line: an index table
 #: names the document in its first cell and cites sections at the far end of the
@@ -173,9 +178,9 @@ def test_every_chinese_numeral_section_reference_lands() -> None:
     """The half of the section convention `§N` never covered.
 
     One document numbers its sections in Chinese (`bench-baselines.md`, 24 of
-    them) and is cited that way twenty-four times -- from `CLAUDE.md`, from
+    them) and is cited that way twenty-four times -- from the agent entry file, from
     other docs, and from a dozen source comments. None of those citations was
-    checked by anything: `docs-reorg-plan.md` therefore had to write "never
+    checked by anything: the 2026-09-03 docs reorganisation therefore had to write "never
     renumber that file" as a rule people must remember. A guard is the better
     half of that rule.
 
@@ -221,19 +226,17 @@ def test_every_chinese_numeral_section_reference_lands() -> None:
     assert broken == []
 
 
-def test_every_tracked_doc_appears_in_both_indexes() -> None:
-    """Two indexes, two readers, and a name may go missing from neither.
+def test_every_tracked_doc_appears_in_the_map() -> None:
+    """The full list of docs lives in one place, and nothing may go missing from it.
 
     `docs/README.md` carries the map -- every tracked doc with its topic and
-    status -- for whoever maintains the docs. `CLAUDE.md` carries the routing
-    list: the same names grouped by domain, plus the few judgement hints, and
-    that is what an agent has in context when it decides what to open.
-    Descriptions live on one side by design; *names* live on both, because a
-    name missing from either side makes the file invisible to that side's
-    reader. Checking only one side was the earlier shape of this test, and it
-    would have passed happily while the map went stale. Archive and report
-    never reach this test -- `_tracked_markdown` drops them -- because they
-    are local notes.
+    status. The agent entry file (`AGENTS.md`) used to carry a second full list
+    and this test held both; since 2026-09-24 the entry keeps only a short
+    route-by-task table and points at the map for everything else (owner
+    ruling 2026-09-24), so the map is the
+    one list a name must not go missing from. Archive, plans and report never
+    reach this test -- `_tracked_markdown` drops them -- because they are
+    stripped from the public snapshot.
     """
 
     tracked = {
@@ -242,12 +245,6 @@ def test_every_tracked_doc_appears_in_both_indexes() -> None:
         if path.is_relative_to(REPOSITORY_ROOT / "docs")
     }
 
-    index = (REPOSITORY_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-    missing = sorted(name for name in tracked if f"`{name}`" not in index)
-    assert missing == [], (
-        "add these to the docs index in CLAUDE.md: " + ", ".join(missing)
-    )
-
     # The map spells its paths relative to `docs/` -- `manual/env.md`, not
     # `docs/manual/env.md` -- and does not list itself: it *is* the map.
     document_map = (REPOSITORY_ROOT / "docs/README.md").read_text(encoding="utf-8")
@@ -255,6 +252,45 @@ def test_every_tracked_doc_appears_in_both_indexes() -> None:
     unmapped = sorted(name for name in mapped if f"`{name}`" not in document_map)
     assert unmapped == [], (
         "add these to the 文档地图 in docs/README.md: " + ", ".join(unmapped)
+    )
+
+
+#: The manual carries its own index, for a reader the map above does not serve.
+#: `docs/README.md` and `AGENTS.md` are read by people who already know the tree
+#: and can find a file the map forgot; a user reads only the manual index, so a
+#: name missing there is not inconvenient but invisible.
+MANUAL = "docs/manual"
+
+
+def test_the_manual_index_links_every_manual_document() -> None:
+    """The manual index is an index, and an index with a hole is worse than none.
+
+    The guard above checks that a doc is *named* in the maintainer map. It
+    does not look at the manual's own index, which
+    is the only index a user ever opens. Adding a page to the manual
+    and forgetting this file leaves a document that ships, renders, and is
+    reachable by nobody.
+
+    Coverage only. That a link resolves is the next test's job, and whether the
+    one-liner beside it is honest stays a human call -- the same limit written
+    into the discipline note at the top of `docs/README.md`.
+    """
+
+    root = REPOSITORY_ROOT / MANUAL
+    index = root / "index.md"
+    documents = {path.name for path in root.glob("*.md")} - {index.name}
+
+    # An empty scanning surface passes every assertion below it. Renaming or
+    # moving the directory has to be red here rather than quietly green.
+    assert documents, f"nothing to index under {MANUAL}/"
+    assert index.exists(), f"{MANUAL}/index.md is gone"
+
+    text = CODE.sub("", index.read_text(encoding="utf-8"))
+    linked = {match.group(1).strip() for match in LINK.finditer(text)}
+    missing = sorted(documents - linked)
+    assert missing == [], (
+        f"these pages are not linked from {MANUAL}/index.md, so a reader of "
+        "the manual cannot reach them: " + ", ".join(missing)
     )
 
 
@@ -271,18 +307,123 @@ def test_relative_links_between_tracked_docs_resolve() -> None:
             # point of checking; the number is not ours to verify.
             target = LINE_ANCHOR.sub("", target)
             resolved = (document.parent / target).resolve()
+            source = document.relative_to(REPOSITORY_ROOT).as_posix()
             try:
                 relative = resolved.relative_to(REPOSITORY_ROOT).as_posix()
             except ValueError:
-                # Points outside the repository; not ours to check.
+                # Out of the repository: one `../` too many, or an absolute
+                # path on this machine. Either way it is broken in every other
+                # clone, which is why it is reported rather than skipped -- the
+                # skip let three over-climbing links in agent-tasks/ sit here
+                # unnoticed.
+                broken.append(f"{source} -> {target} (leaves the repository)")
                 continue
             if relative.startswith(LOCAL_ONLY):
                 continue
             if not resolved.exists():
-                source = document.relative_to(REPOSITORY_ROOT).as_posix()
                 broken.append(f"{source} -> {target}")
 
     assert broken == []
+
+
+#: `[text](file.md#frag)` and `[text](#frag)` -- the half of a link `LINK`
+#: throws away.
+FRAGMENT_LINK = re.compile(r"\]\(([^)\s#]*)#([^)\s]+)\)")
+FENCE = re.compile(r"```.*?```|~~~.*?~~~", re.DOTALL)
+ATX_HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*#*\s*$")
+EXPLICIT_ANCHOR = re.compile(r"<a\s+(?:id|name)=\"([^\"]+)\"")
+PLANS = REPOSITORY_ROOT / "docs" / "plans"
+
+
+def _slug(heading: str) -> str:
+    """GitHub's heading anchor.
+
+    Link markup reduces to its text and tags vanish, as in the rendered
+    heading; then lowercase, drop everything but word characters, `-` and
+    spaces, and turn spaces into `-`. Full-width punctuation, `「」`, backticks
+    and dots all go. Checked against seven headings of `llm_local_agent.md` as
+    GitHub renders them (2026-09-23): every one identical.
+    """
+
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", heading)
+    text = re.sub(r"<[^>]+>", "", text).lower()
+    return re.sub(r"[^\w\- ]", "", text).replace(" ", "-")
+
+
+def _anchors(path: Path) -> set[str]:
+    text = FENCE.sub("", path.read_text(encoding="utf-8"))
+    seen: dict[str, int] = {}
+    anchors = set(EXPLICIT_ANCHOR.findall(text))
+    for line in text.split("\n"):
+        if match := ATX_HEADING.match(line):
+            base = _slug(match.group(1))
+            count = seen.get(base, 0)
+            anchors.add(base if count == 0 else f"{base}-{count}")
+            seen[base] = count + 1
+    return anchors
+
+
+def test_every_anchor_link_lands_on_a_heading() -> None:
+    """A `#fragment` that names no heading renders fine and opens the top of the file.
+
+    Section links are how the docs point a reader at a place instead of making
+    them hunt for a number, so they get the same guarantee file links have.
+    Renaming a heading now turns every link to it red -- fix the links, do not
+    loosen this.
+
+    `docs/plans/` is scanned where it exists (it is stripped from the public
+    snapshot); `archive/` and `reports/` are historical and left alone. A target
+    inside a local-only tree that is absent is skipped, as in the file-link
+    guard.
+    """
+
+    documents = list(_tracked_markdown())
+    if PLANS.is_dir():
+        documents += sorted(PLANS.glob("*.md"))
+    cache: dict[Path, set[str]] = {}
+    broken: list[str] = []
+    for document in documents:
+        text = CODE.sub("", document.read_text(encoding="utf-8"))
+        for match in FRAGMENT_LINK.finditer(text):
+            target, fragment = match.group(1).strip(), match.group(2)
+            if target.startswith(("http://", "https://", "mailto:")):
+                continue
+            resolved = (document.parent / target).resolve() if target else document
+            if resolved.suffix != ".md" or not resolved.exists():
+                continue  # a missing file is the file-link guard's business
+            anchors = cache.setdefault(resolved, _anchors(resolved))
+            if unquote(fragment).lower() not in anchors:
+                source = document.relative_to(REPOSITORY_ROOT).as_posix()
+                broken.append(f"{source} -> {target}#{fragment}")
+
+    assert broken == []
+
+
+def test_every_plan_opens_with_a_status_block() -> None:
+    """A plan says where it stands before anything else.
+
+    The first block after the title is a blockquote carrying `**状态**`. The
+    wording and the status words are free; what is checked is only that a
+    reader never has to dig for them. Local-only, like the plans themselves.
+    """
+
+    if not PLANS.is_dir():
+        return
+    missing: list[str] = []
+    for plan in sorted(PLANS.glob("*.md")):
+        lines = plan.read_text(encoding="utf-8").split("\n")
+        body = lines[1:]
+        while body and not body[0].strip():
+            body.pop(0)
+        block: list[str] = []
+        for line in body:
+            if not line.startswith(">"):
+                break
+            block.append(line)
+        if not lines[0].startswith("# ") or not any("**状态**" in line for line in block):
+            missing.append(plan.name)
+
+    assert missing == []
 
 
 #: Source trees whose comments cite docs by section. `tools/` is in despite
@@ -406,7 +547,9 @@ def test_links_inside_the_local_only_notes_resolve_where_those_notes_exist() -> 
 
     So: check them only where they exist. On the gate branch the directories
     are absent and this test has nothing to do, which is exactly the property
-    the exemption was protecting.
+    the exemption was protecting. `docs/plans/` joined the list on 2026-09-11
+    for the same reason `docs/archive/` is on it -- its notes cite each other
+    by relative path and nothing else would notice a move.
 
     **Only `.md` targets.** That is the class a move breaks: sibling documents
     that were one `../` away and are now two. The code paths these notes cite
@@ -418,7 +561,10 @@ def test_links_inside_the_local_only_notes_resolve_where_those_notes_exist() -> 
     """
 
     broken: list[str] = []
-    for directory in ("docs/archive", "docs/report"):
+    # Derived, not restated: a hand copy of the three names was what would have
+    # gone quietly blind when one of the directories is renamed (`is_dir()`
+    # below skips a name that no longer exists instead of failing).
+    for directory in (prefix.rstrip("/") for prefix in LOCAL_ONLY if prefix.startswith("docs/")):
         root = REPOSITORY_ROOT / directory
         if not root.is_dir():
             continue

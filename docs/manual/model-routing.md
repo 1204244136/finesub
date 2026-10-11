@@ -10,20 +10,19 @@
 
 ## 1. 一次调用是怎么定下来的
 
-一次 run 会运行多类 LLM 会话（背景调查、每窗查询轮、纠错窗、知识更新等）。选模型分四步，
+一次 run 会运行多类 LLM 会话（准备任务、纠错窗、知识更新等）。选模型分四步，
 每一步只回答一个问题：
 
 ```text
 会话(harness 决定)
-  └─→ 任务组          "这是哪一类活"      7 个,固定
-        └─→ 格子       任务组 × difficulty  21 格,携带 prompt 变体
+  └─→ 任务组          "这是哪一类活"      4 个,固定
+        └─→ 格子       任务组 × difficulty  12 格,携带 prompt 变体
               └─→ 模型组  预设把格子绑到它    有序列表,可以自行组合
                     └─→ 逐候选过滤 → 真正应答的那个
 ```
 
 - **任务组**由 harness 定义，不能新增：`correction-mm` / `correction-text` /
-  `planning-mm` / `planning-text` / `research` / `search_judge` / `knowledge`。
-  带 `-mm` / `-text` 的两对由两个媒体开关直接选中（见 §2）。
+  `research` / `knowledge`。带 `-mm` / `-text` 的一对由媒体开关直接选中（见 [§2 开关与旋钮](#2-开关与旋钮)）。
 - **预设**是一张「格子 → 模型组」的绑定表。随包发布一个 `default`；可以在 `config.toml` 中编写
   自己的预设，只需覆盖需要调整的几格。
 - **模型组**是一个**有序**的模型列表。前面的先试，失败（额度/限流/超时/不可用/瞬时错误）
@@ -41,13 +40,13 @@
 
 | 开关 | 取值 | 作用 |
 | --- | --- | --- |
-| `--llm-media` | text / audio / video | 便捷写法，一次设定下面两个 |
-| `--llm-correction-media` | text / audio / video | **纠错窗**吃什么；同时选中 `correction-mm` 或 `correction-text` |
-| `--llm-planning-media` | text / audio / video | **每窗查询轮**吃什么；同时选中 `planning-mm` 或 `planning-text` |
-| `--llm-retrieval` | none / local / native | `local` = harness 自行检索（背景调查 + 每窗查询轮 + 本地搜索代理）;`native` = 模型自带联网搜索（检索质量更好，推荐优先使用，见下）;`none` = 不检索 |
+| `--llm-media` | text / audio / video | **纠错窗**吃什么（阶梯，video 蕴含 audio）；同时选中 `correction-mm` 或 `correction-text`。`text` 也是让纯文本强模型处理音视频素材的方式 |
+| `--llm-retrieval` | none / local / native | `local` = harness 自行检索（准备任务的回填 + 每窗请求回合 + 本地搜索代理）;`native` = 模型自带联网搜索（检索质量更好，推荐优先使用，见下）;`none` = 不检索 |
 | `--llm-difficulty` | quality / intermediate / efficiency | 见下 |
 | `--llm-continuity` | serial / parallel | 窗口之间是否串联上下文；`parallel` 放弃串联换并发 |
-| `--knowledge` | none / collect / update | 知识库读写档位，独立于上述各轴；它是少数**不带** `--llm-` 前缀的选项 |
+| `--knowledge` | none / read / update | 知识库档位：不用 / 只读（默认）/ 读并在任务后更新；独立于上述各轴，是少数**不带** `--llm-` 前缀的选项 |
+
+这五个开关没在命令行上写时，取激活预设的默认值（见下面的[预设带开关默认值](#预设带开关默认值)），再取 `default` 预设的默认值，最后取内置默认。
 
 ### 走代理：`[llm] proxy`
 
@@ -70,14 +69,17 @@ proxy = "http://127.0.0.1:7890"   # 或 socks5://...
 **范围仅限 API 调用。** 下载（模型、ffmpeg、yt-dlp、媒体源）有自己的一套路由发现
 （系统代理 + 环境变量 + 本地端口探活），不受这一项影响。
 
+改了这一行，**之后发出的请求**就会用新值——运行中途改也一样；已经在路上的那次请求不受影响。
+
 > ⚠️ **开启代理不仅改变线路，也会改变失败的表现。** Gemini 会对机房 IP 与共享出口 IP 评分，
 > 判定可疑时直接拒答。因此「检索正常、纠错却持续失败」是该设置下的一种正常现象，并非 bug——
 > 可先更换出口，再排查其他问题。
 
 > 本机 agent(Codex / Claude Code / agy)**不受这一项影响**：它们是各自登录、自己发请求的
-> 外部程序，harness 拉起它们时不传递任何代理变量。这是有意的——它们有自己的网络配置与
-> 风控，替它们改线路可能让发车失败被误判成额度耗尽。**要给它们配代理，按各自 CLI 的文档
-> 独立设置即可**，那条路完全通，不需要 finesub 代劳。
+> 外部程序，`[llm] proxy` 不会传给它们。这是有意的——它们有自己的网络配置与风控，替它们改线路
+> 可能让发车失败被误判成额度耗尽。系统里本来就设着的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` /
+> `NO_PROXY`（以及证书相关的变量）会原样传给它们；**要给它们单独配代理，按各自 CLI 的文档设置即可**，
+> 不需要 finesub 代劳。
 
 ### 检索开关：优先 `native`
 
@@ -88,7 +90,7 @@ proxy = "http://127.0.0.1:7890"   # 或 socks5://...
 
 代价与注意：
 
-- **需要能联网的模型**，见 §4 末尾那条。纯免费 Gemini 档不行。
+- **需要能联网的模型**，见 [§4 出厂预设长什么样](#4-出厂预设长什么样) 末尾那条。纯免费 Gemini 档不行。
 - **`native` 下出处能否核对，取决于后端类型。** agy 这类后端只回报搜索词、不回报来源 URL，模型
   并不掌握真实 URL。实测中，模型会编造形似真实来源的链接填入 `sources`(YouTube video id 被写成
   `genshin_last_legacy`、`4gamer.net/games/000/G000000`)，且每次编造的内容都不同——此类后端的
@@ -106,13 +108,12 @@ proxy = "http://127.0.0.1:7890"   # 或 socks5://...
 
 常见组合：
 
-- `--llm-media video`：查询轮和纠错窗共用同一份视频剪辑，只切一次、只传一次。
-- `--llm-correction-media text --llm-planning-media video`：纠错交给纯文本强模型（比如自接的
-  DeepSeek/Claude），查询轮仍然看视频。**这是让纯文本模型处理带音视频素材的正规路径**。
-- `--llm-media text`：完全不切片、不上传。
+- `--llm-media video`：每个窗口切一份低清视频剪辑，请求回合与交付轮共用它，只切一次、只传一次。
+- `--llm-media text`：完全不切片、不上传。**这也是让纯文本强模型（比如自接的 DeepSeek/Claude）
+  处理带音视频素材的路径**——窗口只拿字幕文本。
 
-> 查询轮读视频比读音频贵：视频在低分辨率下约 `71 tokens/帧 × 0.25 fps ≈ 17.75 tok/s`,
-> 叠在音频约 32 tok/s 上，媒体 token 约 **+55%**。换来的是与纠错窗共用一份剪辑、少一次上传。
+> 读视频比读音频贵：视频在低分辨率下约 `71 tokens/帧 × 0.25 fps ≈ 17.75 tok/s`,
+> 叠在音频约 32 tok/s 上，媒体 token 约 **+55%**。
 > 是否值得由预设决定，harness 不替用户判断。
 
 ### difficulty 只做两件事
@@ -126,14 +127,14 @@ prompt 档位。
 **预设可以按档位绑定不同的模型组**，出厂就是这么配的：纠错的 `quality` 绑 capable 组、
 `intermediate` 绑两个 lite。因此：
 
-- 免费档 capable 的日额度(20 RPD)耗尽时，run 会**停下**而不是偷偷换成 lite;
+- 免费档 capable 的日额度(20 RPD)耗尽、又没配付费 key 时，run 会**停下**而不是偷偷换成 lite（配了付费 key 就轮到组尾的付费成员）;
 - 两条出路：等额度恢复后 resume，或显式 `--llm-difficulty intermediate` 继续。
 - 切档**不会丢失已完成窗口**：窗口指纹不含 difficulty，窗口计划已落盘。产物中会出现前后不同
   变体的混合，这是显式发起的，逐窗都有记录。
 
-`efficiency` 还会把纠错与查询轮的媒体都钉为 `text`、检索钉为 `none`，并要求
-**`--knowledge none`**（不读索引、不注入词条、不做任务后更新）。若发生冲突会直接报错，
-不会静默降级。
+`efficiency` 还会把媒体钉为 `text`、检索钉为 `none`；知识库与风格照常读（读索引、注入词条与风格），
+但**不能 `update`**——低思考的产出不回写知识库。
+其余冲突会直接报错，不会静默降级。
 
 ### 思考旋钮
 
@@ -149,15 +150,12 @@ default 预设，最终回退为 **medium**。
 
 回落方向**朝上**，所以想让某格保持 medium 而它上一格是 high 时，必须显式写出来。
 
-**出厂实况**（21 格全解析，格式为 `思考档 / 模型组 / prompt 变体`）:
+**出厂实况**（12 格全解析，格式为 `思考档 / 模型组 / prompt 变体`）:
 
 | 任务组 | quality | intermediate | efficiency |
 | --- | --- | --- | --- |
 | correction-mm | medium / correction-capable / capableC | medium / correction-basic / basicB | **low** / correction-basic / basicB |
 | correction-text | medium / correction-capable / capableC | medium / correction-basic / basicB | **low** / correction-basic / basicB |
-| planning-mm | medium / lightweight-default / 单模板 | medium / 同左 | **low** / 同左 |
-| planning-text | medium / lightweight-default / 单模板 | medium / 同左 | **low** / 同左 |
-| search_judge | medium / lightweight-default / 单模板 | medium / 同左 | **low** / 同左 |
 | research | **high** / research-default / 单模板 | **high** / 同左 | **low** / 同左 |
 | knowledge | **high** / knowledge-capable / 单模板 | **high** / 同左 | **low** / 同左 |
 
@@ -165,7 +163,7 @@ default 预设，最终回退为 **medium**。
 high**。它们的产物被下游全量复用（research 写的背景包每个窗口都读，knowledge 直接写库），换档
 换的是模型，不应顺带砍掉推理。intermediate 那一格是**继承**来的，不是写死的：回落朝上。
 
-抽象档位到供应商参数的换算见 §3 的 `thinking` 列。
+抽象档位到供应商参数的换算见 [§3 模型事实表(catalog)](#3-模型事实表catalog) 的 `thinking` 列。
 
 ### 会话档位（只对 agent 生效）
 
@@ -175,23 +173,58 @@ high**。它们的产物被下游全量复用（research 写的背景包每个�
 
 ```toml
 [llm.presets.my.agent_session]
-"correction-text/quality" = "pseudo-conversational"
+"correction-text/quality" = "api"
 ```
 
 | 档位 | 一次调用是什么 | 什么时候选它 |
 | --- | --- | --- |
 | `api` | 每次调用一个全新会话，整包 prompt 重发 | 想要每窗完全独立、可复现 |
 | `per-window`（默认） | 一个窗口连同它的修复轮共用一次会话 | 出厂默认，不必动 |
-| `resume` | 整条 run 一条会话，跨窗口续上下文 | 想让模型记住前面窗口 |
-| `pseudo-conversational` | 整条 run **一个常驻 CLI**：它做完一个窗口就向 FineSub 要下一个 | 想吃满会话缓存、少付冷启动 |
+| `resume`（实验） | 整条 run 一条会话，跨窗口续上下文 | 只用于实验：历史没有上限，长素材会撑满上下文；CodeBuddy 2.156.0 及更早的版本续会话吃不到历史缓存，2.164.0 起 hy3 实测已正常 |
+| `pseudo-conversational`（已冻结） | 整条 run **一个常驻 CLI**：它做完一个窗口就向 FineSub 要下一个 | 不建议：保留现状、不再改进，试跑里比 `resume` 贵 |
 
 三点要知道：
 
-- `pseudo-conversational` **要求 CLI 支持 per-invocation MCP server**（三家均支持）。探测不到时
+- `pseudo-conversational` **要求 CLI 支持 per-invocation MCP server**（五家都支持）。探测不到时
   直接报错停止，不会静默切换档位，因为选择该档即表示要求此形态。
 - 带音视频的调用**任何档位下都单独走一次会话**，不进常驻 CLI（工具协议是纯文本的）。
 - 该档位下 token 用量按**会话**记账（CLI 一次调用只报一次总账），所以任务报告里 agent 那行的
   「调用次数」按窗口算、token 按会话算，两列本就不是一回事。
+
+### 预设带开关默认值
+
+预设除了绑模型，还可以给上表那五个开关写默认值。例如一份只绑纯文本模型的预设，顺便把媒体定成文字：
+
+```toml
+[llm.presets.my-deepseek.defaults]
+media = "text"
+retrieval = "none"
+```
+
+键是 `media` / `retrieval` / `difficulty` / `continuity` / `knowledge`，取值与对应的命令行开关相同；另有一个整数键
+`parallel_windows`（≥ 1，对应 `--llm-parallel-windows`），只在最后的 `continuity` 是 `parallel` 时生效，否则按 1 算、出处里写明。
+写错键、写错值，或者同一份预设里自相矛盾（既写 `difficulty = "efficiency"` 又写 `media = "audio"` 或 `knowledge = "update"`；
+既写 `parallel_windows` 又写 `continuity = "serial"`），启动时直接报错。
+
+一个开关取什么，按这个顺序找，找到就停：
+
+1. 命令行上写了的值；
+2. 激活预设的 `defaults`；
+3. `default` 预设的 `defaults`（出厂的 `default` 一项都没写；出厂预设里写了默认值的是 `agy`、`agy-fast`、`fast`，见下面各节）；
+4. 内置默认（audio / local / quality / serial / read）。
+
+`difficulty` 最后是 `efficiency` 时，媒体、检索两个开关会被钉成 text / none——只钉命令行没写的；命令行写了
+别的值（比如 `--llm-media audio`）就报错，要用音频得同时写 `--llm-difficulty quality`。所以只写 `--llm-difficulty efficiency`
+就够了，不用再连写另外两个。知识库与风格在该档封顶在 `read`：没人写时照常读；`efficiency` 来自命令行或别的层时，预设（知识库）或 `config.toml`（风格）给的 `update` 降为 `read`，命令行写 `update` 报错。
+
+预设给的值和在命令行上手写同一个值，效果完全一样，作废已完成进度的范围也一样（[§7 什么会作废已完成的进度](#7-什么会作废已完成的进度)）。
+每次纠错任务都会在产物目录写一份 `resolved-switches.json`，记下五个开关最后取了什么、各自来自命令行、哪个预设还是内置默认；
+加 `--verbose` 时，取自预设或被 efficiency 钉死、封顶的开关也会打印出来。
+
+`finesub` 的任务记录里，这五个开关只记命令行上写了的，另有一个 `resolved_switches` 字段指向上面那份文件（没进纠错的 run 没有这份文件）。
+
+参考资料导入（`reference_ingest`）不读这里的默认值：它的 `index.csv` 每行自带一个「预设」（`mm-med`、`text` 等），那是导入流程自己的一套，
+媒体与检索由它定；路由预设对导入只管选模型。
 
 ## 3. 模型事实表(catalog)
 
@@ -221,7 +254,7 @@ user-data，即 checkout 根。你的行会标为 `self_reported`，产物中与
 | 列 | 必填 | 留空时 |
 | --- | --- | --- |
 | `fact_id` | ✅ | — 这行的名字，模型组按它引用 |
-| `provider_tier` | ✅ | — 与 `.env` 条目名一致（`GEMINI_FREE` / `GEMINI_PAID` / 自己的 provider id）。本地 agent 用 `LOCAL_CODEX` / `LOCAL_CLAUDE` / `LOCAL_AGY` / `LOCAL_DSH` / `LOCAL_WORKBUDDY`：它们不读 key，而是**决定用哪个 CLI driver**(`LOCAL_DSH` 的 `api_model_id` 要写成 `<dsh provider>/<model>`，例如 `deepseek-official/deepseek-v4-flash`，因为 dsh 从插件配置选模型而不是命令行；`LOCAL_WORKBUDDY` 写模型 id 本身，取值以服务端认的那张清单为准，且**每行都要写自己的 `quota_pool`**——那个账号是按模型线分别计额度的，见 [`agent.md`](agent.md) 4.2) |
+| `provider_tier` | ✅ | — 与 `.env` 条目名一致（`GEMINI_FREE` / `GEMINI_PAID` / 自己的 provider id）。本地 agent 用 `LOCAL_CODEX` / `LOCAL_CLAUDE` / `LOCAL_AGY` / `LOCAL_DSH` / `LOCAL_CODEBUDDY`：它们不读 key，而是**决定用哪个 CLI driver**(`LOCAL_DSH` 的 `api_model_id` 要写成 `<dsh provider>/<model>`，例如 `deepseek-official/deepseek-flash`，因为 dsh 从插件配置选模型而不是命令行；`LOCAL_CODEBUDDY` 写模型 id 本身，取值以服务端认的那张清单为准，且**每行都必须写 `quota_pool`**（留空会直接报错）——那个账号背后不止一份额度：一条免费线一份、付费的共用一份积分，见 [`agent.md`](agent.md) 4.2) |
 | `api_model_id` | ✅ | — 发给供应商的真实模型名 |
 | `max_input_tokens` | ✅ | — **这个 API 能接受的最大输入**，没有乐观默认。它和 `context_window` 一起决定窗口怎么切，见下一行 |
 | `provider_kind` | | 打包 tier 按其方言推断，否则 `openai_compat`。取 `gemini` / `local_agent` / `openai_compat` / `anthropic` |
@@ -231,16 +264,16 @@ user-data，即 checkout 根。你的行会标为 `self_reported`，产物中与
 | `max_output_tokens` | | 65536 |
 | `context_window` | | **留空 = 这一行不声明联合约束**，存成两者之和，于是它恒不起作用。Gemini 分别公布输入与输出两个上限，所以**免费档留空**；**付费档与 agy 仍然填了**（`ctx = max_input = 1048576`，包络 983040）——该决定基于按单池规划的考虑，而非假设两个公布值能够同时用尽。**单池供应商必须填**（Codex、Anthropic：答案和提示词花的是同一份预算）。窗口的输入包络取 `min(max_input_tokens, context_window − 输出上限)`，因此填写该列后，能放入一窗的输入会比 `max_input_tokens` 略小，差额正是预留给答案的空间。⚠ 若填写值小于 `max_input_tokens` 或 `max_output_tokens`，会**直接报错**，不会被静默截断 |
 | `supports_audio` / `supports_video` / `supports_native_search` | | `false`。能力位，用于逐候选过滤。两个自定义 HTTP 文本方言(`openai_compat`/`anthropic`)**不允许**声明音视频；打包的 Gemini REST 与本地 Agy target 可以声明媒体能力 |
-| `video_high_resolution_only` | | `false`。为 `true` 时，该模型参与的媒体格强制按高分辨率视频费率计帧（见 `docs/llm_local_agent_agy.md` §3）；出厂仅 agy 的 Gemini 行开启 |
+| `video_high_resolution_only` | | `false`。为 `true` 时，该模型参与的媒体格强制按高分辨率视频费率计帧（见 `docs/llm_local_agent_agy.md` [§3 视频](../llm_local_agent_agy.md#3-视频分辨率不可调现有-token-公式失真)）；出厂仅 agy 的 Gemini 行开启 |
 | `thinking` | | `true`（恒等映射），见下 |
 | `token_scale` | | 1.0，见下 |
 | `rpm` / `tpm` / `rpd` / `tpd` | | 100 / 4M / 无限 / 无限；`tpm`/`tpd` 只算输入 token,`-1` = 无限 |
-| `is_free` | | `false` |
-| `hint_output_ceiling` | | `false`。开关：告诉 agent「你每轮输出上限是本行的 `max_output_tokens`，快到时先调一次工具再继续」。**只对被实测证明受益的模型开**——说错的数比不说更糟，所以数字永远取本行的 `max_output_tokens`，不另填。出厂只有 `local-workbuddy-glm-5_3-flash` 开着 |
-| `fallback_model` | | 空。**这一列会花钱**：填了之后，本行的模型答不了时（额度耗尽，或重试一次仍然过载）由 CLI 自己把这次 session 交给这里写的模型跑完，并在结束时打一条 warning。只对有免费/付费孪生的行才有意义；出厂只有 `local-workbuddy-hy3`（→ `hy3-x`）与 `local-workbuddy-hy4`（→ `hy4-preview-x`）写了。留空 = 答不了就报错，这是每一行的默认 |
+| `is_free` | | `false`。这一列**不参与任何路由决策**，只是给人看的注解——唯一用到它的是一条告警：如果它说是免费的、却和一条付费行写了同一个 `quota_pool`，那两行里必有一行的额度记错了地方 |
+| `hint_output_ceiling` | | `false`。开关：告诉 agent「你每轮输出上限是本行的 `max_output_tokens`，快到时先调一次工具再继续」。**只对被实测证明受益的模型开**——说错的数比不说更糟，所以数字永远取本行的 `max_output_tokens`，不另填。出厂只有 `local-codebuddy-glm-5_3-flash` 开着 |
+| `fallback_model` | | 空。**这一列会花钱**：填了之后，本行的模型答不了时（额度耗尽，或重试一次仍然过载）由 CLI 自己把这次 session 交给这里写的模型跑完，并在结束时打一条 warning。只对有免费/付费孪生的行才有意义；出厂只有 `local-codebuddy-hy3`（→ `hy3-x`）写了。留空 = 答不了就报错，这是每一行的默认；写成本行自己的模型名等于没写（CLI 会跳过它） |
 | `quality_score` | | 0–100，**纯咨询性**：只用来生成告警，绝不参与任何路由决策。**留空 = 没有判断**，按 100 算（不触发任何质量下限），并在日志里记一条 note 说明这件事——留空不是「判断为差」，想让下限对它生效就填个数 |
 | — | | **规划包络与请求上限是两个数**（2026-09-04）：包络按「预计输出」从 `context_window` 里扣（纠错窗是 `output_scale × 输出系数 × 每窗字幕上限`，非纠错轮是 `output_scale × 32000`），而每次调用**仍然按答题模型自己的 `max_output_tokens` 打满地请求**。预留按估计放开输入，请求按上限保住答案余量 |
-| `quota_pool` | | 取 `provider_tier`。**只对本地 agent 有意义**：一个订阅额度用完时，同池的 target 会一起被停用（见 [`agent.md`](agent.md) §6）。写入该列才启用分组；出厂由 Antigravity(`AGY_GEMINI` / `AGY_ANTHROPIC`)与 WorkBuddy(每行一个，实测该账号按模型线分别计额度)配置了，因为其单个 CLI 背后是两份独立计量的额度 |
+| `quota_pool` | | 取 `provider_tier`。**只对本地 agent 有意义**：一个订阅额度用完时，同池的 target 会一起被停用（见 [`agent.md`](agent.md) [§6 异常处理](agent.md#6-异常处理)）。三种写法——**留空** = 该 tier 一份额度；**`per-model`** = 这一行自己一份（池名自动派生，所以新增一条独立计量的线不用起名字）；**写一个名字** = 明确和写了同一个名字的行共用。出厂 Antigravity 写了 `AGY_GEMINI` / `AGY_ANTHROPIC`，CodeBuddy 的免费线写 `per-model`、付费行写 `CODEBUDDY_CREDITS`（它们花的是同一份积分）。⚠ **这两个 tier 上留空会直接报错**：一个 CLI 背后有好几份分开计量的额度，「按 tier」在那里不是答案，猜哪边都会把某类行记错——报错文本会告诉你该写哪个 |
 
 ### 窗口太小的模型会被拦下
 
@@ -279,6 +312,7 @@ user-data，即 checkout 根。你的行会标为 `self_reported`，产物中与
 | `true` | **恒等映射**（默认）：抽象档位原样发出 |
 | `false` | 这个模型完全不发思考参数（**包括全局覆盖也不发**） |
 | `高映射,中映射,低映射` | 三个供应商取值，覆盖恒等 |
+| `高,中,低` 三个整数 | 按 token 预算控制思考的模型（Gemini 2.5）：直接就是三档的思考预算 |
 
 恒等是合理默认而非巧合，三家的档位词本来就同名：
 
@@ -293,6 +327,9 @@ user-data，即 checkout 根。你的行会标为 `self_reported`，产物中与
 `medium,medium,low`——它在同一个抽象档位上比 3.7 多想约 1.5 倍，而思考与字幕正文共用同一份
 输出上限，所以 high 被压回 medium;medium 那一格**故意保持 medium 不再往下**，因为实测把它降到
 `low` 之后，五个纠错窗里有四个一个思考 token 都不出——`low` 是把要不要想交给模型，不是少想一点。
+**按预算控制思考的模型写三个整数**：Gemini 2.5 没有档位词，只收 token 预算。不写时预算按输出上限的比例推出（20% / 40% /
+60%，65536 下即 13107 / 26214 / 39321），可 2.5 Flash 的上限是 24576，超了 API 直接拒绝整次调用。所以出厂的 2.5 Flash 写
+`24576,16384,8192`——按同一比例缩到它的上限之内。自己接 2.5 系模型时照此写，数字不超过该模型的上限。
 映射同样用于本地 headless agent target:Codex 走 `model_reasoning_effort`,
 Claude Code 走 `--effort`,dsh 写进它模型插件的 `reasoningEffort`。DeepSeek 那个插件只有
 off/low/high/max，没有 `medium`，所以 FineSub 会把 `medium` 译成 `high`、`xhigh` 译成 `max`。
@@ -307,10 +344,7 @@ off/low/high/max，没有 `medium`，所以 FineSub 会把 `medium` 译成 `high
 | --- | ---: | --- | --- | --- |
 | correction-mm | 70 | 3.7 Flash | `correction-capable` | 免费 3.7 Flash(75) → 免费 3.8 Flash(75) → 免费 3.6 Flash(75) → 免费 3.5 Flash(70) → 付费 3.7 Flash(75) → 付费 3.8 Flash(75) |
 | correction-text | 70 | 3.7 Flash | `correction-capable` | 同上 |
-| planning-mm | 50 | 3.5 Flash Lite | `lightweight-default` | 免费 3.5 Lite(60) → 付费 3.5 Lite(60) |
-| planning-text | 50 | 3.5 Flash Lite | `lightweight-default` | 同上 |
 | research | 50 | 3.6 Flash | `research-default` | 免费 3.6 Flash(75) → 免费 3.5 Flash(70) → 免费 3.7 Flash(75) → 免费 3.8 Flash(75) → 付费 3.7 Flash(75) → 付费 3.8 Flash(75) |
-| search_judge | 50 | 3.5 Flash Lite | `lightweight-default` | 同 planning |
 | knowledge | 70 | 3.6 Flash | `knowledge-capable` | 同 research |
 
 「参考模型」是**派生**的，且**按格**：该格所绑模型组的第一个成员。所以纠错的 `intermediate` /
@@ -320,7 +354,17 @@ off/low/high/max，没有 `medium`，所以 FineSub 会把 `medium` 译成 `high
 
 其余任务组只绑 quality，低档自动向上继承。
 
-### 另外两个出厂预设：`agy-hybrid` 与 `agy`
+两条要事先知道的代价：
+
+- **免费档的知识更新为尽力而为(best-effort)。** `knowledge` 与 `research` 均以免费 capable 模型
+  优先，而免费档仅有 **20 RPD**。带调查的 run 会先消耗 research 配额，之后再分 chunk 执行知识
+  更新，免费档很容易在知识更新阶段耗尽配额，且**没有 lite 后备**。这是「不静默降质」的代价，并非
+  bug。
+- **`--llm-retrieval native` 需要具备联网能力的模型。** 出厂由付费 3.7 / 3.8 Flash 提供联网；免费
+  3.x 完全无法联网，纯免费档运行 native 会在启动校验时报错。此时可开启付费档，或显式绑定打包的
+  `gemini-native-search` 组（含免费 2.5 Flash，但其 50 分低于纠错/知识的下限 70）。
+
+### agent 的两个出厂预设：`agy-hybrid` 与 `agy`
 
 两个都把 Antigravity 排进模型组，是 agent 模式的入口（详见 [`agent.md`](agent.md)）;
 差别只有一处——**免费 API 在不在名单里**。
@@ -329,16 +373,26 @@ off/low/high/max，没有 `medium`，所以 FineSub 会把 `medium` 译成 `high
 
 | 模型组 | 成员（有序） | 绑定的格子 |
 | --- | --- | --- |
-| `agy-capable` | 免费 3.7 Flash → 免费 3.8 Flash → agy Opus 4.6 → agy Gemini 3.7 Flash | 纠错的 quality + intermediate、knowledge/quality |
-| `agy-basic` | 免费 3.5 Flash → agy Opus 4.6 → agy Gemini 3.7 Flash | research、planning、search_judge 的 quality |
+| `agy-capable` | 免费 3.7 Flash → 免费 3.8 Flash → agy Sonnet 5.5 → agy Gemini 3.7 Flash | 纠错的 quality + intermediate、knowledge/quality |
+| `agy-basic` | 免费 3.5 Flash → agy Sonnet 5.5 → agy Gemini 3.7 Flash | research 的 quality |
+
+免费 API 在前是有意的，两边的额度都不浪费。Sonnet 5.5 是**纯文本**，排在媒体成员之前同样有意：
+文字任务优先给它，带剪辑的任务在能力过滤时自动跳过它、落到 agy 前置的那个 Gemini。
+
+这一节几张表都没写全的一点：每组末尾都还有一个 `local-agy-native-gemini-3_7-flash`——同一个
+模型，只是额外授权了 agy 自带的搜索工具，**只有 `--llm-retrieval native` 会选中它**（普通
+调用在它前面就已经落到未授权那一档）。注意 agy 只报搜索词、不报来源 URL,Codex/Claude
+那两档才有完整出处。
 
 `[llm] preset = "agy"`：同样的格子，但名单中**没有任何 API 成员**。适用于已付费订阅、不愿再
-管理 API key 的情况。
+管理 API key 的情况。它带一个开关默认值 `retrieval = "native"`，联网搜索用 agy 自带的工具，
+因为 `local` 检索要 Exa / Gemini Free / Tavily 的 key。代价是检索时每组只剩末尾那个带搜索授权的 agy Gemini（纯文本窗也不再先给
+Sonnet），且只报搜索词、不报来源 URL；要换回就在命令行写 `--llm-retrieval local`。
 
 | 模型组 | 成员（有序） | 绑定的格子 |
 | --- | --- | --- |
-| `agy-only-capable` | agy Opus 4.6 → agy Gemini 3.7 Flash | 纠错的 quality + intermediate、knowledge/quality |
-| `agy-only-basic` | agy Opus 4.6 → agy Gemini 3.7 Flash | research、planning、search_judge 的 quality |
+| `agy-only-capable` | agy Sonnet 5.5 → agy Gemini 3.7 Flash | 纠错的 quality + intermediate、knowledge/quality |
+| `agy-only-basic` | agy Sonnet 5.5 → agy Gemini 3.7 Flash | research 的 quality |
 
 > **与 `execution_policy = "agent-only"` 有何区别？** 两条路径可能产生相同的调用，但语义不同：
 > policy 是**全局后端闸门**，只能禁用一个后端、不能新增成员，且对**任何**激活的预设生效；预设
@@ -349,18 +403,33 @@ off/low/high/max，没有 `medium`，所以 FineSub 会把 `medium` 译成 `high
 > Gemini Lite:`--test-profile` 会将整轮运行中的每一次调用都固定到 test target 上；若沿用默认
 > 值，相当于让「纯 agy」运行的测试全部打到 API 上。
 
-> Opus 4.6 一行的思考档位**不可调**：agy 将档位编码在模型名中，仅其 Gemini 系列区分
-> high/medium/low。因此该行 `thinking` 填写 `false`,`[llm].local_agent_reasoning_effort`
-> 对它也不生效（携带该参数时 agy 会直接拒绝请求）。
+> agy 的 Sonnet 5.5 与 Opus 5.5 按 high/medium/low 原样接收思考档位（`thinking` 为默认映射）。
+> agy 没有 `xhigh`：`[llm].local_agent_reasoning_effort = "xhigh"` 对 agy 的各行按 `high` 发。
+> Opus 5.5 不在任何出厂模型组里，要用就 `--llm-model local-agy-opus-5_5` 点名，或列进自己的模型组。
+
+### 快速粗纠：`agy-fast` 与 `fast`
+
+给很长的输入做一遍不过度思考的简单纠错，意思大致对、方便找亮点即可。用 `--llm-preset agy-fast` 或 `--llm-preset fast` 选，
+两者的开关默认值相同：`difficulty = "efficiency"`（纯文本、不检索、低思考；照常读知识库与风格，不回写）、
+`continuity = "parallel"`、`parallel_windows = 4`（4 个窗口同时跑）。命令行写了的照样优先。
+`agy-fast` 另写了 `retrieval = "none"`：在它下面改用 `--llm-difficulty quality` 时不搜索，而不是落到要 key 的 `local`；
+要 agy 的完整质量档（含自带搜索），用 `--llm-preset agy`。
+
+| 预设 | 给谁 | efficiency 格 | 其余格 |
+| --- | --- | --- | --- |
+| `agy-fast` | 有 agy 订阅的人 | 纠错与准备任务都只用 agy Gemini 3.7 Flash（`agy-only-fast`）；5 小时额度用完就停下报错，**不会转到 API** | 与 `agy` 相同 |
+| `fast` | 只用 API 的人 | 纠错落到两个 3.5 Flash Lite（免费在前、付费在后）；准备任务与 `default` 相同（免费 3.6 / 3.5 / 3.7 / 3.8 Flash，再接付费） | 与 `default` 相同 |
+
+4 个窗口是上限，实际并发还受 `[llm].local_agent_max_parallel`（agent，默认 4）或 API 的每分钟请求限速约束。
 
 ### dsh 的两个组：`dsh-capable` / `dsh-basic`
 
-**没有预设会自动绑它们**，要用就在 `[llm.bindings]` 里显式绑：
+**没有预设会自动绑它们**，要用就在自己预设的 `[llm.presets.<名>.bindings]` 里显式绑：
 
 | 模型组 | 成员（有序） |
 | --- | --- |
-| `dsh-capable` | DeepSeek-V4-Pro → V4-Flash → V4-Pro（带搜索） |
-| `dsh-basic` | DeepSeek-V4-Flash → V4-Pro（带搜索） |
+| `dsh-capable` | DeepSeek-V4.1-Flash → V4-Pro → V4.1-Flash（带搜索） → V4-Pro（带搜索） |
+| `dsh-basic` | DeepSeek-V4.1-Flash → V4.1-Flash（带搜索） |
 
 > **只能绑定到按窗口执行的格子。** dsh 仅从命令行接收任务，整窗字幕无法放入命令行，因此它只支持
 > 工具会话；绑定到 `api` 或 `resume` 档位会直接报错。同时它不支持音视频，也无法报告 token 用量。
@@ -384,23 +453,24 @@ target；两档都要等于两个模型，得写两行不同的 `api_model_id`�
 `reasoning`。原因是 dsh 的配置覆盖采用整键替换：若 FineSub 代为写入该项，会把该 provider 的
 `baseURL` 与 key 一并覆盖，因此 FineSub 不修改此项，档位设置留给你自行完成。
 
-免费 API 在前是有意的，两边的额度都不浪费。Opus 4.6 是**纯文本**，排在媒体成员之前同样有意：
-文字任务优先给它，带剪辑的任务在能力过滤时自动跳过它、落到 agy 前置的那个 Gemini。
+### CodeBuddy 的两个组：`codebuddy-capable` / `codebuddy-basic`
 
-前面几张表没写全的一点：每组末尾都还有一个 `local-agy-native-gemini-3_7-flash`——同一个
-模型，只是额外授权了 agy 自带的搜索工具，**只有 `--llm-retrieval native` 会选中它**（普通
-调用在它前面就已经落到未授权那一档）。注意 agy 只报搜索词、不报来源 URL,Codex/Claude
-那两档才有完整出处。
+同样**没有预设会自动绑它们**，要用就在自己预设的 `[llm.presets.<名>.bindings]` 里显式绑：
 
-两条要事先知道的代价：
+| 模型组 | 成员（有序） |
+| --- | --- |
+| `codebuddy-capable` | GLM-5.3-Flash → DeepSeek-V4.1-Flash → V4-Pro → V4.1-Flash（带搜索） → V4-Pro（带搜索） |
+| `codebuddy-basic` | hy3 → GLM-5.3-Flash → DeepSeek-V4.1-Flash → hy3（带搜索） |
 
-- **免费档的知识更新为尽力而为(best-effort)。** `knowledge` 与 `research` 均以免费 capable 模型
-  优先，而免费档仅有 **20 RPD**。带调查的 run 会先消耗 research 配额，之后再分 chunk 执行知识
-  更新，免费档很容易在知识更新阶段耗尽配额，且**没有 lite 后备**。这是「不静默降质」的代价，并非
-  bug。
-- **`--llm-retrieval native` 需要具备联网能力的模型。** 出厂由付费 3.7 / 3.8 Flash 提供联网；免费
-  3.x 完全无法联网，纯免费档运行 native 会在启动校验时报错。此时可开启付费档，或显式绑定打包的
-  `gemini-native-search` 组（含免费 2.5 Flash，但其 50 分低于纠错/知识的下限 70）。
+> **两个组都会扣积分。** `codebuddy-capable` 的成员全是付费线；`codebuddy-basic` 从免费的 hy3 开始，但 hy3
+> 出厂带着付费孪生（免费额度用完时由 CLI 切到 `hy3-x` 计费），后面的 GLM、DeepSeek 也是付费线。只想用免费
+> 额度，就不绑组，直接绑 `local-codebuddy-hy3`，再把这一行的 `fallback_model` 清空（做法见
+> [`agent.md`](agent.md) 4.2）。
+>
+> GLM-5.3-Flash 排第一，因为它是 [`agent.md`](agent.md) 4.2 推荐的那一行，这样绑组和绑单个模型从同一个模型开始。
+> 它的单次输出上限只有 32,000，所以绑这两个组会看到「最大输出 32000 < 64000」的窗口告警，原因同 4.2。
+> 免费线 hy3 与付费线各记各的额度，hy3 用完只让链条往下走一格。模型清单跟着账号走：你的账号够不到其中某个
+> 模型时，调用会直接报错并贴出服务端原话（安装、登录与站点的说明也在 4.2）。
 
 ## 5. 接自己的模型
 
@@ -417,7 +487,7 @@ target；两档都要等于两个模型，得写两行不同的 `api_model_id`�
 
 ```text
 fact_id|provider_tier|provider_kind|base_url|api_model_id|max_input_tokens|max_output_tokens|quality_score
-ds-flash|deepseek|openai_compat|https://api.deepseek.com|deepseek-v4-flash|128000|32768|60
+ds-flash|deepseek|openai_compat|https://api.deepseek.com|deepseek-flash|128000|32768|60
 ```
 
 这一行同时做了三件事：声明 `deepseek` 这个 provider（方言 + 端点）、成为一条 `self_reported`
@@ -428,7 +498,7 @@ ds-flash|deepseek|openai_compat|https://api.deepseek.com|deepseek-v4-flash|12800
 
 **③ 编排**——在 `config.toml` 里组队、绑格子。全是**具名表**（没有 `[[数组表]]`），所以设置
 面板的写入器和手动编辑可以共存。用打包已有的名字就是覆盖它（例如重写
-`[llm.model_groups.lightweight-default]` 换掉出厂的轻量组，或整个重写
+`[llm.model_groups.correction-basic]` 换掉出厂的纠错降档组，或整个重写
 `[llm.presets.default]`）；覆盖会在启动时列出来：
 
 ```toml
@@ -456,16 +526,18 @@ name = "DeepSeek 纠错"
 [llm.presets.my-deepseek.bindings]
 "correction-text/quality" = "my-corr"        # 一个模型组
 "research/quality"        = "ds-flash"       # 直接一个模型
-"knowledge/quality"       = "local-codex-completion-gpt-5_6-luna"
+"knowledge/quality"       = "local-codex-completion-gpt-6-luna"
 ```
 
 FineSub 会自动把它包成一个单成员模型组（内部名 `target:<名字>`）。这也是使用 Codex / Claude
-Code / WorkBuddy 的办法：它们的 target 都已声明好，出厂预设只是没绑。可用的 target 名见
-`model_routes.toml` 的 `[targets.*]` 段（随代码发布，与 catalog 同目录）:`local-codex-*` /
-`local-claude-*` 各有两个变体，`completion` 与 `native` 的区别在于是否允许模型使用自己的搜索
-工具，后者走带 `web-search` 的 execution profile。`local-workbuddy-*` 与 `local-dsh-*` 没有
-`completion` 中缀（`local-workbuddy-hy3` / `local-workbuddy-native-hy3`），因为这两个
-tier 会给用户自己加的 catalog 行**自动生成同形的 target**。
+Code / CodeBuddy 的办法：出厂预设只是没绑。可用的 target 名：Codex / Claude / agy 写在
+`model_routes.toml` 的 `[targets.*]` 段（随代码发布，与 catalog 同目录）；打包的
+`local-dsh-*` / `local-codebuddy-*` 由 catalog 行自动长出一对（不带搜索的 `fact_id`，以及
+vendor 前缀后插入 `native` 的搜索档）。`local-codex-*` / `local-claude-*` 各有 `completion` 与
+`native` 两个变体，区别在于是否允许模型使用自己的搜索工具。`local-codebuddy-*` 与 `local-dsh-*`
+没有 `completion` 中缀（`local-codebuddy-hy3` / `local-codebuddy-native-hy3`），因为这两个
+tier 会给用户自己加的 catalog 行**自动生成同形的 target**——用户行仍是一行一个 target，
+`supports_native_search` 决定带不带搜索；两档都要等于两个模型，得写两行不同的 `api_model_id`。
 
 **同名时模型组优先**，因此即使 catalog 中新增了同名模型行，也不会在不知情的情况下改变你的绑定。
 
@@ -484,15 +556,17 @@ research = "ds-flash"         # 这个任务组钉单模型(按任务组的写�
 模型，失败也应清晰可见。若因此导致某个 `-mm` 格子无可用模型，启动时会给出警告。
 
 - 值先查模型组、再查 target；同名同时存在时报二义性错误。任务组名必须是真的
-  (`correction-mm` / `correction-text` / `planning-mm` / `planning-text` /
-  `research` / `search_judge` / `knowledge`)，写错直接报错并列出可选值。
+  (`correction-mm` / `correction-text` / `research` / `knowledge`)，写错直接报错并列出可选值。
 - **对激活预设与 default 预设均生效**——未绑定的格子会回落到 default 预设，若优先模型恰好在这些
   格子上无法使用，则属于较难发现的问题。
-- 修改该表会使未完成进度失效（见 §7），因为「由谁应答」本身就是路由身份的一部分。
+- 修改该表会使未完成进度失效（见 [§7 什么会作废已完成的进度](#7-什么会作废已完成的进度)），因为「由谁应答」本身就是路由身份的一部分。
 
-**不改文件的运行时版本**：`--llm-model [任务组=]值`（可重复；裸值 = default）,
-`finesub.pipeline` / `finesub.llm.correction_translation` 与
-`finesub.llm.knowledge` 的 `repair`/`verify` 都收。语义与上表相同，只对本次进程生效，
+**命令行选预设**：`--llm-preset <名>` 只对这次运行生效，优先于 `config.toml` 的 `[llm] preset`；不存在的名字直接报错并列出可选的。
+`finesub.pipeline`（整批一个；manifest 行里不能写）、`finesub.llm.correction_translation`、`finesub.llm.knowledge` 的
+`repair`/`verify`/`ingest`、`finesub.llm.knowledge.update`、参考资料导入都收。换预设与在配置里换一样：只作废还没交付的那次调用的断点。
+
+**不改文件的运行时版本**：`--llm-model [任务组=]值`（可重复；裸值 = default；作用在选好的预设之上），收它的入口与上面
+`--llm-preset` 相同（两者共用一份定义）。语义与上表相同，只对本次进程生效，
 config.toml 不动；优先级按 `命令行[任务组] > 命令行[default] > 配置[任务组] > 配置[default]`
 逐格解析——裸写 `--llm-model X` 会盖过配置里的按任务组指定（这一次就是全用 X）,
 配置里没被命令行碰到的任务组照旧生效。
@@ -503,7 +577,7 @@ config.toml 不动；优先级按 `命令行[任务组] > 命令行[default] > �
 ### 第一版的三条硬限制
 
 1. **自定义 endpoint 只做纯文本。** 媒体由打包的 Gemini REST 或本地 Agy target 承担。想让纯
-   文本强模型处理带音视频的素材，用 `--llm-correction-media text`（查询轮照常吃剪辑）。绑错不会
+   文本强模型处理带音视频的素材，用 `--llm-media text`。绑错不会
    静默丢音频，带媒体的调用会在能力过滤时跳过它。
 2. **日封禁机制不适用于非 Gemini 服务。** 日额度封禁依赖 Gemini 的结构化 `quotaId` 判定；其他
    服务返回的 429 默认按限流处理，达到上限后会持续退避重试（若错误文本明确指向日配额，仍归入日
@@ -520,7 +594,7 @@ config.toml 不动；优先级按 `命令行[任务组] > 命令行[default] > �
 | --- | --- | --- |
 | `成员 X 的 quality_score=N 低于下限 M` | quality 格的组里有成员低于任务组下限 | 确认是有意放的。另外两档本身就是声明过的降档，不告警 |
 | `成员 X 未声明 quality_score，按 100 计` | 这是 **note 不是告警**（只进日志，`--verbose` 才上屏）| 不必处理。想让质量下限对它生效，就在 catalog 行里填个分 |
-| `规划包络由 X 决定 (…tokens…)，窗口数约 ×N` | 组内最小的输入包络/输出上限低于免费 Gemini 基线 | 窗口按**组内最低**规划（谁应答还没定，必须保守）。×N 是窗口数放大倍数。⚠ 2026-09 起**反过来也成立了**：harness 那道 194,000 的硬上限已经删掉，组内全是大窗口模型就真的会切出更大的窗。真正还在限制每窗字幕量的是质量护栏 `[chunking] max_window_subtitle_tokens`（默认 10000），把它设成 0 会连这道也去掉——那时窗口大小随模型的输出上限走，进入未标定区（`docs/llm_followups.md` 的 P6） |
+| `规划包络由 X 决定 (…tokens…)，窗口数约 ×N` | 组内最小的输入包络/输出上限低于免费 Gemini 基线 | 窗口按**组内最低**规划（谁应答还没定，必须保守）。×N 是窗口数放大倍数。⚠ 2026-09 起**反过来也成立了**：harness 那道 194,000 的硬上限已经删掉，组内全是大窗口模型就真的会切出更大的窗。真正还在限制每窗字幕量的是质量护栏 `[chunking] max_window_subtitle_tokens`（默认 10000），把它设成 0 会连这道也去掉——那时窗口大小只随模型的输出上限与输出系数走，护栏原本挡住的质量风险就没人管了 |
 | `组内没有成员支持音频` | `-mm` 格里一个能听的都没有 | 带媒体的调用会在能力过滤后无候选可用；换模型，或把该任务改成 `text` |
 | `N 个成员里只有 1 个支持音频` | 该格能服务媒体调用，但只有一个候选 | 不是错误：纯文本成员排在前面是刻意的（文字任务优先给它）。但媒体调用的链长为 1，那一个失败就整轮失败，想要冗余就再加一个能听的成员 |
 | `target X 不支持视频，按 video->audio 降一级` | 运行期安全网触发 | 正常配置不该看到它。说明该格里混进了看不了视频的模型 |
@@ -540,9 +614,10 @@ prompt 变体，逐窗记录会保留实际 `variant` / `difficulty` / `knowledg
 | 改 `continuity` | 复用（`parallel→serial` 会告警：advice 台账从空重建） | 复用 |
 | 改知识库内容、`--knowledge` | 复用 | 复用 |
 | 改 `quality_score`、`floor_score`、显示名、预设名、注释 | 复用 | 复用 |
+| 改预设的开关默认值（`defaults`） | 与在命令行上改同一个开关相同（见上面各行） | 同左 |
 | 重新下载同一份音视频（大小不变） | 复用 | 复用 |
 | 改媒体开关、`--output-scale`、`token_scale`、窗口上限，或换成**上下文更小的模型组** | 复用；pending 窗按当前包络预拆 | 复用（若同时改 retrieval，则重跑） |
-| 改 prompt version、任务备注/风格、`--research-search-rounds`、`--test-profile` | ❌ | ❌ |
+| 改 prompt version、任务备注/风格、`--test-profile` | ❌ | ❌ |
 | `*-stable.json` 内容变化 | ❌ | ❌ |
 | 计划/JSON 损坏、schema 不兼容、存档响应过不了当前 parser | 该层重做；被覆盖的 context 先备份为 `*.invalid[.N]` | 同左 |
 | `--no-resume` 或删除产物 | 按要求重新执行 | 同左 |
@@ -552,7 +627,7 @@ prompt 变体，逐窗记录会保留实际 `variant` / `difficulty` / `knowledg
 窗口变大：更换为更大模型后，如需合成更少、更大的窗口，可显式删除 artifact 目录中的
 `correction-window-plan.json`——这会同时放弃原 chunk id 对窗口缓存的寻址。
 
-`efficiency` 会连带把纠错媒体钉成 `text`、检索钉成 `none`（见 §2）。前者只触发
+`efficiency` 会连带把纠错媒体钉成 `text`、检索钉成 `none`（见 [§2 开关与旋钮](#2-开关与旋钮)）。前者只触发
 pending 窗口预算体检；后者改变调查语义，所以已有 research context 会重跑。只想在额度耗尽后
 换便宜模型并最大限度复用两层产物，仍优先用 **`intermediate`**：它只换 prompt 变体和思考档位，
 窗口与调查都原样保留；`efficiency` 则保留已完成窗口、重做调查并体检 pending 窗。

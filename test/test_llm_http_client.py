@@ -19,7 +19,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-from finesub.llm import http as llm_http
 from finesub.llm.http import DIRECT, client_kwargs, llm_http_client
 
 LLM_ROOT = Path(__file__).resolve().parents[1] / "src" / "finesub" / "llm"
@@ -95,9 +94,11 @@ def test_every_injectable_call_site_defaults_to_the_factory() -> None:
 
 @pytest.fixture(autouse=True)
 def _forget_config():
-    llm_http.reset_proxy_cache()
+    from finesub import config as config_module
+
+    config_module.clear_config_cache()
     yield
-    llm_http.reset_proxy_cache()
+    config_module.clear_config_cache()
 
 
 def _config(tmp_path: Path, monkeypatch, body: str) -> None:
@@ -134,6 +135,17 @@ def test_direct_is_how_you_say_no_proxy_on_a_proxied_machine(
     """Without it, "unset the key" would still leave `HTTPS_PROXY` in charge."""
 
     _config(tmp_path, monkeypatch, f'[llm]\nproxy = "{DIRECT}"\n')
+    assert client_kwargs() == {"proxy": None, "trust_env": False}
+
+
+def test_an_edited_proxy_reaches_the_next_client(tmp_path, monkeypatch) -> None:
+    """No memo in between: config.toml edits take effect on the next read,
+    here as everywhere else. It used to be pinned for the life of the process."""
+
+    _config(tmp_path, monkeypatch, '[llm]\nproxy = "http://127.0.0.1:7890"\n')
+    assert client_kwargs()["proxy"] == "http://127.0.0.1:7890"
+
+    (tmp_path / "config.toml").write_text(f'[llm]\nproxy = "{DIRECT}"\n', encoding="utf-8")
     assert client_kwargs() == {"proxy": None, "trust_env": False}
 
 

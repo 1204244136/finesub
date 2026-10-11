@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Dict
+from typing import Any, Dict
 
 # Only harness-authored section headers — search/extract bodies often contain
 # markdown ``##`` headings that must not truncate the user prompt.
@@ -18,10 +18,16 @@ def split_exchange_sections(text: str) -> Dict[str, str]:
 
     Section titles match ``ExchangeLogger`` output: ``请求（system）``,
     ``请求（user）``, ``模型响应``. Missing sections become empty strings.
+
+    A task-flow delivery exchange renders the whole conversation -- system,
+    the opening user message, the replayed ``请求（assistant）`` request turn
+    and the fill turn as a second user section. ``user`` is the *opening*
+    (the window's own inputs live there); every user body is kept in order
+    under ``users`` and the assistant turn under ``assistant``.
     """
 
     matches = list(_SECTION_RE.finditer(text or ""))
-    out: Dict[str, str] = {"system": "", "user": "", "response": ""}
+    out: Dict[str, Any] = {"system": "", "user": "", "response": "", "users": [], "assistant": ""}
     for idx, match in enumerate(matches):
         title = match.group("title").strip()
         start = match.end()
@@ -31,7 +37,11 @@ def split_exchange_sections(text: str) -> Dict[str, str]:
         if title.startswith("请求") and "system" in title_lower:
             out["system"] = body
         elif title.startswith("请求") and "user" in title_lower:
-            out["user"] = body
+            out["users"].append(body)
+            if not out["user"]:
+                out["user"] = body
+        elif title.startswith("请求") and "assistant" in title_lower:
+            out["assistant"] = body
         elif "模型响应" in title or title.strip() in {"响应", "response"}:
             out["response"] = body
     return out

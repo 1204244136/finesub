@@ -12,7 +12,10 @@ from types import SimpleNamespace
 import pytest
 
 from finesub.llm.agent.local_agent import (
+    AGENT_USER_RULES_NOTICE,
     RETAINED_FAILED_EPISODES,
+    RETAINED_UNACCEPTED_EPISODES,
+    UNACCEPTED_EPISODE_MARKER,
     AgyDriverConfig,
     AgyLocalAgentDriver,
     AgentCapsuleManager,
@@ -45,7 +48,7 @@ if "--help" in args:
 payload = sys.stdin.buffer.read()
 print(json.dumps({"type":"thread.started","thread_id":"11111111-2222-3333-4444-555555555555"}))
 mode = "ok"
-for marker in ("sleep", "child", "tool", "search", "search-started", "fail", "config-fail", "catalog-fail", "large", "env", "argv", "unknown", "todo", "item-error", "turn-failed", "stdout-flood", "stderr-flood"):
+for marker in ("sleep", "child", "tool", "search", "search-started", "fail", "config-fail", "catalog-fail", "large", "env", "envdump", "argv", "unknown", "todo", "item-error", "turn-failed", "stdout-flood", "stderr-flood", "stale-cache-turn-failed"):
     if marker.encode() in payload:
         mode = marker
 if mode == "sleep":
@@ -82,10 +85,18 @@ if mode == "config-fail":
 if mode == "catalog-fail":
     sys.stderr.write("failed to decode models response: future schema\n")
     raise SystemExit(7)
+if mode == "stale-cache-turn-failed":
+    sys.stderr.write("ERROR codex_models_manager::manager: failed to load models cache: missing field\n")
+    print(json.dumps({"type":"turn.started"}))
+    print(json.dumps({"type":"error","message":"You've hit your usage limit."}))
+    print(json.dumps({"type":"turn.failed","error":{"message":"You've hit your usage limit."}}))
+    raise SystemExit(1)
 if mode == "large":
     result = "x" * 100
 elif mode == "env":
     result = str("GEMINI_FREE" in os.environ)
+elif mode == "envdump":
+    result = json.dumps({"env": dict(os.environ), "argv": args})
 elif mode == "argv":
     result = json.dumps(args)
 else:
@@ -195,6 +206,7 @@ if "/hooks" in args:
     if "--log-file" in args:
         log = Path(args[args.index("--log-file") + 1])
         log.write_text(
+            "I server.go:1663] Language server version: 1.1.13\n"
             'project: created project "runtime" '
             '(id=11111111-2222-3333-4444-555555555555) at fake.json\n',
             encoding="utf-8",
@@ -235,7 +247,11 @@ print(json.dumps({"event": "step_update", "step_update": {
 }}))
 print(json.dumps({"event": "result", "result": {
     "conversation_id": "agy-conv", "status": "SUCCESS",
-    "response": "<translated>agy</translated>",
+    "response": (
+        "thought\nI should check row 1 first."
+        if "LEAK" in json.dumps(messages)
+        else "<translated>agy</translated>"
+    ),
     "duration_seconds": 1, "num_turns": 1,
     "usage": {"input_tokens": 12, "output_tokens": 3,
               "thinking_tokens": 2, "cache_read_tokens": 4,
@@ -278,6 +294,7 @@ def _driver(tmp_path: Path, monkeypatch, **overrides) -> CodexLocalAgentDriver:
         config_overrides=overrides.get("config_overrides", ()),
         max_parallel=overrides.get("max_parallel", 1),
         stall_timeout_seconds=overrides.get("stall_timeout_seconds", 0.0),
+        keep_episodes=overrides.get("keep_episodes", False),
     )
     return CodexLocalAgentDriver(config)
 
@@ -285,7 +302,7 @@ def _driver(tmp_path: Path, monkeypatch, **overrides) -> CodexLocalAgentDriver:
 def _agy_driver(tmp_path: Path) -> AgyLocalAgentDriver:
     script = tmp_path / "fake_agy.py"
     script.write_text(FAKE_AGY, encoding="utf-8")
-    return AgyLocalAgentDriver(
+    driver = AgyLocalAgentDriver(
         AgyDriverConfig(
             command=(sys.executable, str(script)),
             runtime_root=tmp_path / "runtime",
@@ -298,43 +315,48 @@ def _agy_driver(tmp_path: Path) -> AgyLocalAgentDriver:
             max_stderr_bytes=8192,
         )
     )
+    # The fake CLI writes no project record; grants have their own tests.
+    driver._grant_permissions = lambda *a, **k: None  # type: ignore[assignment]
+    return driver
 
 
-def test_agy_sends_effort_only_to_the_models_that_accept_it() -> None:
-    """agy rejects `--effort` for every model that bakes the level into its id.
+def test_every_agy_spawn_switches_its_update_check_off(monkeypatch) -> None:
+    """agy's update check runs `agy --version` in a detached console that
+    `no_window()` cannot hide; only the environment switch keeps it away.
+    The model call, the probe and the `/hooks` check all carry it."""
 
-    Verified against the real CLI on 2026-08-15:
+    driver = AgyLocalAgentDriver(AgyDriverConfig(command=("agy",)))
+    for env in (driver._spawn_environment(), driver._spawn_environment(native_search=True)):
+        assert env["AGY_CLI_DISABLE_AUTO_UPDATE"] == "true"
 
-        Error: invalid model selection (--model "claude-opus-4-6-thinking"
-        --effort "high"): --effort is not supported for model "..."
+    seen: list[dict[str, str]] = []
 
-    That is a hard pre-flight failure, which classifies as transient -- two of
-    them and the quota probe freezes the whole Antigravity allowance for five
-    hours over a flag. Re-derive the split with `agy models`.
-    """
+    def fake_run(argv, **kwargs):
+        seen.append(kwargs["env"])
+        return subprocess.CompletedProcess(argv, 0, "1.2.13", "")
 
-    from finesub.llm.agent.local_agent import _agy_model_takes_effort
-
-    assert _agy_model_takes_effort("gemini-3.7-flash") is True
-    assert _agy_model_takes_effort("gemini-3.5-flash") is True
-    assert _agy_model_takes_effort("claude-opus-4-6-thinking") is False
-    assert _agy_model_takes_effort("claude-sonnet-4-6") is False
-    assert _agy_model_takes_effort("gpt-oss-120b-medium") is False
+    monkeypatch.setattr(local_agent_module, "_resolve_shell_free_command", lambda command: ("agy",))
+    monkeypatch.setattr(local_agent_module.subprocess, "run", fake_run)
+    driver._probe_driver()
+    driver._hooks_command(Path("."), create=True)
+    assert len(seen) == 3  # version, help, /hooks
+    assert all(env["AGY_CLI_DISABLE_AUTO_UPDATE"] == "true" for env in seen)
 
 
-def test_agy_argv_drops_effort_for_a_model_that_refuses_it(tmp_path: Path) -> None:
-    """Even when `[llm].local_agent_reasoning_effort` forces one globally.
+def test_agy_sends_every_model_an_effort_it_has(tmp_path: Path) -> None:
+    """agy's Claude models refuse to start without `--effort` (verified
+    2026-10-03, agy 1.2.16):
 
-    That override reaches the driver config directly, bypassing the catalog's
-    `thinking = false`, so this is the last line of defence.
+        invalid model selection (--model "claude-sonnet-5-5" --effort ""):
+        --model claude-sonnet-5-5 requires --effort (available: low, medium, high)
+
+    and agy has no `xhigh`, which `[llm].local_agent_reasoning_effort` may
+    force on every driver: it goes out as `high`.
     """
 
     from dataclasses import replace as dataclass_replace
 
     driver = _agy_driver(tmp_path)
-    driver.config = dataclass_replace(
-        driver.config, model="claude-opus-4-6-thinking", effort="high"
-    )
     capsule = SimpleNamespace(
         root=tmp_path / "capsule" / "episode",
         messages_path=tmp_path / "capsule" / "episode" / "task.json",
@@ -343,24 +365,21 @@ def test_agy_argv_drops_effort_for_a_model_that_refuses_it(tmp_path: Path) -> No
     driver._resolved_command = ("agy",)
     driver._ensure_project = lambda _root, native=False: ("project-id", "digest")
 
-    argv = driver._argv(
-        capsule,
-        native_search=False,
-        probe=SimpleNamespace(),
-        reasoning_effort="high",
-    )
+    def sent(model: str, reasoning_effort: str, forced: str = "") -> str | None:
+        driver.config = dataclass_replace(driver.config, model=model, effort=forced)
+        argv = driver._argv(
+            capsule,
+            native_search=False,
+            probe=SimpleNamespace(),
+            reasoning_effort=reasoning_effort,
+        )
+        return argv[argv.index("--effort") + 1] if "--effort" in argv else None
 
-    assert "--effort" not in argv
-    assert argv[argv.index("--model") + 1] == "claude-opus-4-6-thinking"
-
-    driver.config = dataclass_replace(driver.config, model="gemini-3.7-flash")
-    gemini_argv = driver._argv(
-        capsule,
-        native_search=False,
-        probe=SimpleNamespace(),
-        reasoning_effort="high",
-    )
-    assert gemini_argv[gemini_argv.index("--effort") + 1] == "high"
+    assert sent("claude-sonnet-5-5", "medium") == "medium"
+    assert sent("claude-opus-5-5", "high") == "high"
+    assert sent("gemini-3.7-flash", "low") == "low"
+    assert sent("claude-sonnet-5-5", "medium", forced="xhigh") == "high"
+    assert sent("gemini-3.7-flash", "") is None
 
 
 def test_agy_repairs_only_inside_the_session_that_wrote_the_answer(
@@ -439,6 +458,7 @@ def test_agy_native_and_media_calls_use_separate_projects(tmp_path: Path) -> Non
         AGY_AGENT_NAME,
         AGY_NATIVE_AGENT_NAME,
         AGY_NATIVE_PERMISSION_RULES,
+        AGY_READ_PERMISSION_RULES,
     )
 
     driver = _agy_driver(tmp_path)
@@ -463,10 +483,13 @@ def test_agy_native_and_media_calls_use_separate_projects(tmp_path: Path) -> Non
     media = driver._argv(capsule, native_search=False, probe=SimpleNamespace())
     native = driver._argv(capsule, native_search=True, probe=SimpleNamespace())
 
-    # Only the entitled project gets the fetch permission, and only it needs
-    # one: agy auto-denies an ungranted `read_url_content` in headless mode and
-    # ends the turn with it (2026-08-30).
-    assert granted == [("native-id", AGY_NATIVE_PERMISSION_RULES)]
+    # Both get the read permission (agy 1.2.13 checks `view_file` too); only
+    # the entitled project gets the fetch permission: agy auto-denies an
+    # ungranted call in headless mode and ends the turn with it (2026-08-30).
+    assert granted == [
+        ("media-id", AGY_READ_PERMISSION_RULES),
+        ("native-id", AGY_READ_PERMISSION_RULES + AGY_NATIVE_PERMISSION_RULES),
+    ]
 
     assert media[media.index("--agent") + 1] == AGY_AGENT_NAME
     assert native[native.index("--agent") + 1] == AGY_NATIVE_AGENT_NAME
@@ -649,6 +672,21 @@ def test_agy_driver_verifies_project_and_prepares_audio_inside_episode(
     assert len(state["hook_digest"]) == 64
 
 
+def test_agy_tags_a_leaked_thought_on_the_returned_attempt(tmp_path: Path) -> None:
+    """The wiring, end to end: a capsule answer that opens with agy's leaked
+    reasoning comes back as content (the output contract decides) with
+    `answer_shape` on the attempt; an ordinary answer carries no tag."""
+
+    driver = _agy_driver(tmp_path)
+
+    leaked = driver.run([{"role": "user", "content": "LEAK"}], task="correction")
+    plain = driver.run([{"role": "user", "content": "fine"}], task="correction")
+
+    assert leaked.content.startswith("thought\n")
+    assert leaked.execution_attempt["answer_shape"] == "thought_leak"
+    assert "answer_shape" not in plain.execution_attempt
+
+
 def test_agy_media_preparation_failure_is_retained_but_redacted(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -712,6 +750,21 @@ def test_codex_driver_deletes_successful_episode(
     )
 
 
+def test_keep_episodes_keeps_a_clean_run_and_codex_rollout(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """`[llm] local_agent_keep_episodes`: nothing is deleted, and Codex keeps
+    its own rollout (no --ephemeral) -- its only per-request ledger."""
+
+    driver = _driver(tmp_path, monkeypatch, keep_episodes=True, max_result_bytes=8192)
+    result = driver.run([{"role": "user", "content": "argv"}], task="general")
+
+    assert result.execution_attempt["episode_kept_by_setting"] is True
+    assert (tmp_path / "runtime").exists()
+    assert Path(result.execution_attempt["evidence_locator"]["absolute_at_write"]).is_dir()
+    assert "--ephemeral" not in json.loads(result.content)
+
+
 def test_codex_assignment_scope_persists_and_resumes_exact_handle(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -738,9 +791,32 @@ def test_codex_assignment_scope_persists_and_resumes_exact_handle(
     resume = second_argv.index("resume")
     handle = second_argv.index(first.conversation_handle)
     assert resume < handle
-    assert second_argv[-1] != first.conversation_handle
+    # `exec resume` reads stdin only when the prompt is `-`.
+    assert second_argv[-1] == "-"
     assert second_argv[second_argv.index("--sandbox") + 1] == "read-only"
     assert second.conversation_handle == first.conversation_handle
+
+
+def test_codex_resume_sends_the_prompt_and_the_task_through_stdin(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Measured 2026-09-30: with the prompt text as the argument, every resumed
+    turn answered "no <stdin> JSON" -- `exec resume` ignores stdin then."""
+
+    from finesub.llm.agent import local_agent as la
+
+    driver = _driver(tmp_path, monkeypatch)
+    payload = b'{"messages": []}'
+
+    fresh, fresh_meta = driver._prepare_capsule_input(None, payload)
+    resumed, resumed_meta = driver._prepare_capsule_input(
+        None, payload, conversation_handle="11111111-2222-3333-4444-555555555555"
+    )
+
+    assert (fresh, dict(fresh_meta)) == (payload, {})
+    assert resumed.startswith(la.AGENT_TASK_PROMPT_STDIN_ONLY.encode("utf-8"))
+    assert resumed.endswith(b"<stdin>\n" + payload + b"\n</stdin>\n")
+    assert resumed_meta == {"resume_prompt_via_stdin": True}
 
 
 def test_cleanup_failure_does_not_change_a_successful_result(
@@ -770,7 +846,7 @@ def test_cleanup_failure_does_not_change_a_successful_result(
 def test_codex_driver_applies_per_call_reasoning_effort(
     tmp_path: Path, monkeypatch
 ) -> None:
-    driver = _driver(tmp_path, monkeypatch)
+    driver = _driver(tmp_path, monkeypatch, max_result_bytes=8192)
 
     result = driver.run(
         [{"role": "user", "content": "argv"}],
@@ -790,6 +866,7 @@ def test_codex_driver_explicit_reasoning_override_wins_per_call_mapping(
         tmp_path,
         monkeypatch,
         config_overrides=('model_reasoning_effort="low"',),
+        max_result_bytes=8192,
     )
 
     result = driver.run(
@@ -1049,6 +1126,25 @@ def test_model_catalog_schema_failure_is_unavailable_and_points_to_capsule(
 
     attempt = caught.value._harness_execution_attempts[0]
     assert attempt["capsule_id"] in str(caught.value)
+
+
+def test_a_stale_cache_warning_does_not_outrank_a_turn_that_ran(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex logs the cache warning, refetches, and runs the turn anyway.
+
+    Seen 2026-09-16: the turn then failed on the usage limit, and the call was
+    reported as "cannot decode the current model catalog; update the CLI".
+    A CLI that reached a turn has a usable catalog; what failed is the turn.
+    """
+
+    driver = _driver(tmp_path, monkeypatch)
+
+    with pytest.raises(LocalAgentError) as caught:
+        driver.run([{"role": "user", "content": "stale-cache-turn-failed"}], task="general")
+
+    assert not isinstance(caught.value, LocalAgentUnavailableError)
+    assert "model catalog" not in str(caught.value)
 
 
 def test_spawn_failure_has_capsule_execution_attempt(
@@ -1447,6 +1543,205 @@ def test_pruning_never_follows_a_link_out_of_the_domain(tmp_path: Path) -> None:
     assert outside.is_dir()
 
 
+def _unaccepted_episode(parent: Path, name: str, *, age_seconds: float) -> Path:
+    root = _episode(parent, name, age_seconds=age_seconds)
+    (root / UNACCEPTED_EPISODE_MARKER).write_text("{}", encoding="utf-8")
+    # Writing the marker bumps the directory's mtime; put the age back.
+    stamp = time.time() - age_seconds
+    os.utime(root, (stamp, stamp))
+    return root
+
+
+def test_unaccepted_sessions_roll_in_a_pool_of_their_own(tmp_path: Path) -> None:
+    """Two caps, counted apart, so a burst of one kind cannot evict the other.
+
+    Counted as one pool of `RETAINED_FAILED_EPISODES`, the 37 old episodes
+    below would lose their 17 oldest across both kinds -- and a run that left
+    many sessions unaccepted would push every transport failure out of reach.
+    """
+
+    manager = AgentCapsuleManager(tmp_path / "runtime")
+    location = manager.resolve_location()
+    location.parent.mkdir(parents=True, exist_ok=True)
+    old_day = 86_400.0
+    for index in range(RETAINED_FAILED_EPISODES + 3):
+        _episode(location.parent, f"failed-{index:03d}", age_seconds=old_day + index)
+    for index in range(RETAINED_UNACCEPTED_EPISODES + 4):
+        _unaccepted_episode(
+            location.parent, f"unaccepted-{index:03d}", age_seconds=old_day + index
+        )
+
+    removed = manager.prune(location, timeout_seconds=900)
+
+    names = {p.name for p in location.parent.iterdir() if p.is_dir()}
+    assert len({n for n in names if n.startswith("failed-")}) == RETAINED_FAILED_EPISODES
+    assert (
+        len({n for n in names if n.startswith("unaccepted-")})
+        == RETAINED_UNACCEPTED_EPISODES
+    )
+    # Oldest-first within each pool: the highest indices carry the oldest mtimes.
+    assert set(removed) == (
+        {f"failed-{i:03d}" for i in range(RETAINED_FAILED_EPISODES, RETAINED_FAILED_EPISODES + 3)}
+        | {
+            f"unaccepted-{i:03d}"
+            for i in range(RETAINED_UNACCEPTED_EPISODES, RETAINED_UNACCEPTED_EPISODES + 4)
+        }
+    )
+
+
+def test_a_predicate_that_raises_counts_as_not_accepted() -> None:
+    """Keeping evidence that turns out to be unneeded costs disk; dropping it costs the diagnosis."""
+
+    def unreadable() -> bool:
+        raise RuntimeError("runtime state unreadable")
+
+    assert local_agent_module._completion_holds(unreadable) is False
+    assert local_agent_module._completion_holds(lambda: True) is True
+
+
+FAKE_CLAUDE_CLEAN_EXIT = r'''
+import json
+import pathlib
+import sys
+
+args = sys.argv[1:]
+if "--version" in args:
+    print("2.1.231 (Claude Code)")
+    raise SystemExit(0)
+if "--help" in args:
+    print("--output-format stream-json --no-session-persistence --tools --allowed-tools "
+          "--safe-mode --setting-sources --effort --model --resume --session-id "
+          "--mcp-config --strict-mcp-config")
+    raise SystemExit(0)
+sys.stdin.buffer.read()
+print(json.dumps({"type": "system", "subtype": "init", "tools": [], "model": "fake",
+                  "session_id": "11111111-2222-3333-4444-555555555555"}), flush=True)
+print(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+    {"type": "text", "text": "I have the answer, but I never called submit."}]}}), flush=True)
+print(json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                  "terminal_reason": "end_turn", "permission_denials": [],
+                  "usage": {"input_tokens": 10, "output_tokens": 3}}), flush=True)
+# The very last thing a real run does. A test that wants "accepted" to turn true
+# only once this session has finished uses this file as its predicate.
+pathlib.Path(__file__).with_suffix(".done").write_text("1", encoding="utf-8")
+'''
+
+
+def _clean_exit_driver(tmp_path: Path) -> tuple[object, Path]:
+    from finesub.llm.agent import local_agent as la
+
+    script = tmp_path / "fake_claude_clean_exit.py"
+    script.write_text(FAKE_CLAUDE_CLEAN_EXIT, encoding="utf-8")
+    driver = la.ClaudeCodeLocalAgentDriver(
+        la.ClaudeCodeDriverConfig(
+            command=(sys.executable, str(script)),
+            runtime_root=tmp_path / "runtime",
+            timeout_seconds=30,
+            max_result_bytes=1024,
+            max_event_bytes=8192,
+            max_stderr_bytes=8192,
+        )
+    )
+    return driver, script
+
+
+def test_a_session_that_leaves_unaccepted_keeps_its_capsule(tmp_path: Path) -> None:
+    """A clean exit is a transport success, but a harness session's text is not its artifact.
+
+    Removing the capsule of such a run used to take the only record of what the
+    agent did -- the harness writes no exchange for a call it then fails.
+    """
+
+    driver, _script = _clean_exit_driver(tmp_path)
+
+    result = driver.run(
+        [{"role": "user", "content": "call next_task"}],
+        task="research",
+        completion=lambda: False,
+    )
+
+    attempt = result.execution_attempt
+    assert attempt["retained_unaccepted"] is True
+    capsule_root = Path(attempt["evidence_locator"]["absolute_at_write"])
+    assert (capsule_root / UNACCEPTED_EPISODE_MARKER).is_file()
+    assert (capsule_root / "events" / "agent-events.jsonl").exists()
+
+
+def test_a_session_accepted_after_the_last_poll_is_not_kept_as_unaccepted(
+    tmp_path: Path,
+) -> None:
+    """The supervisor polls about once a second, and only while the CLI runs.
+
+    A CLI that submits and exits inside that second is accepted without ever
+    being observed so, and keyed on the poll alone that successful call would
+    be kept as unaccepted. The fake CLI here exits within milliseconds of its
+    last write, which a real one rarely does (CodeBuddy left 4.6-11.7s after
+    accept in ten measured calls) -- this pins the case, not its frequency.
+    Which path observed the accept is a race; that it is never filed as
+    unaccepted is not.
+    """
+
+    driver, script = _clean_exit_driver(tmp_path)
+
+    result = driver.run(
+        [{"role": "user", "content": "call next_task"}],
+        task="research",
+        completion=script.with_suffix(".done").exists,
+    )
+
+    attempt = result.execution_attempt
+    assert "retained_unaccepted" not in attempt
+    # Either path removes the capsule of an accepted, clean session.
+    assert "evidence_locator" not in attempt
+
+
+FAKE_CLAUDE_EXITS_AFTER_ACCEPT = FAKE_CLAUDE_CLEAN_EXIT.replace(
+    "sys.stdin.buffer.read()\n",
+    "sys.stdin.buffer.read()\n"
+    "import time\n"
+    "pathlib.Path(__file__).with_suffix('.done').write_text('1', encoding='utf-8')\n"
+    "time.sleep(2.5)\n",
+)
+
+
+def test_a_session_seen_accepted_while_running_removes_its_capsule(tmp_path: Path) -> None:
+    """The supervisor saw the accept, then the CLI left cleanly within its grace.
+
+    That used to return before the capsule was settled, so every such success
+    stayed on disk, unmarked, in the transport-failure pool -- CodeBuddy took
+    this path ten times out of ten, enough for one long run to roll the real
+    failures out of that pool.
+    """
+
+    from finesub.llm.agent import local_agent as la
+
+    script = tmp_path / "fake_claude_exits_after_accept.py"
+    script.write_text(FAKE_CLAUDE_EXITS_AFTER_ACCEPT, encoding="utf-8")
+    driver = la.ClaudeCodeLocalAgentDriver(
+        la.ClaudeCodeDriverConfig(
+            command=(sys.executable, str(script)),
+            runtime_root=tmp_path / "runtime",
+            timeout_seconds=30,
+            max_result_bytes=1024,
+            max_event_bytes=8192,
+            max_stderr_bytes=8192,
+        )
+    )
+
+    result = driver.run(
+        [{"role": "user", "content": "call next_task"}],
+        task="research",
+        completion=script.with_suffix(".done").exists,
+    )
+
+    attempt = result.execution_attempt
+    assert attempt["completed_by_runtime_at"], "the poll must have seen the accept"
+    assert not attempt.get("reclaimed_after_completion")
+    assert "evidence_locator" not in attempt
+    episodes = [p for p in (tmp_path / "runtime").rglob("*") if p.is_dir() and p.name == "events"]
+    assert episodes == []
+
+
 def test_a_new_episode_prunes_before_it_grows_the_domain(tmp_path: Path) -> None:
     manager = AgentCapsuleManager(tmp_path / "runtime")
     location = manager.resolve_location()
@@ -1651,7 +1946,7 @@ def test_provider_tier_picks_the_driver() -> None:
 
     settings = ExecutionSettings()
     codex = driver_for_provider_tier(
-        settings, provider_tier="LOCAL_CODEX", model="gpt-5.6-luna"
+        settings, provider_tier="LOCAL_CODEX", model="gpt-6-luna"
     )
     claude = driver_for_provider_tier(
         settings, provider_tier="LOCAL_CLAUDE", model="claude-opus-5"
@@ -1678,7 +1973,7 @@ def test_claude_prompt_survives_a_bare_argv(tmp_path: Path, monkeypatch) -> None
     args = json.loads(result.content)
 
     assert "--model" not in args and "--effort" not in args
-    assert args[-1].startswith("You are a FineSub text execution backend")
+    assert args[-1].startswith(AGENT_USER_RULES_NOTICE + " You are a FineSub text execution backend")
     assert args[args.index("--tools") + 1] == ""
 
 
@@ -2064,8 +2359,8 @@ def test_an_accepted_task_reclaims_a_lingering_cli_and_keeps_its_raw_stream(
     assert attempt["return_code"] is not None
     assert attempt["duration_ms"] < 20_000
     # Reclaimed after accept: the raw original is kept beside the normalized
-    # file (the Claude normalizer reports the cut line as a violation rather
-    # than failing, so the stream is not flagged partial here).
+    # file (the reader drops the cut line rather than failing, so the stream
+    # is not flagged partial here).
     assert attempt["raw_events_retained"] is True
     capsule_root = Path(attempt["evidence_locator"]["absolute_at_write"])
     raw = (capsule_root / "events" / "raw.jsonl").read_text(encoding="utf-8")
@@ -2208,3 +2503,284 @@ def test_the_worker_bootstrap_stops_forbidding_the_tools_it_entitles() -> None:
         # bootstrap on step one, docs/llm_local_agent_agy.md §3).
         rule = next(line for line in entitled.splitlines() if line.startswith("4."))
         assert "web search" in rule
+
+
+# --- exit-on-accept ---------------------------------------------------------
+
+# A CLI parked on the harness's held `accepted` reply: it has written every
+# request it finished -- one of them as two `assistant` events sharing a
+# message id, the way Claude Code splits content blocks -- and now waits for a
+# tool result that never comes. `cut-tail` adds half a line ending inside a
+# multi-byte character; `bad-usage` makes one request's usage unreadable.
+FAKE_CLAUDE_HELD_ON_ACCEPT = r'''
+import json
+import pathlib
+import sys
+import time
+
+args = sys.argv[1:]
+if "--version" in args:
+    print("2.1.231 (Claude Code)")
+    raise SystemExit(0)
+if "--help" in args:
+    print("--output-format stream-json --no-session-persistence --tools --allowed-tools "
+          "--safe-mode --setting-sources --effort --model --resume --session-id "
+          "--mcp-config --strict-mcp-config")
+    raise SystemExit(0)
+payload = sys.stdin.buffer.read()
+
+
+def emit(event):
+    sys.stdout.write(json.dumps(event) + "\n")
+    sys.stdout.flush()
+
+
+def assistant(message_id, blocks, usage):
+    emit({"type": "assistant", "message": {"id": message_id, "role": "assistant",
+          "model": "fake", "content": blocks, "usage": usage}})
+
+
+emit({"type": "system", "subtype": "init", "tools": [], "model": "fake",
+      "session_id": "11111111-2222-3333-4444-555555555555"})
+assistant("msg-1", [{"type": "tool_use", "name": "mcp__finesub__next_task", "input": {}}],
+          {"input_tokens": 100, "output_tokens": 5, "cache_read_input_tokens": 0,
+           "cache_creation_input_tokens": 900})
+assistant("msg-2", [{"type": "text", "text": "submitting"}],
+          {"input_tokens": 20, "output_tokens": 1, "cache_read_input_tokens": 900,
+           "cache_creation_input_tokens": 300})
+assistant("msg-2", [{"type": "tool_use", "name": "mcp__finesub__submit", "input": {"payload": "x"}}],
+          "garbage" if b"bad-usage" in payload else
+          {"input_tokens": 20, "output_tokens": 400, "cache_read_input_tokens": 900,
+           "cache_creation_input_tokens": 300})
+if b"cut-tail" in payload:
+    sys.stdout.buffer.write('{"type": "assistant", "message": {"content": "é'.encode("utf-8")[:-1])
+    sys.stdout.flush()
+pathlib.Path(__file__).with_suffix(".ready").write_text("1", encoding="utf-8")
+time.sleep(60)
+'''
+
+
+def _held_driver(tmp_path: Path, *, keep_episodes: bool = False):
+    from finesub.llm.agent import local_agent as la
+
+    script = tmp_path / "fake_claude_held.py"
+    script.write_text(FAKE_CLAUDE_HELD_ON_ACCEPT, encoding="utf-8")
+    driver = la.ClaudeCodeLocalAgentDriver(
+        la.ClaudeCodeDriverConfig(
+            command=(sys.executable, str(script)),
+            runtime_root=tmp_path / "runtime",
+            timeout_seconds=30,
+            max_result_bytes=1024,
+            max_event_bytes=8192,
+            max_stderr_bytes=8192,
+            keep_episodes=keep_episodes,
+        )
+    )
+    return driver, script.with_suffix(".ready")
+
+
+@pytest.mark.parametrize("keep_episodes", [False, True])
+def test_exit_on_accept_ends_the_cli_at_once_and_settles_like_a_clean_exit(
+    tmp_path: Path, keep_episodes: bool
+) -> None:
+    """The kill is ours and expected: no grace, no retained raw stream, no
+    failure-pool capsule -- and the usage comes from the per-request events,
+    one request per message id, since the `result` was never written."""
+
+    driver, ready = _held_driver(tmp_path, keep_episodes=keep_episodes)
+    started = time.monotonic()
+
+    result = driver.run(
+        [{"role": "user", "content": "call next_task cut-tail"}],
+        task="correction",
+        completion=ready.exists,
+        exit_on_completion=True,
+    )
+
+    attempt = result.execution_attempt
+    # Well inside the 15s grace and the fake's 60s sleep.
+    assert time.monotonic() - started < 10
+    assert attempt["ended_on_accept"] is True
+    assert "reclaimed_after_completion" not in attempt
+    assert "raw_events_retained" not in attempt
+    assert "retained_unaccepted" not in attempt
+    assert result.usage == {
+        "input_tokens": 120,
+        "output_tokens": 405,
+        "cache_read_input_tokens": 900,
+        "cache_creation_input_tokens": 1200,
+        "source": "claude_code_message_events",
+    }
+    assert attempt["usage"] == result.usage
+    assert not attempt.get("warnings")
+    if keep_episodes:
+        assert attempt["episode_kept_by_setting"] is True
+        capsule_root = Path(attempt["evidence_locator"]["absolute_at_write"])
+        # Settled as a success: the raw original was replaced by the
+        # normalized rows, exactly as on a clean exit.
+        assert (capsule_root / "events" / "agent-events.jsonl").exists()
+        assert not (capsule_root / "events" / "raw.jsonl").exists()
+    else:
+        assert "evidence_locator" not in attempt
+        assert [p for p in (tmp_path / "runtime").rglob("events") if p.is_dir()] == []
+
+
+def test_exit_on_accept_with_unreadable_usage_still_succeeds(tmp_path: Path) -> None:
+    """Best effort: an unreadable per-request usage makes the usage unknown
+    and says so once; the call is not failed, retried or held up over it."""
+
+    driver, ready = _held_driver(tmp_path)
+
+    result = driver.run(
+        [{"role": "user", "content": "call next_task bad-usage"}],
+        task="correction",
+        completion=ready.exists,
+        exit_on_completion=True,
+    )
+
+    attempt = result.execution_attempt
+    assert attempt["ended_on_accept"] is True
+    assert attempt["usage"] == {"source": "unavailable"}
+    assert [w["event"] for w in attempt["warnings"]] == ["usage_unknown_after_accept"]
+    assert "evidence_locator" not in attempt
+
+
+def test_without_exit_on_accept_the_cli_keeps_its_grace(tmp_path: Path, monkeypatch) -> None:
+    """The setting off (or the pseudo host, which never sets it): the same
+    held CLI is left its grace and then reclaimed, raw stream kept."""
+
+    from finesub.llm.agent import local_agent as la
+
+    monkeypatch.setattr(la, "ACCEPTED_EXIT_GRACE_SECONDS", 1.5)
+    driver, ready = _held_driver(tmp_path)
+    started = time.monotonic()
+
+    result = driver.run(
+        [{"role": "user", "content": "call next_task"}],
+        task="correction",
+        completion=ready.exists,
+    )
+
+    attempt = result.execution_attempt
+    assert time.monotonic() - started >= 1.5
+    assert attempt["reclaimed_after_completion"] is True
+    assert "ended_on_accept" not in attempt
+    assert attempt["raw_events_retained"] is True
+
+
+def test_codebuddy_message_usage_is_summed_per_request(tmp_path: Path) -> None:
+    """Measured shape (CodeBuddy 2.137.1, hy3, 2026-09-30): a thinking-only
+    message with null usage, then the request's text and tool_use under one
+    id, the second carrying the numbers; input = cache write + cache read."""
+
+    from finesub.llm.agent.local_agent import _normalize_codebuddy_events
+
+    def assistant(message_id, kind, usage):
+        return {"type": "assistant", "message": {"id": message_id, "model": "hy3",
+                "content": [{"type": kind, "text": "t"}], "usage": usage}}
+
+    zero = {"input_tokens": 0, "output_tokens": 0,
+            "cache_creation_input_tokens": None, "cache_read_input_tokens": None}
+    rows = [
+        {"type": "system", "subtype": "init", "tools": [], "session_id": "s"},
+        assistant("think-1", "thinking", zero),
+        assistant("req-1", "text", {**zero, "cache_creation_input_tokens": 0}),
+        assistant("req-1", "text", {"input_tokens": 9564, "output_tokens": 40,
+                                    "cache_creation_input_tokens": 9052,
+                                    "cache_read_input_tokens": 512}),
+        assistant("req-2", "text", {"input_tokens": 10228, "output_tokens": 674,
+                                    "cache_creation_input_tokens": 756,
+                                    "cache_read_input_tokens": 9472}),
+    ]
+    raw = tmp_path / "raw.jsonl"
+    raw.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+    _rows, usage, _violations, _content = _normalize_codebuddy_events(
+        raw, native_search=False, max_bytes=1_000_000
+    )
+
+    assert usage == {
+        "input_tokens": 19792,
+        "output_tokens": 714,
+        "cache_read_input_tokens": 9984,
+        "cache_creation_input_tokens": 9808,
+        "source": "codebuddy_message_events",
+    }
+
+    # With its `result`, the CLI's own total wins.
+    rows.append({"type": "result", "subtype": "success", "is_error": False,
+                 "usage": {"input_tokens": 1, "output_tokens": 1}})
+    raw.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    _rows, usage, _violations, _content = _normalize_codebuddy_events(
+        raw, native_search=False, max_bytes=1_000_000
+    )
+    assert usage["source"] == "codebuddy_result_event" and usage["input_tokens"] == 1
+
+
+def test_agy_step_usage_is_summed_when_the_result_never_came(tmp_path: Path) -> None:
+    """Each finished request's `step_update` (state DONE) carries its usage; on
+    a measured seven-request tool session those add up to `result.usage`
+    exactly. A step's ACTIVE rows carry none, a tool step has none."""
+
+    from finesub.llm.agent.local_agent import _normalize_agy_events
+
+    def step(index, state, step_type, usage=None):
+        update = {"conversation_id": "c", "step_index": index, "state": state,
+                  "step_type": step_type}
+        if usage is not None:
+            update["usage"] = usage
+        return {"event": "step_update", "step_update": update}
+
+    first = {"input_tokens": 8326, "output_tokens": 187, "thinking_tokens": 125,
+             "cache_read_tokens": 8140, "total_tokens": 8513}
+    second = {"input_tokens": 3657, "output_tokens": 5215, "thinking_tokens": 4595,
+              "cache_read_tokens": 16258, "total_tokens": 8872}
+    rows = [
+        {"event": "init", "conversation_id": "c",
+         "init": {"tools": ["view_file"], "permission_mode": "x"}},
+        step(0, "DONE", "user_input"),
+        step(1, "ACTIVE", "agent_response"),
+        step(1, "DONE", "agent_response", first),
+        step(2, "ACTIVE", "tool"),
+        step(2, "DONE", "tool"),
+        step(3, "DONE", "agent_response", second),
+        step(4, "ACTIVE", "tool"),
+    ]
+    raw = tmp_path / "raw.jsonl"
+    raw.write_bytes(
+        "".join(json.dumps(row) + "\n" for row in rows).encode("utf-8")
+        # A line the kill cut inside a multi-byte character.
+        + '{"event": "step_update", "step_update": {"text_delta": "é'.encode("utf-8")[:-1]
+    )
+
+    _rows, usage, violations, _content = _normalize_agy_events(
+        raw, native_search=False, max_bytes=1_000_000
+    )
+
+    assert usage == {
+        "input_tokens": 11983,
+        "output_tokens": 5402,
+        "reasoning_output_tokens": 4720,
+        "cached_input_tokens": 24398,
+        "total_tokens": 17385,
+        "conversation_cumulative": False,
+        "source": "agy_step_events",
+    }
+    # The cut line is dropped, not reported; only the missing result is.
+    assert violations == ["agy event stream requires exactly one result event; got 0"]
+
+
+def test_only_a_cut_last_line_is_forgiven(tmp_path: Path) -> None:
+    """Bad bytes or JSON on a complete line still count against the stream."""
+
+    from finesub.llm.agent.local_agent import _read_event_text
+
+    raw = tmp_path / "raw.jsonl"
+    raw.write_bytes(b'{"a": 1}\n{"b": "\xff"}\n')
+    with pytest.raises(LocalAgentPolicyViolationError, match="not UTF-8"):
+        _read_event_text(raw, vendor="X", max_bytes=1024)
+    raw.write_bytes(b'{"a": 1}\n{"b": 2')
+    assert _read_event_text(raw, vendor="X", max_bytes=1024) == '{"a": 1}\n'
+    # A complete last object without its newline is still an event.
+    raw.write_bytes(b'{"a": 1}\n{"b": 2}')
+    assert _read_event_text(raw, vendor="X", max_bytes=1024) == '{"a": 1}\n{"b": 2}'

@@ -110,6 +110,67 @@ def test_two_premature_stops_fail_the_call(tmp_path, monkeypatch) -> None:
     assert len(driver.calls) == AGENT_PREMATURE_STOP_RETRIES + 1
 
 
+def _execution_attempts(error: BaseException) -> list:
+    """The attempts the harness hung on an error, wherever routing left them."""
+
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        attempts = getattr(current, "_harness_execution_attempts", None)
+        if attempts:
+            return list(attempts)
+        current = current.__cause__ or current.__context__
+    return []
+
+
+def test_every_no_submit_attempt_is_named_and_keeps_its_text(tmp_path, monkeypatch) -> None:
+    """Both attempts of a failed call say premature stop, and carry the CLI's text.
+
+    The last attempt used to be appended as the driver returned it, so the one
+    that decided the failure was the only one the record did not mark. And the
+    text the CLI left behind was not kept anywhere: a tool session's text is not
+    its artifact, and the capsule that staged it is pruned on a clean exit --
+    which a no-submit run is. Without it, "never composed an answer" and
+    "composed one, never called submit" look identical.
+    """
+
+    _no_api(monkeypatch)
+    driver = _ToolUsingFakeDriver(lambda server: _call(server, 1, "next_task"))
+    client = _client(driver, tmp_path)
+
+    with pytest.raises(Exception) as excinfo:
+        client.complete(LLMRole.GENERAL_CAPABLE, MESSAGES)
+
+    attempts = _execution_attempts(excinfo.value)
+    assert len(attempts) == AGENT_PREMATURE_STOP_RETRIES + 1
+    assert all(attempt["premature_stop"] is True for attempt in attempts)
+    # The fake driver's CLI "says" this on every run; it is what a real one
+    # would have left in its final message instead of calling submit.
+    assert all(attempt["final_text_tail"] == "submitted" for attempt in attempts)
+    assert all(attempt["final_text_chars"] == len("submitted") for attempt in attempts)
+
+
+def test_the_no_submit_text_tail_is_bounded() -> None:
+    from finesub.llm.agent.agent_session_host import (
+        NO_SUBMIT_TEXT_TAIL_CHARS,
+        no_submit_attempt,
+    )
+
+    attempt = {"backend": "local_agent", "capsule_id": "cap-1"}
+    text = "a" * (NO_SUBMIT_TEXT_TAIL_CHARS * 2) + "the end"
+
+    record = no_submit_attempt(attempt, text)
+
+    assert record["final_text_chars"] == len(text)
+    assert len(record["final_text_tail"]) == NO_SUBMIT_TEXT_TAIL_CHARS
+    # The tail, not the head: how an unsubmitted answer ends is the evidence.
+    assert record["final_text_tail"].endswith("the end")
+    assert "premature_stop" not in attempt, "the driver's attempt dict is not modified"
+    # No text is not an empty tail: the key is simply absent.
+    assert "final_text_tail" not in no_submit_attempt(attempt, "")
+
+
 def test_the_audit_bundle_lands_in_the_capsule(tmp_path, monkeypatch) -> None:
     """What the agent could read, what it submitted and every frame, in one place."""
 

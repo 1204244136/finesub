@@ -235,3 +235,47 @@ def test_concurrency_shows_up_in_the_detail(separation, monkeypatch) -> None:
 
     assert "3 并发" in reporter.progress_calls[0]["detail"]
     assert "并发" not in reporter.progress_calls[1]["detail"]
+
+
+def test_the_onnx_provider_notice_is_dropped_and_other_warnings_survive() -> None:
+    """The Roformer runs on torch; "acceleration will NOT be enabled" is false for it.
+
+    Driven through the library's own emit point (`configure_cuda`) so a wrong
+    logger name in the filter cannot pass by agreeing with itself.
+    """
+
+    import logging
+
+    pytest.importorskip("audio_separator.separator.separator")
+    from audio_separator.separator import Separator
+
+    from finesub.speech.preprocessing.separator import separation
+
+    instance = Separator.__new__(Separator)
+    instance.logger = logging.getLogger(Separator.__module__)
+    seen: list[str] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            seen.append(record.getMessage())
+
+    handler = _Collect()
+    instance.logger.addHandler(handler)
+    try:
+        separation._mute_onnx_provider_notice()
+        separation._mute_onnx_provider_notice()  # idempotent
+        assert (
+            sum(isinstance(f, separation._DropOnnxProviderNotice) for f in instance.logger.filters)
+            == 1
+        )
+        instance.configure_cuda([])  # onnxruntime without CUDAExecutionProvider
+        instance.logger.warning("something else went wrong")
+    finally:
+        instance.logger.removeHandler(handler)
+        for f in [
+            f for f in instance.logger.filters if isinstance(f, separation._DropOnnxProviderNotice)
+        ]:
+            instance.logger.removeFilter(f)
+
+    assert not any("acceleration will NOT" in message for message in seen)
+    assert "something else went wrong" in seen

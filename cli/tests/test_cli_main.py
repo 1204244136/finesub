@@ -282,7 +282,7 @@ def test_capability_rules_read_the_command_line_the_pipeline_reads() -> None:
         ["a.wav", "--knowledge", "update", "--stage", "final-srt"],
         ["a.wav", "--knowledge=update", "--stage=translated-srt"],
         ["a.wav", "--knowledge=update", "--llm-correct-translate"],
-        ["a.wav", "--knowledge", "collect", "--stage", "final-srt"],
+        ["a.wav", "--knowledge", "read", "--stage", "final-srt"],
     ):
         assert capabilities_from_arguments(arguments) == (), arguments
     # A URL still needs the downloader, whatever else the run asks for.

@@ -16,7 +16,7 @@ episode 的落点分两档（**开头就分，别只读这一段就接路径**�
 - **仓库 / worktree**：**不能**用大文件根——那里的大文件根就是 checkout 本身，而 Codex 会自动
   吃掉 cwd 之上的 `AGENTS.md`（§2 门二实测）。**定为 `%TEMP%/finesub-agent-runtime/<域
   digest>/`**，不随打包安装的 relocate 移动。理由见下方「为什么 checkout 档留在 TEMP」；
-- 两档都由 §2 那个统一的 location resolver 解析，调用方不自己拼路径。
+- 两档都由 [§2 capsule 是一次性 episode](#2-capsule-是一次性-episode不是持久-storeg-d已实施) 那个统一的 location resolver 解析，调用方不自己拼路径。
 
 **选哪一档的判据已写死。** 不能留给调用者猜，因为有一个配置会让两个显而易见的
 判据给出不同答案：`FINESUB_CHECKOUT_DATA=0`（`resources.md` 记载的"让仓库运行接到共享数据"）。
@@ -49,7 +49,7 @@ episode 的落点分两档（**开头就分，别只读这一段就接路径**�
 
 | 位 | 定法 |
 | --- | --- |
-| 共享实现 | `python -m finesub.llm.agent.agent_cleanup`——**定案，见下方「resolver 归属」**。它要用 §2 的 resolver，而 resolver 要用 `finesub.paths` 的 checkout 检测；把它搬进 `finesub_bootstrap` 会逼出第二个检测器 |
+| 共享实现 | `python -m finesub.llm.agent.agent_cleanup`——**定案，见下方「resolver 归属」**。它要用 [§2 capsule 是一次性 episode](#2-capsule-是一次性-episode不是持久-storeg-d已实施) 的 resolver，而 resolver 要用 `finesub.paths` 的 checkout 检测；把它搬进 `finesub_bootstrap` 会逼出第二个检测器 |
 | 打包 CLI | 加 `finesub agent-clean`，**但不能走 `run_in_runtime()`**——它第一句就是 `ensure_ready()`，会为了删几个文本文件先装运行环境、下 ffmpeg，而且运行环境损坏时清理反而用不了（那恰恰是有人要清理的典型时刻）。改成在 **shell 自己的解释器**上以子进程跑 vendored 的 `finesub.llm.agent.agent_cleanup`（不 import，保持分层；不 provisioning） |
 | checkout | `python -m finesub.llm.agent.agent_cleanup`，与 `python -m finesub.llm.correction_translation` 同级。**仓库根包不再声明 `[project.scripts]`**（2026-08：对外只留 CLI wheel 的 `finesub`），所以 checkout 一律走 `python -m` |
 | 作用域 | 默认**只清本域**；`--all-domains` 才扫未分区旧根与其他域，见下 |
@@ -143,7 +143,7 @@ followups 里也早写明「只读 sandbox 挡写不挡读」：agent 能不能�
 它真正兜的是**我们自己的递归删除**。当时 `AgentCapsuleManager.prune()` 对 `runtime_root` 下的
 **任意**子目录动手——不校验 manifest、不校验 id 形状——只要早于 24h 且不在最新 N 个之内就
 `shutil.rmtree`；`runtime_root` 一旦被指到有内容的地方，清理就会删掉别人的东西。reparse point
-那半是同一类事故：`rmtree` 跟着 junction 走出预期目录。（下面第 1 条已修；整套判定按 §2
+那半是同一类事故：`rmtree` 跟着 junction 走出预期目录。（下面第 1 条已修；整套判定按 [§2 capsule 是一次性 episode](#2-capsule-是一次性-episode不是持久-storeg-d已实施)
 还会整体退场。）
 
 历史过渡顺序如下；这些 prune 所有权判据已随 G-D 删除：
@@ -154,24 +154,28 @@ followups 里也早写明「只读 sandbox 挡写不挡读」：agent 能不能�
    `runtime_root` 现在最坏是"什么都不删"。
 2. **位置守卫改成"只放行 canonical 路径"，不是原样保留**——但它**不是**可有可无的防御
    纵深（我一度这么写，错了）：实测证明它是目前唯一挡住 Codex 吃掉用户 `AGENTS.md` /
-   `CLAUDE.md` 的东西，见 §2 门二。`.git` 祖先检查会拒掉 checkout 模式
+   `CLAUDE.md` 的东西，见 [§2 capsule 是一次性 episode](#2-capsule-是一次性-episode不是持久-storeg-d已实施) 门二。`.git` 祖先检查会拒掉 checkout 模式
    下的大文件根（那里的大文件根就是 checkout 本身），所以必须明确：由 `paths.py` 推导出的
    `<big-data>/agent-capsules` 放行，调用方自定义的仓库内路径照旧拒绝。判据是"这个路径是不是我们
    算出来的"，不是"它在不在仓库里"。reparse 那半原样保留——它防的是 rmtree 走偏，仍然值钱。
    仍然拒绝任意仓库路径的理由：capsule 根是 agent 的 cwd，落在用户仓库里会让供应商那些"从 cwd
    往上找项目文件"的机制（CLAUDE.md 自动发现、`--skip-git-repo-check` 想跳过的那类检查）指向用户
    的源码树。这与"能不能读"无关（读本来就没隔离），是"默认锚点指向哪里"的问题。
-3. **checkout 模式能否用大文件根，取决于 §2 门二——而门二已实测未过。** 打包安装的大文件根
+3. **checkout 模式能否用大文件根，取决于 [§2 capsule 是一次性 episode](#2-capsule-是一次性-episode不是持久-storeg-d已实施) 门二——而门二已实测未过。** 打包安装的大文件根
    不在仓库里，放行；**仓库/worktree 模式改用 `%TEMP%/finesub-agent-runtime/<域 digest>/`**
    （本节开头已定，此处不再是二选一），因为那里的大文件根就是 checkout 本身，而 Codex 会自动
    吃掉 cwd 之上的 `AGENTS.md`。第 2 步的 canonical 放行只解决"我们自己的 rmtree"，解决不了这条。
 
 第 1 条曾作为过渡修复单独落地，现已由 one-shot 删除语义取代。
 
-**全局配置隔离。** 目标是 agent 只看到本次任务，不继承这台机器的任何个性化配置。当前实测
+**全局配置隔离。** 目标是 agent 的**行为**只由本次任务决定，不继承这台机器的个性化配置（规则文件、MCP、插件、
+hooks）；**连到哪、用哪个号**则跟随用户，Codex 的做法见 [`llm_local_agent.md`](llm_local_agent.md)
+[§14 当前实现与迁移注意事项](llm_local_agent.md#14-当前实现与迁移注意事项)。用户级的**全局规则文件**只有 Claude Code
+（`--setting-sources ""`）与 dsh（关掉 `agent-instructions`）挡得住；Codex、CodeBuddy、agy 照样注入，靠开场兜底句
+（2026-09-30 实测）。当前实测
 （Claude Code，`--safe-mode` + `--setting-sources ""`）：`skills: []`、`plugins: []`、
 `mcp_servers: []`、`slash_commands: []`；**`CLAUDE.md` 自动发现已于 2026-08-13 实测确认关闭**
-（工作目录的与上层的都不加载，见 §2 门二的表）。**仍需确认**：`agents` 字段仍列出内建 agent
+（工作目录的与上层的都不加载，见 [§2 capsule 是一次性 episode](#2-capsule-是一次性-episode不是持久-storeg-d已实施) 门二的表）。**仍需确认**：`agents` 字段仍列出内建 agent
 （`Task*` 已被拒所以调不动，但值得确认无旁路）。Codex 已测——它**会**加载，见门二；agy 在
 显式 `--new-project`/`--project` 下也会加载 `AGENTS.md`，未绑定 project 时则不可靠。
 
@@ -209,8 +213,7 @@ followups 里也早写明「只读 sandbox 挡写不挡读」：agent 能不能�
 
 只要如此，就必须在盘上证明所有权，而证明要写、要读、要跨进程一致。换成「只删自己这次原子
 创建并记下路径的那一个目录」之后，整个证明链就不需要了——运行时不扫描、不认领、不清扫别人的
-episode，清理是一条显式的用户命令。**这是当前契约，不要再往回长。**（那五轮的经过留在本地
-`docs/archive/agent_backend_implementation_log.md`。）
+episode，清理是一条显式的用户命令。**这是当前契约，不要再往回长。**（那五轮的经过留在维护者的本地归档里。）
 
 ### 事实基线
 
@@ -231,6 +234,8 @@ AgentEpisode
   ├─ mkdtemp 在专用 parent root 下原子创建唯一目录
   ├─ 调用期间存放 input / 事件 / stderr / staging 结果
   ├─ transport 成功 → 删除自己创建并记下的那一条精确路径
+  │    └─ 例外：harness 会话（带 completion 谓词）而 runtime 始终没 accept
+  │             → 标记后留下，进独立的滚动池（见下文）
   └─ transport 失败或进程被强杀 → 原样留下，那是唯一的失败现场
 ```
 
@@ -243,6 +248,86 @@ violation、提取到有界的最终文本。**不是**「字幕通过了业务 
 返回之后才写。进程正好崩在这两点之间，两边都不会留下东西。接受它，因为 API 路径本来就是同样
 的保证，而 capsule 没有任何真实的恢复逻辑值得为它建一套事务提交协议。**但不能写成「exchange
 已经记下」**——落盘发生在删除之后，不是之前。
+
+**harness 会话下「exchange 会记下完整应答」这个前提不成立**（2026-09-16）。上面「capsule
+不必留」的理由是 exchange 会记下完整应答；对 completion 传输成立，因为最终文本就是产物。tool
+session（以及会话宿主的 CLI）的最终文本**没有产物语义**（产物只经 `submit` 交付），于是一个
+**没被 accept 就干净退出**的会话：transport 成功 → capsule 按上面的规则删除；harness 随后才判
+失败 → 失败轮不写 exchange。CLI 留下的一切两边都没有——实测 11.5k output token 零字节留存，
+「根本没写出答案」与「写了但没调 `submit`」无从区分，而两者修法相反。两处收口：
+
+- **attempt 上的文本尾巴**：no-submit 的 execution attempt 自带 `final_text_tail`（末
+  `NO_SUBMIT_TEXT_TAIL_CHARS` 字符）与 `final_text_chars`，从 driver 返回的内存结果上取，不依赖
+  capsule 是否还在（`agent_session_host.no_submit_attempt`）。
+- **capsule 本身也留**（owner 2026-09-16）：尾巴只说明回复怎么收的尾，事件流、stderr、它读到的
+  输入只在 capsule 里。（回复**为空**的会话不走这里：`_run_episode` 对空回复抛
+  `_empty_answer_error`，本来就按 transport 失败保留、进失败池。）driver 在删除点
+  （`_settle_episode`）判断：带 completion 谓词、而谓词不成立 → 写 `UNACCEPTED_EPISODE_MARKER`、
+  保留、定位符留在 attempt 上。这类 episode **单独计数**：`RETAINED_UNACCEPTED_EPISODES = 10`，
+  与 transport 失败的 `RETAINED_FAILED_EPISODES = 20` 各自按 mtime 滚动，互不挤占。判断留在 driver
+  内（谓词是 harness 本来就传进来的），上层调用点不感知——本节不让 episode 生命周期渗进上层的
+  那条约束仍然成立。
+- **审计包只进最后一个 capsule**：tool session 在循环结束后对最后一个 result 写一次审计包。第一次
+  premature stop 之后重试时，前一个 capsule 带标记留下，但里面**没有审计包**——只有事件流、stderr
+  与输入；它那一轮的拉取台账随 `reset_conversation` 清掉，只在最后一个审计包的 `resets` 里留痕。
+
+**谓词的含义是「CLI 可以走了」，不完全等于「工作被 accept 了」。** 单 task 会话两者重合；会话宿主
+（pseudo-conversational）的谓词有两处偏差，保留判断照读不误：
+
+- **空闲时自己离开**：CLI 在没有未完成 task、assignment 尚未 seal 时干净退出（状态 `waiting`），
+  谓词为假，于是即使它服务过的 task 全都 accept 了，capsule 也会被标成 unaccepted 留下。代价只是
+  这 10 个名额里的一个。
+- **harness 主动结束**：`_end_session`（replacement round / task timeout / close）先置 `_dead`，
+  谓词因此恒真。通常 CLI 不会自己走（它停在长轮询上，或正在干活）→ 宽限后回收 → 原始流随 capsule
+  留在失败池；只有 CLI 在宽限期内恰好自己干净退出，才按已完成删掉——哪怕当时有 task 没 accept。
+  罕见；`close(keep_evidence=True)` 保住的是 assignment 树，不是这个 capsule。
+
+要让两者严格一致，得给 driver 单独传一个「是否已 accept」的谓词，与回收用的谓词分开——今天没做，
+上面两处偏差的代价不值得为它改 driver 接口。
+
+**判断前必须再问一次 runtime。** 监督循环只在 CLI 活着时约每秒轮询一次谓词，进程退出后不再查。
+一个 submit 完一秒内就退出的 CLI，被 accept 了却从没被轮询观察到；若只凭轮询结果判断，这次成功
+调用会被当成 unaccepted 留下。多常发生取决于 CLI：2026-09-16 实测 CodeBuddy 10 次调用都在 accept
+之后 4.6–11.7s 才退出，轮询次次赶上——所以对它这是少见情形，但补查只多读一次状态，换来判断不依赖
+这个时序。谓词本身抛异常按「未 accept」处理：多留一份证据只费磁盘，少留一份则丢掉诊断。
+
+**要全部留下时**：`[llm] local_agent_keep_episodes = true`（默认 `false`，只为排查）。打开后 driver 不删任何 episode、也不跑滚动清理，pseudo 会话关闭时也不删 assignment 树；Codex 不再带 `--ephemeral`，它自己的 rollout（`~/.codex/sessions`，这家唯一的逐请求账本）随之留下。不进执行身份，改它不作废 checkpoint。磁盘不封顶，查完关掉再 `agent-clean`。
+
+**accept 了的会话，不管轮询看没看到，干净退出就删 capsule**（2026-09-30）。轮询看到 accept 时
+（`done_by_runtime`），driver 不再要求退出码与最终文本，但仍走同一个删除点（`_runtime_completed_result`
+→ `_settle_episode`）；只有宽限期满被回收（`reclaimed_after_completion`）、或原始流读不了
+（`stream_partial`）的才留下，原始流（`raw_events_retained`）在 capsule 里，进失败池。此前这条路直接
+返回、从不删除，CodeBuddy 10/10 走它，一条长 run 的成功会话就能把真正的 transport 失败按 mtime 挤出那
+20 个名额。
+
+**单 task 工具会话默认 accept 后立刻结束 CLI**（`[llm] local_agent_exit_on_accept`，`auto | on | off`，默认 `auto`，
+2026-09-30）。`auto` 只对能从逐请求事件补全用量的 driver 打开（agy、CodeBuddy、Claude Code）；Codex 只在
+`turn.completed` 报一次用量、提前结束就整次未知，dsh 的补全没验证，二者在 `auto` 下不提前结束（owner 2026-09-30），
+`on` 强制打开。按 driver 的取舍在 `ExecutionSettings.exit_on_accept_for`。这是预期的结束，不是回收：attempt 记 `ended_on_accept`，被杀的退出码与被截断的最后
+半行都不算数（读事件流时丢掉末尾不完整的一行），照常 settle、删 capsule（`local_agent_keep_episodes`
+打开时照常留下）。只有工具会话入口（`RoleClient._run_agent_tool_session`）按设置传
+`run(exit_on_completion=True)`；pseudo-conversational 宿主从不传——它的谓词是整个 assignment 结束，
+单个 accept 之后 CLI 还要回去 `next_task`。为了让 CLI 来不及发「收尾」那次请求，MCP server 把让
+assignment 完成的那条 `accepted` 回复先记进帧日志、再压住 `ACCEPTED_REPLY_HOLD_SECONDS`（10s）才发，
+driver 在下一次轮询（约每秒）看到 accept 就结束进程树；没人结束它，回复照发，只多花这段时间。
+关掉设置即回到宽限期行为。
+
+**提前结束时用量怎么来**：CLI 的总账在它最后的终止事件里，提前结束就没有。driver 改用流里每次请求
+自己的用量补全，标出来源（尽力而为：读不出就记成未知，attempt 上一条 `usage_unknown_after_accept`
+warning，调用照常成功，不等待、不重试）：
+
+| CLI | 补全办法 | `usage.source` |
+| --- | --- | --- |
+| Claude Code / CodeBuddy | 每条 `assistant` 事件的 `message.usage`，按 `message.id` 去重（同一请求拆成多条事件时逐字段取最大）后相加 | `claude_code_message_events` / `codebuddy_message_events` |
+| agy | 每个 `step_update`（state `DONE`）的 `usage`，按 `step_index` 去重后相加；只算本轮，不是会话累计 | `agy_step_events` |
+| Codex | `exec --json` 只在 `turn.completed` 给一次用量，提前结束拿不到 | 未知（`unavailable`） |
+
+各来源的 `input_tokens` 口径与同家 `result` 一致（Claude Code、agy 不含缓存，CodeBuddy 含），换算见
+`client._INPUT_EXCLUDES_CACHE`。实测（2026-09-30，各 n=1）：agy 3.7 Flash 两次不提前结束的工具会话
+（7 次、5 次请求），各步用量逐字段相加与 `result.usage` 完全相等；省下的收尾请求在 agy 上是一次约
+0.9 万未缓存 + 1.6 万缓存读取，CodeBuddy hy3 上约 1.1 万输入（其中缓存写入 815）。⚠ agy 自己的
+逐请求账本（`conversations/<id>.db` 的 `gen_metadata`）被提前结束时会缺最后一次（交稿那次）请求的
+记录，查账以事件流为准。
 
 ### 可以删掉的
 
@@ -388,7 +473,7 @@ case-fold、分隔符与 UNC 形式归一。digest 保留完整 SHA-256，不截
 - 任一域执行 cleanup → **看不到也删不掉**另一域的 episode。
 
 **门二：checkout 模式下 canonical parent 仍与执行隔离冲突。** G-C 要把 capsule 放进
-`<big-data>/agent-capsules`，而仓库/worktree 模式的大文件根**就是主 checkout**。§1 自己写了
+`<big-data>/agent-capsules`，而仓库/worktree 模式的大文件根**就是主 checkout**。[§1 执行环境卫生](#1-执行环境卫生episode-落在哪g-c已实施) 自己写了
 拒绝任意仓库路径的理由是 **cwd 锚点**——供应商那些"从 cwd 往上找项目文件"的机制会指向用户源码
 树。**这个理由对 canonical 路径同样成立**："它是 canonical" 只证明目录归 FineSub 管，不证明供应
 商不会向上发现 `CLAUDE.md` / 项目规则。而各 driver 的规则隔离，下面这张表就是实测结果
@@ -404,8 +489,8 @@ case-fold、分隔符与 UNC 形式归一。digest 保留完整 SHA-256，不截
 | agy（显式 `--new-project` / 后续 `--project`） | **加载 `AGENTS.md`** | **加载 `AGENTS.md`**；`CLAUDE.md` 不加载 |
 
 Codex 是**自动注入**，不是模型自己去读：`--ignore-rules` 确实在 argv 里，事件流中没有任何工具
-调用，第一条 `agent_message` 直接吐出哨兵口令。那两个 flag 管的应当是**用户级** config/rules，
-管不到项目级 `AGENTS.md`。Claude Code 侧确认不是假阴性：`is_error=false`、`terminal_reason=
+调用，第一条 `agent_message` 直接吐出哨兵口令。那两个 flag 连**用户级**的全局 `$CODEX_HOME/AGENTS.md`
+也管不到（2026-09-30 实测）：`--ignore-rules` 管的是执行策略 `.rules`，不是指令文件。Claude Code 侧确认不是假阴性：`is_error=false`、`terminal_reason=
 completed`、答案就是 `NONE`。
 
 **所以"逐 driver 实测"这条分支已经走完并且失败了**，剩下的不是二选一：
@@ -419,7 +504,7 @@ completed`、答案就是 `NONE`。
   | 候选 | 问题 |
   | --- | --- |
   | checkout 的兄弟目录 | checkout 一搬家就成孤儿。⚠ 当时还有第二条理由「worktree 本来就是兄弟目录（`../asr-playground-<topic>`）、再塞一个进去很吵」——2026-09-04 worktree 搬进内嵌 `.worktrees/` 后它不成立了；第一条足够，落点不变 |
-  | 本机 cache/state | 违反「仓库版只用自己的数据、绝不碰 `%LOCALAPPDATA%`」这条已写进 CLAUDE.md 与 resources.md 的用户契约，而 capsule 装的是任务正文 |
+  | 本机 cache/state | 违反「仓库版只用自己的数据、绝不碰 `%LOCALAPPDATA%`」这条已写进 AGENTS.md 与 resources.md 的用户契约，而 capsule 装的是任务正文 |
   | **TEMP + 域分区** | **无** |
 
   关键在于 **G-C 的搬迁/卸载目标对 checkout 本来就不适用**：随 `relocate` 搬、随
@@ -454,7 +539,7 @@ completed`、答案就是 `NONE`。
   - **按域的 cleanup 只看自己那棵子树**，绝不枚举未分区旧根、也绝不碰别的域的子树——旧根可能
     正被另一个协调域或旧版本使用，靠某一个 checkout 的 activity barrier 判它空闲是不成立的；
   - 未分区旧根交给**显式的一次性全量 cleanup**：用户主动执行、列清楚要删什么、要求所有 agent
-    已停止。这正是 §2 那条规则的应用——**扫描可以存在，但必须是用户发起的**；
+    已停止。这正是 [§2 capsule 是一次性 episode](#2-capsule-是一次性-episode不是持久-storeg-d已实施) 那条规则的应用——**扫描可以存在，但必须是用户发起的**；
   - 不做静默迁移。旧现场都是小文本，留着不影响正确性。
 
 - **留存规则的准确说法**（用户文档按这句写，别写成"只有失败会留"）：
@@ -465,7 +550,7 @@ completed`、答案就是 `NONE`。
   belt-and-braces，那是错的：在 Codex 上它是目前唯一挡住"用户仓库的项目规则被注入进纠错调用"
   的东西。G-D 拆所有权机制时不能顺手把它拆掉。
 - agy 已跑该实验；结论同样要求 checkout/worktree 的执行根在仓库外，并要求 driver 每次显式绑定
-  它自己生成的 project。漏传 `--project` 不仅改变规则发现，还会让 `llm_local_agent_agy.md` §4 的 hooks 消失。
+  它自己生成的 project。漏传 `--project` 不仅改变规则发现，还会让 `llm_local_agent_agy.md` [§4 准入硬门：view_file 的读取边界](llm_local_agent_agy.md#4-准入硬门view_file-的读取边界) 的 hooks 消失。
 
 顺带一提，这不只是"洁癖"：用户仓库的 `AGENTS.md` 一旦进入上下文，既是 prompt 污染（项目规则
 混进字幕任务），也是注入面（任何能写到那份文件的人就能给 agent 下指令）。
@@ -518,6 +603,11 @@ locator，交给显式 cleanup 以后处理。删不掉临时文件是卫生问�
 永远是刚发生那次。因此 `AgentCapsuleManager.prune` 在**建新 episode 时**按 mtime 只保留最近
 `RETAINED_FAILED_EPISODES = 20` 个。放在创建前而不是调用结束后：域只在这一刻增长，先剪再建也
 保证崩在半路时不会留下 N+1。
+
+**第二个池（2026-09-16）**：harness 会话干净退出却没被 accept 的现场带 `UNACCEPTED_EPISODE_MARKER`，
+由同一次 `prune` 单独计数，只留最近 `RETAINED_UNACCEPTED_EPISODES = 10` 个。分开数是因为合在一起
+时，一批此类会话会把 transport 失败全挤出去（反之亦然）。下面两道闸门对两个池同样适用。为什么
+这类现场要留、为什么判断前要再问一次 runtime，见上文「目标形态」。
 
 **绝不能删掉正在跑的 capsule**，两道彼此独立的闸门都为此：
 

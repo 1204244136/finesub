@@ -57,6 +57,38 @@ def _manifest_shell(tmp_path: Path, monkeypatch):
     return shell
 
 
+@pytest.mark.parametrize(
+    ("platform", "named"), [("darwin", "macOS"), ("linux", "Linux"), ("freebsd14", "freebsd14")]
+)
+def test_an_unprovisionable_platform_is_told_where_the_source_install_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str, named: str
+) -> None:
+    """The managed runtime is Windows-only; saying only that is a dead end."""
+
+    shell = _shell(tmp_path)  # built first: patched os.name breaks pathlib here
+    monkeypatch.setattr(shell_module.os, "name", "posix")
+    monkeypatch.setattr(shell_module.sys, "platform", platform)
+
+    with pytest.raises(SystemExit) as failure:
+        shell.ensure_ready()
+
+    message = str(failure.value)
+    assert named in message
+    # A user who installed from PyPI has no checkout, so the way out is a URL.
+    assert shell_module.REPO_INSTALL_DOC in message
+
+
+def test_the_platform_message_does_not_date_itself_on_wheel_availability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Which wheels exist changes; the document it points at owns that fact."""
+
+    monkeypatch.setattr(shell_module.sys, "platform", "linux")
+    message = shell_module._unsupported_platform_message()
+
+    assert not any(word in message for word in ("rocm", "cu128", "released", "尚未"))
+
+
 def test_only_the_output_flag_is_the_shells_business(tmp_path: Path) -> None:
     """Every other pipeline flag reaches the pipeline untouched.
 
@@ -276,16 +308,12 @@ def test_same_name_in_two_directories_is_two_tasks(
     assert len(_task_dirs(shell)) == 2
 
 
-def test_continuing_a_task_records_the_cli_defaults_that_actually_ran(
+def test_continuing_a_task_drops_switches_this_run_did_not_give(
     tmp_path: Path,
 ) -> None:
-    """Desktop defaults must not survive a CLI run that used different ones.
-
-    Both planted values are ones the desktop form defaults to and the CLI does
-    not, so each assertion below fails if the re-record keeps the old entry.
-    `llm_media` used to be planted as `video` *and* asserted as `video`, which
-    proved nothing: the recorder's own default had drifted to `video` too.
-    """
+    """A continued task is re-recorded from this run's command line: switches
+    an earlier record carried (here planted `video` / `update`) must not
+    survive into a run that did not give them."""
 
     from finesub_bootstrap import task_index
 
@@ -304,12 +332,11 @@ def test_continuing_a_task_records_the_cli_defaults_that_actually_ran(
     shell.dispatch([str(source), "--language", "ja"])
 
     request = task_index.read(shell._index_path(), shell.paths.tasks)[-1]
-    assert request["request"]["llm_media"] == "audio"
-    # `collect`, not `none`: an unset switch is `collect` outside an efficiency
-    # run (`resolve_knowledge_switch`). The planted `update` still has to go --
-    # that is what this test is about -- it just gets replaced by the value the
-    # run really had.
-    assert request["request"]["knowledge"] == "collect"
+    # Not given this time, so not recorded at all (the LLM preset fills them,
+    # and what it filled is in resolved-switches.json): the planted values
+    # must go rather than survive as if this run had used them.
+    assert "llm_media" not in request["request"]
+    assert "knowledge" not in request["request"]
     assert request["request"]["device"] == "cuda"
     assert request["request"]["language"] == "ja"
     assert request["created_at"] == 1.0, "a continued task was created once"
@@ -380,7 +407,7 @@ def test_cli_history_preserves_every_setting_a_retry_would_replay(
             "--extra-style",
             "concise",
             "--knowledge",
-            "collect",
+            "read",
             "--postprocess-profile",
             "4",
         ]
@@ -406,27 +433,28 @@ def test_cli_history_preserves_every_setting_a_retry_would_replay(
         "llm_media": "video",
         "llm_retrieval": "native",
         "llm_difficulty": "efficiency",
+        "knowledge": "read",
+        "resolved_switches": str(
+            shell.paths.tasks
+            / next(path.name for path in _task_dirs(shell))
+            / "chosen-name.llm-artifacts"
+            / "resolved-switches.json"
+        ),
         "llm_fast": "off",
         "llm_output_scale": 0.05,
         "extra_info": "inline\nfrom file",
         "extra_style": "concise",
-        "knowledge": "collect",
         "postprocess_profile": 4,
     }
 
 
-def test_omitted_switches_are_recorded_as_the_pipeline_would_default_them(
+def test_omitted_llm_switches_are_left_out_and_the_record_points_at_what_ran(
     tmp_path: Path,
 ) -> None:
-    """An absent flag must record what the pipeline actually does.
-
-    `_recorded_request` fills its own defaults rather than leaving a field
-    absent for a reader to fill, so each one has to track
-    `pipeline.parse_args`. The desktop form's defaults differed on purpose
-    (its front end sent `llm_media` explicitly), which is exactly how the
-    media default drifted to `video` here while the pipeline defaulted to
-    `audio`.
-    """
+    """An unset LLM switch is the active preset's to fill, which this package
+    cannot read; recording a mirrored default would name a value the run may
+    not have used (owner 2026-09-30). The record points at the correction
+    task's own account instead, and the other settings keep their defaults."""
 
     from finesub_bootstrap import task_index
 
@@ -434,30 +462,21 @@ def test_omitted_switches_are_recorded_as_the_pipeline_would_default_them(
     source.write_bytes(b"audio")
     shell = _recording_shell(tmp_path)
 
-    shell.dispatch([str(source)])
+    shell.dispatch([str(source), "--task-artifact-dir", str(tmp_path / "art")])
 
     body = task_index.read(shell._index_path(), shell.paths.tasks)[-1]["request"]
-    assert body["llm_media"] == "audio"
-    assert body["llm_difficulty"] == "quality"
-    assert body["llm_retrieval"] == "local"
+    for key in ("llm_media", "llm_retrieval", "llm_difficulty", "llm_continuity", "knowledge"):
+        assert key not in body
+    assert body["resolved_switches"] == str((tmp_path / "art" / "resolved-switches.json").resolve())
     assert body["llm_fast"] == "auto"
-    # Not a constant: `resolve_knowledge_switch` reads an unset switch as
-    # `collect`, and only `difficulty=efficiency` turns it into `none`. This
-    # one was recorded as a flat "none" until 2026-09-03, which told a reader
-    # of the history that a run which had injected the knowledge base never
-    # read it.
-    assert body["knowledge"] == "collect"
 
 
-def test_an_efficiency_run_records_the_knowledge_switch_it_actually_had(
+def test_an_efficiency_run_records_only_the_switch_it_was_given(
     tmp_path: Path,
 ) -> None:
-    """The other half of the rule: `efficiency` turns an unset switch into none.
-
-    Two branches, so a constant cannot be right for both -- which is how the
-    flat "none" survived: it happened to match this case and quietly misstated
-    every other run.
-    """
+    """Efficiency pins knowledge to none, but that is the LLM layer's
+    resolution, not something the user typed: it lives in
+    resolved-switches.json, not in the record."""
 
     from finesub_bootstrap import task_index
 
@@ -468,7 +487,23 @@ def test_an_efficiency_run_records_the_knowledge_switch_it_actually_had(
     shell.dispatch([str(source), "--llm-difficulty", "efficiency"])
 
     body = task_index.read(shell._index_path(), shell.paths.tasks)[-1]["request"]
-    assert body["knowledge"] == "none"
+    assert body["llm_difficulty"] == "efficiency"
+    assert "knowledge" not in body
+
+
+def test_the_record_keeps_a_typed_preset_and_window_count(tmp_path: Path) -> None:
+    """`--llm-preset` and `--llm-parallel-windows` are recorded like the other
+    LLM switches: when typed, and only then."""
+
+    from finesub_bootstrap import task_index
+
+    source = tmp_path / "clip.wav"
+    source.write_bytes(b"audio")
+    shell = _recording_shell(tmp_path)
+
+    shell.dispatch([str(source), "--llm-preset", "fast", "--llm-parallel-windows", "3"])
+    body = task_index.read(shell._index_path(), shell.paths.tasks)[-1]["request"]
+    assert (body["llm_preset"], body["llm_parallel_windows"]) == ("fast", 3)
 
 
 def test_shell_rejects_a_name_the_pipeline_cannot_record(tmp_path: Path) -> None:

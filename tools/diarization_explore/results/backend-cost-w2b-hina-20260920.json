@@ -1,0 +1,1304 @@
+{
+  "rows": [
+    {
+      "episode": "hina-06",
+      "people": 6,
+      "sortformer": {
+        "fixed": 0.6314113529423296,
+        "crossfit": 0.6314113529423296,
+        "f1": 0.6605697406368922,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 1326.0,
+          "merges": 153,
+          "labels": 867.0,
+          "abstained": 26
+        },
+        "terms": {
+          "move": 564.0,
+          "delete": 75.0,
+          "add": 214.0,
+          "duplicate": 14.0,
+          "merge": 459.0,
+          "total": 1326.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9272814738316164,
+        "crossfit": 0.9111919054241873,
+        "f1": 0.8451660658442167,
+        "naming": {
+          "tracks": 16,
+          "leading": 13,
+          "over_floor": 6,
+          "covering": 7
+        },
+        "leading_counts": {
+          "1": 13,
+          "3": 8,
+          "10": 5
+        },
+        "cost": {
+          "total": 916.0,
+          "merges": 154,
+          "labels": 454.0,
+          "abstained": 0
+        },
+        "terms": {
+          "move": 158.0,
+          "delete": 100.0,
+          "add": 152.0,
+          "duplicate": 44.0,
+          "merge": 462.0,
+          "total": 916.0
+        }
+      }
+    },
+    {
+      "episode": "hina-08",
+      "people": 6,
+      "sortformer": {
+        "fixed": 0.6682356538305174,
+        "crossfit": 0.6682356538305174,
+        "f1": 0.621743788161114,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 2161.0,
+          "merges": 269,
+          "labels": 1354.0,
+          "abstained": 14
+        },
+        "terms": {
+          "move": 920.0,
+          "delete": 238.0,
+          "add": 196.0,
+          "duplicate": 0.0,
+          "merge": 807.0,
+          "total": 2161.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.8727810014683011,
+        "crossfit": 0.8705113516092513,
+        "f1": 0.768999309538011,
+        "naming": {
+          "tracks": 12,
+          "leading": 12,
+          "over_floor": 10,
+          "covering": 7
+        },
+        "leading_counts": {
+          "1": 12,
+          "3": 11,
+          "10": 8
+        },
+        "cost": {
+          "total": 1836.0,
+          "merges": 272,
+          "labels": 1020.0,
+          "abstained": 0
+        },
+        "terms": {
+          "move": 470.0,
+          "delete": 427.0,
+          "add": 100.0,
+          "duplicate": 23.0,
+          "merge": 816.0,
+          "total": 1836.0
+        }
+      }
+    },
+    {
+      "episode": "hina-13",
+      "people": 6,
+      "sortformer": {
+        "fixed": 0.7320726000281187,
+        "crossfit": 0.7320726000281187,
+        "f1": 0.6554373352543731,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 4158.0,
+          "merges": 791,
+          "labels": 1785.0,
+          "abstained": 27
+        },
+        "terms": {
+          "move": 780.0,
+          "delete": 217.0,
+          "add": 788.0,
+          "duplicate": 0.0,
+          "merge": 2373.0,
+          "total": 4158.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.8634670335923844,
+        "crossfit": 0.8626668277705205,
+        "f1": 0.7570936682419553,
+        "naming": {
+          "tracks": 8,
+          "leading": 8,
+          "over_floor": 8,
+          "covering": 6
+        },
+        "leading_counts": {
+          "1": 8,
+          "3": 7,
+          "10": 7
+        },
+        "cost": {
+          "total": 3858.0,
+          "merges": 792,
+          "labels": 1482.0,
+          "abstained": 3
+        },
+        "terms": {
+          "move": 574.0,
+          "delete": 287.0,
+          "add": 612.0,
+          "duplicate": 9.0,
+          "merge": 2376.0,
+          "total": 3858.0
+        }
+      }
+    },
+    {
+      "episode": "hina-14",
+      "people": 6,
+      "sortformer": {
+        "fixed": 0.6969276811150313,
+        "crossfit": 0.6969276811150313,
+        "f1": 0.599769910509172,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 3905.0,
+          "merges": 735,
+          "labels": 1700.0,
+          "abstained": 27
+        },
+        "terms": {
+          "move": 794.0,
+          "delete": 172.0,
+          "add": 734.0,
+          "duplicate": 0.0,
+          "merge": 2205.0,
+          "total": 3905.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.854381535562225,
+        "crossfit": 0.8536666204492269,
+        "f1": 0.741948315257409,
+        "naming": {
+          "tracks": 9,
+          "leading": 9,
+          "over_floor": 9,
+          "covering": 6
+        },
+        "leading_counts": {
+          "1": 9,
+          "3": 9,
+          "10": 7
+        },
+        "cost": {
+          "total": 3596.0,
+          "merges": 745,
+          "labels": 1361.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 500.0,
+          "delete": 254.0,
+          "add": 586.0,
+          "duplicate": 21.0,
+          "merge": 2235.0,
+          "total": 3596.0
+        }
+      }
+    },
+    {
+      "episode": "hina-32",
+      "people": 5,
+      "sortformer": {
+        "fixed": 0.6675420319462746,
+        "crossfit": 0.6675420319462746,
+        "f1": 0.6202662630078608,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 2425.0,
+          "merges": 431,
+          "labels": 1132.0,
+          "abstained": 4
+        },
+        "terms": {
+          "move": 546.0,
+          "delete": 150.0,
+          "add": 436.0,
+          "duplicate": 0.0,
+          "merge": 1293.0,
+          "total": 2425.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.8552343419128002,
+        "crossfit": 0.8552343419128002,
+        "f1": 0.7387999593815366,
+        "naming": {
+          "tracks": 7,
+          "leading": 7,
+          "over_floor": 7,
+          "covering": 6
+        },
+        "leading_counts": {
+          "1": 7,
+          "3": 7,
+          "10": 6
+        },
+        "cost": {
+          "total": 2189.0,
+          "merges": 431,
+          "labels": 896.0,
+          "abstained": 0
+        },
+        "terms": {
+          "move": 340.0,
+          "delete": 229.0,
+          "add": 310.0,
+          "duplicate": 17.0,
+          "merge": 1293.0,
+          "total": 2189.0
+        }
+      }
+    },
+    {
+      "episode": "hina-40",
+      "people": 5,
+      "sortformer": {
+        "fixed": 0.7058419221358997,
+        "crossfit": 0.7058419221358997,
+        "f1": 0.6534271811366595,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 5139.0,
+          "merges": 914,
+          "labels": 2397.0,
+          "abstained": 19
+        },
+        "terms": {
+          "move": 1188.0,
+          "delete": 386.0,
+          "add": 812.0,
+          "duplicate": 11.0,
+          "merge": 2742.0,
+          "total": 5139.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9344702453927911,
+        "crossfit": 0.9344702453927911,
+        "f1": 0.8738426352071836,
+        "naming": {
+          "tracks": 7,
+          "leading": 7,
+          "over_floor": 6,
+          "covering": 5
+        },
+        "leading_counts": {
+          "1": 7,
+          "3": 7,
+          "10": 5
+        },
+        "cost": {
+          "total": 4147.0,
+          "merges": 917,
+          "labels": 1396.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 320.0,
+          "delete": 463.0,
+          "add": 606.0,
+          "duplicate": 7.0,
+          "merge": 2751.0,
+          "total": 4147.0
+        }
+      }
+    },
+    {
+      "episode": "hina-63",
+      "people": 5,
+      "sortformer": {
+        "fixed": 0.7102509375638422,
+        "crossfit": 0.6592421260549832,
+        "f1": 0.6632049678326173,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 452.0,
+          "merges": 16,
+          "labels": 404.0,
+          "abstained": 12
+        },
+        "terms": {
+          "move": 362.0,
+          "delete": 5.0,
+          "add": 20.0,
+          "duplicate": 17.0,
+          "merge": 48.0,
+          "total": 452.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9824103475428281,
+        "crossfit": 0.9812451299551261,
+        "f1": 0.9653913522436961,
+        "naming": {
+          "tracks": 11,
+          "leading": 6,
+          "over_floor": 6,
+          "covering": 6
+        },
+        "leading_counts": {
+          "1": 6,
+          "3": 5,
+          "10": 5
+        },
+        "cost": {
+          "total": 108.0,
+          "merges": 16,
+          "labels": 60.0,
+          "abstained": 2
+        },
+        "terms": {
+          "move": 30.0,
+          "delete": 5.0,
+          "add": 22.0,
+          "duplicate": 3.0,
+          "merge": 48.0,
+          "total": 108.0
+        }
+      }
+    },
+    {
+      "episode": "hina-64",
+      "people": 6,
+      "sortformer": {
+        "fixed": 0.7878482299303711,
+        "crossfit": 0.7778488111121978,
+        "f1": 0.7950891833999884,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 243.0,
+          "merges": 6,
+          "labels": 225.0,
+          "abstained": 3
+        },
+        "terms": {
+          "move": 210.0,
+          "delete": 3.0,
+          "add": 12.0,
+          "duplicate": 0.0,
+          "merge": 18.0,
+          "total": 243.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9854822016156857,
+        "crossfit": 0.975833965007908,
+        "f1": 0.9670661890894658,
+        "naming": {
+          "tracks": 19,
+          "leading": 8,
+          "over_floor": 6,
+          "covering": 10
+        },
+        "leading_counts": {
+          "1": 8,
+          "3": 6,
+          "10": 5
+        },
+        "cost": {
+          "total": 51.0,
+          "merges": 6,
+          "labels": 33.0,
+          "abstained": 0
+        },
+        "terms": {
+          "move": 16.0,
+          "delete": 4.0,
+          "add": 12.0,
+          "duplicate": 1.0,
+          "merge": 18.0,
+          "total": 51.0
+        }
+      }
+    },
+    {
+      "episode": "hina-65",
+      "people": 6,
+      "sortformer": {
+        "fixed": 0.67830358627497,
+        "crossfit": 0.6695375141244747,
+        "f1": 0.6680036305548396,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 399.0,
+          "merges": 3,
+          "labels": 390.0,
+          "abstained": 7
+        },
+        "terms": {
+          "move": 376.0,
+          "delete": 8.0,
+          "add": 6.0,
+          "duplicate": 0.0,
+          "merge": 9.0,
+          "total": 399.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9657049540180971,
+        "crossfit": 0.9536935067529193,
+        "f1": 0.9253582334480601,
+        "naming": {
+          "tracks": 11,
+          "leading": 8,
+          "over_floor": 7,
+          "covering": 7
+        },
+        "leading_counts": {
+          "1": 8,
+          "3": 8,
+          "10": 6
+        },
+        "cost": {
+          "total": 62.0,
+          "merges": 3,
+          "labels": 53.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 40.0,
+          "delete": 7.0,
+          "add": 6.0,
+          "duplicate": 0.0,
+          "merge": 9.0,
+          "total": 62.0
+        }
+      }
+    },
+    {
+      "episode": "hina-67",
+      "people": 5,
+      "sortformer": {
+        "fixed": 0.7741814210476176,
+        "crossfit": 0.6977569031450306,
+        "f1": 0.8006481242432089,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 3
+        },
+        "cost": {
+          "total": 258.0,
+          "merges": 14,
+          "labels": 216.0,
+          "abstained": 3
+        },
+        "terms": {
+          "move": 180.0,
+          "delete": 14.0,
+          "add": 22.0,
+          "duplicate": 0.0,
+          "merge": 42.0,
+          "total": 258.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.8195633338323284,
+        "crossfit": 0.7456513701954701,
+        "f1": 0.853624572848602,
+        "naming": {
+          "tracks": 8,
+          "leading": 6,
+          "over_floor": 7,
+          "covering": 5
+        },
+        "leading_counts": {
+          "1": 6,
+          "3": 5,
+          "10": 3
+        },
+        "cost": {
+          "total": 236.0,
+          "merges": 14,
+          "labels": 194.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 154.0,
+          "delete": 13.0,
+          "add": 22.0,
+          "duplicate": 5.0,
+          "merge": 42.0,
+          "total": 236.0
+        }
+      }
+    },
+    {
+      "episode": "hina-68",
+      "people": 8,
+      "sortformer": {
+        "fixed": 0.644044121246274,
+        "crossfit": 0.644044121246274,
+        "f1": 0.6188745509978759,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 576.0,
+          "merges": 3,
+          "labels": 567.0,
+          "abstained": 8
+        },
+        "terms": {
+          "move": 546.0,
+          "delete": 15.0,
+          "add": 6.0,
+          "duplicate": 0.0,
+          "merge": 9.0,
+          "total": 576.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9917144320505826,
+        "crossfit": 0.9908202115326987,
+        "f1": 0.9831967406540577,
+        "naming": {
+          "tracks": 12,
+          "leading": 10,
+          "over_floor": 10,
+          "covering": 8
+        },
+        "leading_counts": {
+          "1": 10,
+          "3": 8,
+          "10": 8
+        },
+        "cost": {
+          "total": 38.0,
+          "merges": 3,
+          "labels": 29.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 16.0,
+          "delete": 7.0,
+          "add": 6.0,
+          "duplicate": 0.0,
+          "merge": 9.0,
+          "total": 38.0
+        }
+      }
+    },
+    {
+      "episode": "hina-73",
+      "people": 7,
+      "sortformer": {
+        "fixed": 0.6523031442481407,
+        "crossfit": 0.6277528106663488,
+        "f1": 0.6765329550264256,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 437.0,
+          "merges": 5,
+          "labels": 422.0,
+          "abstained": 5
+        },
+        "terms": {
+          "move": 406.0,
+          "delete": 6.0,
+          "add": 8.0,
+          "duplicate": 2.0,
+          "merge": 15.0,
+          "total": 437.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9713277003242211,
+        "crossfit": 0.9697209489824861,
+        "f1": 0.9243803453859306,
+        "naming": {
+          "tracks": 11,
+          "leading": 10,
+          "over_floor": 9,
+          "covering": 8
+        },
+        "leading_counts": {
+          "1": 10,
+          "3": 9,
+          "10": 8
+        },
+        "cost": {
+          "total": 69.0,
+          "merges": 5,
+          "labels": 54.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 38.0,
+          "delete": 6.0,
+          "add": 8.0,
+          "duplicate": 2.0,
+          "merge": 15.0,
+          "total": 69.0
+        }
+      }
+    },
+    {
+      "episode": "hina-74",
+      "people": 5,
+      "sortformer": {
+        "fixed": 0.6726486268987019,
+        "crossfit": 0.6726486268987019,
+        "f1": 0.6877082487420924,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 3
+        },
+        "cost": {
+          "total": 641.0,
+          "merges": 64,
+          "labels": 449.0,
+          "abstained": 9
+        },
+        "terms": {
+          "move": 306.0,
+          "delete": 21.0,
+          "add": 122.0,
+          "duplicate": 0.0,
+          "merge": 192.0,
+          "total": 641.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9379578401457488,
+        "crossfit": 0.9368256043992892,
+        "f1": 0.8824240842007393,
+        "naming": {
+          "tracks": 18,
+          "leading": 8,
+          "over_floor": 9,
+          "covering": 9
+        },
+        "leading_counts": {
+          "1": 8,
+          "3": 6,
+          "10": 5
+        },
+        "cost": {
+          "total": 397.0,
+          "merges": 64,
+          "labels": 205.0,
+          "abstained": 2
+        },
+        "terms": {
+          "move": 68.0,
+          "delete": 12.0,
+          "add": 124.0,
+          "duplicate": 1.0,
+          "merge": 192.0,
+          "total": 397.0
+        }
+      }
+    },
+    {
+      "episode": "hina-10",
+      "people": 4,
+      "sortformer": {
+        "fixed": 0.6155572220890567,
+        "crossfit": 0.5920923249012527,
+        "f1": 0.5755637435765135,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 3
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 2578.0,
+          "merges": 336,
+          "labels": 1570.0,
+          "abstained": 14
+        },
+        "terms": {
+          "move": 928.0,
+          "delete": 126.0,
+          "add": 424.0,
+          "duplicate": 92.0,
+          "merge": 1008.0,
+          "total": 2578.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9438585207985758,
+        "crossfit": 0.9365125887883958,
+        "f1": 0.8820781478011068,
+        "naming": {
+          "tracks": 23,
+          "leading": 13,
+          "over_floor": 11,
+          "covering": 10
+        },
+        "leading_counts": {
+          "1": 13,
+          "3": 10,
+          "10": 3
+        },
+        "cost": {
+          "total": 1668.0,
+          "merges": 336,
+          "labels": 660.0,
+          "abstained": 0
+        },
+        "terms": {
+          "move": 150.0,
+          "delete": 281.0,
+          "add": 192.0,
+          "duplicate": 37.0,
+          "merge": 1008.0,
+          "total": 1668.0
+        }
+      }
+    },
+    {
+      "episode": "hina-30",
+      "people": 4,
+      "sortformer": {
+        "fixed": 0.7768596603535032,
+        "crossfit": 0.7768596603535032,
+        "f1": 0.7055170658848606,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 2840.0,
+          "merges": 510,
+          "labels": 1310.0,
+          "abstained": 17
+        },
+        "terms": {
+          "move": 590.0,
+          "delete": 254.0,
+          "add": 458.0,
+          "duplicate": 8.0,
+          "merge": 1530.0,
+          "total": 2840.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9131999161007643,
+        "crossfit": 0.9131999161007643,
+        "f1": 0.8027397672470528,
+        "naming": {
+          "tracks": 7,
+          "leading": 7,
+          "over_floor": 6,
+          "covering": 5
+        },
+        "leading_counts": {
+          "1": 7,
+          "3": 6,
+          "10": 6
+        },
+        "cost": {
+          "total": 2616.0,
+          "merges": 514,
+          "labels": 1074.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 340.0,
+          "delete": 382.0,
+          "add": 320.0,
+          "duplicate": 32.0,
+          "merge": 1542.0,
+          "total": 2616.0
+        }
+      }
+    },
+    {
+      "episode": "hina-37",
+      "people": 4,
+      "sortformer": {
+        "fixed": 0.8077952092729489,
+        "crossfit": 0.8077952092729489,
+        "f1": 0.6943192988144707,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 3950.0,
+          "merges": 765,
+          "labels": 1655.0,
+          "abstained": 30
+        },
+        "terms": {
+          "move": 664.0,
+          "delete": 275.0,
+          "add": 716.0,
+          "duplicate": 0.0,
+          "merge": 2295.0,
+          "total": 3950.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.8625113206984455,
+        "crossfit": 0.8625113206984455,
+        "f1": 0.7589080766480659,
+        "naming": {
+          "tracks": 5,
+          "leading": 5,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 5,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 3916.0,
+          "merges": 776,
+          "labels": 1588.0,
+          "abstained": 2
+        },
+        "terms": {
+          "move": 620.0,
+          "delete": 376.0,
+          "add": 592.0,
+          "duplicate": 0.0,
+          "merge": 2328.0,
+          "total": 3916.0
+        }
+      }
+    },
+    {
+      "episode": "hina-57",
+      "people": 4,
+      "sortformer": {
+        "fixed": 0.8237269929243813,
+        "crossfit": 0.8237269929243813,
+        "f1": 0.7168898491587975,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 2409.0,
+          "merges": 424,
+          "labels": 1137.0,
+          "abstained": 29
+        },
+        "terms": {
+          "move": 450.0,
+          "delete": 353.0,
+          "add": 334.0,
+          "duplicate": 0.0,
+          "merge": 1272.0,
+          "total": 2409.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.8570002066178445,
+        "crossfit": 0.8468253197961925,
+        "f1": 0.7179775735997856,
+        "naming": {
+          "tracks": 14,
+          "leading": 14,
+          "over_floor": 9,
+          "covering": 6
+        },
+        "leading_counts": {
+          "1": 14,
+          "3": 14,
+          "10": 6
+        },
+        "cost": {
+          "total": 2508.0,
+          "merges": 432,
+          "labels": 1212.0,
+          "abstained": 2
+        },
+        "terms": {
+          "move": 426.0,
+          "delete": 459.0,
+          "add": 262.0,
+          "duplicate": 65.0,
+          "merge": 1296.0,
+          "total": 2508.0
+        }
+      }
+    },
+    {
+      "episode": "hina-62",
+      "people": 4,
+      "sortformer": {
+        "fixed": 0.9898201497612038,
+        "crossfit": 0.9898201497612038,
+        "f1": 0.9820234824333939,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 54.0,
+          "merges": 8,
+          "labels": 30.0,
+          "abstained": 6
+        },
+        "terms": {
+          "move": 12.0,
+          "delete": 4.0,
+          "add": 14.0,
+          "duplicate": 0.0,
+          "merge": 24.0,
+          "total": 54.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9964450509105564,
+        "crossfit": 0.9941952977898719,
+        "f1": 0.9924575744706557,
+        "naming": {
+          "tracks": 8,
+          "leading": 6,
+          "over_floor": 5,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 6,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 49.0,
+          "merges": 8,
+          "labels": 25.0,
+          "abstained": 4
+        },
+        "terms": {
+          "move": 4.0,
+          "delete": 4.0,
+          "add": 16.0,
+          "duplicate": 1.0,
+          "merge": 24.0,
+          "total": 49.0
+        }
+      }
+    },
+    {
+      "episode": "hina-69",
+      "people": 4,
+      "sortformer": {
+        "fixed": 0.982989630001178,
+        "crossfit": 0.982989630001178,
+        "f1": 0.9683786665688977,
+        "naming": {
+          "tracks": 4,
+          "leading": 4,
+          "over_floor": 4,
+          "covering": 4
+        },
+        "leading_counts": {
+          "1": 4,
+          "3": 4,
+          "10": 4
+        },
+        "cost": {
+          "total": 23.0,
+          "merges": 0,
+          "labels": 23.0,
+          "abstained": 0
+        },
+        "terms": {
+          "move": 20.0,
+          "delete": 3.0,
+          "add": 0.0,
+          "duplicate": 0.0,
+          "merge": 0.0,
+          "total": 23.0
+        }
+      },
+      "diarizen": {
+        "fixed": 0.9874665764817501,
+        "crossfit": 0.9874665764817501,
+        "f1": 0.9472996192821703,
+        "naming": {
+          "tracks": 10,
+          "leading": 7,
+          "over_floor": 6,
+          "covering": 6
+        },
+        "leading_counts": {
+          "1": 7,
+          "3": 6,
+          "10": 5
+        },
+        "cost": {
+          "total": 17.0,
+          "merges": 0,
+          "labels": 17.0,
+          "abstained": 1
+        },
+        "terms": {
+          "move": 16.0,
+          "delete": 0.0,
+          "add": 0.0,
+          "duplicate": 1.0,
+          "merge": 0.0,
+          "total": 17.0
+        }
+      }
+    }
+  ],
+  "paired": {
+    "fixed": {
+      "mean": 18.441567680458878,
+      "ci95": [
+        13.460605252870561,
+        23.292795134414703
+      ],
+      "better": 19,
+      "n": 19
+    },
+    "B3 F1": {
+      "mean": 15.604127602366566,
+      "ci95": [
+        10.927806568896978,
+        20.4159410526821
+      ],
+      "better": 18,
+      "n": 19
+    },
+    "leading tracks": {
+      "mean": 4.631578947368421,
+      "ci95": [
+        3.526315789473684,
+        5.842105263157895
+      ],
+      "better": 0,
+      "n": 19
+    },
+    "tracks >= 30 s": {
+      "mean": 3.4210526315789473,
+      "ci95": [
+        2.6315789473684212,
+        4.2631578947368425
+      ],
+      "better": 0,
+      "n": 19
+    },
+    "tracks for 95%": {
+      "mean": 2.8947368421052633,
+      "ci95": [
+        2.1052631578947367,
+        3.789473684210526
+      ],
+      "better": 0,
+      "n": 19
+    },
+    "leading >= 3 rows": {
+      "mean": 3.3684210526315788,
+      "ci95": [
+        2.3157894736842106,
+        4.526315789473684
+      ],
+      "better": 0,
+      "n": 19
+    },
+    "leading >= 10 rows": {
+      "mean": 1.6842105263157894,
+      "ci95": [
+        1.0526315789473684,
+        2.3157894736842106
+      ],
+      "better": 1,
+      "n": 19
+    },
+    "edit cost": {
+      "mean": -299.8421052631579,
+      "ci95": [
+        -431.68552631578945,
+        -184.0
+      ],
+      "better": 18,
+      "n": 19
+    },
+    "label part": {
+      "mean": -306.3157894736842,
+      "ci95": [
+        -437.89473684210526,
+        -192.26184210526318
+      ],
+      "better": 18,
+      "n": 19
+    }
+  },
+  "script": "ef879db6bbb1dab2c92992d1675c7162ccf77d404ca390e94167e9b9a5972719"
+}

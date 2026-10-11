@@ -69,7 +69,7 @@ def test_the_provisioning_layer_does_not_import_the_pipeline_package() -> None:
     feature. The one real dependency (`shell.py` resolving an output name) is a
     deliberate function-level import, which is why this checks `tree.body` only.
 
-    CLAUDE.md's architecture table marks this rule as test-enforced. It said so
+    docs/architecture.md marks this rule as test-enforced. It said so
     before this test existed, which is the failure this test also fixes.
     """
 
@@ -237,6 +237,88 @@ def test_the_thin_cli_stays_importable_on_python_310() -> None:
     )
 
 
+#: Questions about *this machine's GPU* that only `device.py` may ask torch.
+#: Using a card (empty_cache, synchronize, memory statistics, autocast) is
+#: fine anywhere; asking whether there is one, which vendor, which architecture
+#: or which build is not -- that is how a bare `is_available()` once put work
+#: on a card with no kernels, and how an AMD card would be mistaken for NVIDIA.
+DEVICE_PROBES = {
+    "cuda": {
+        "is_available",
+        "device_count",
+        "get_arch_list",
+        "get_device_capability",
+        "get_device_name",
+        "get_device_properties",
+        "mem_get_info",
+        "is_bf16_supported",
+        "set_device",
+    },
+    "version": {"cuda", "hip"},
+    "backends": {"mps"},
+}
+DEVICE_PROBE_HOME = "src/finesub/speech/runtime/device.py"
+
+
+def _attribute_chain(node: ast.AST) -> list[str]:
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+    return list(reversed(parts))
+
+
+def test_device_probes_live_in_one_module() -> None:
+    repository_root = SOURCE_ROOT.parent
+    offenders: list[str] = []
+    for source in SOURCE_ROOT.rglob("*.py"):
+        relative = source.relative_to(repository_root).as_posix()
+        if relative == DEVICE_PROBE_HOME:
+            continue
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Attribute):
+                continue
+            chain = _attribute_chain(node)
+            if len(chain) < 2 or chain[0] != "torch":
+                continue
+            if chain[1] == "xpu" or (
+                len(chain) >= 3 and chain[2] in DEVICE_PROBES.get(chain[1], set())
+            ):
+                offenders.append(f"{relative}:{node.lineno} {'.'.join(chain)}")
+
+    assert offenders == [], (
+        "ask finesub.speech.runtime.device instead of probing torch directly"
+    )
+
+
+#: The only production code allowed to call `torch.jit.load`. Handing it a path
+#: string lets libtorch open the file with a narrow-character `fopen`, which
+#: misreads a non-ASCII install path on a non-UTF-8 Windows code page -- the
+#: 0.5.1 report of `silero_vad.jit` "not existing". The helper there passes a
+#: file object instead.
+TORCHSCRIPT_LOAD_HOME = "src/finesub/speech/runtime/native_paths.py"
+
+
+def test_torchscript_loads_go_through_one_helper() -> None:
+    repository_root = SOURCE_ROOT.parent
+    offenders: list[str] = []
+    for source in SOURCE_ROOT.rglob("*.py"):
+        relative = source.relative_to(repository_root).as_posix()
+        if relative == TORCHSCRIPT_LOAD_HOME:
+            continue
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and _attribute_chain(node)[-2:] == ["jit", "load"]:
+                offenders.append(f"{relative}:{node.lineno}")
+
+    assert offenders == [], (
+        "load TorchScript with finesub.speech.runtime.native_paths.load_torchscript"
+    )
+
+
 #: The only production code allowed to call `shutil.rmtree` directly. Every
 #: other tree deletion goes through `fsops.remove_tree`, which refuses to follow
 #: a directory link out of the tree it was asked to delete -- users do redirect
@@ -318,11 +400,13 @@ ROUTING_LAYERS = {
     "api_keys": 0,
     "config": 0,
     "model_catalog": 0,
-    "model_routes": 1,
     "profiles": 1,
-    "execution_policy": 2,
-    "model_router": 3,
-    "capabilities": 4,
+    # Above profiles since 2026-09-30: a preset's `defaults` table is checked
+    # against the switch vocabulary profiles owns.
+    "model_routes": 2,
+    "execution_policy": 3,
+    "model_router": 4,
+    "capabilities": 5,
 }
 
 

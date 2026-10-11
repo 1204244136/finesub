@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from finesub import settings
+
 import concurrent.futures as cf
 import json
 import threading
@@ -58,7 +60,7 @@ def test_explicit_split_length_scale_beats_the_config(tmp_path, monkeypatch) -> 
     ("explicit", "body", "expected_source"),
     [
         (None, "[segmentation]\nlength_scale = 4.0\n", "config.toml"),
-        (4.0, "[providers]\ntavily = false\n", "--split-length-scale"),
+        (4.0, "[providers]\ntavily = false\n", "explicit value"),
     ],
 )
 def test_out_of_range_split_length_scale_names_where_it_came_from(
@@ -77,20 +79,20 @@ def test_the_silero_assist_defaults_to_on_in_the_backend(
 
     _with_config(tmp_path, monkeypatch, "[providers]\ntavily = false\n")
 
-    assert vad_asr.resolve_vad_silero_assist() is True
-    assert vad_asr.resolve_vad_silero_assist(None) is True
+    assert settings.VAD_SILERO_ASSIST.resolve() is True
+    assert settings.VAD_SILERO_ASSIST.resolve(None) is True
 
 
 def test_the_config_file_can_turn_the_silero_assist_off(tmp_path, monkeypatch) -> None:
     _with_config(tmp_path, monkeypatch, "[vad]\nsilero_assist = false\n")
 
-    assert vad_asr.resolve_vad_silero_assist() is False
+    assert settings.VAD_SILERO_ASSIST.resolve() is False
 
 
 def test_an_explicit_silero_switch_beats_the_config(tmp_path, monkeypatch) -> None:
     _with_config(tmp_path, monkeypatch, "[vad]\nsilero_assist = false\n")
 
-    assert vad_asr.resolve_vad_silero_assist(True) is True
+    assert settings.VAD_SILERO_ASSIST.resolve(True) is True
 
 
 def test_a_non_boolean_silero_setting_is_refused_rather_than_coerced(
@@ -101,7 +103,7 @@ def test_a_non_boolean_silero_setting_is_refused_rather_than_coerced(
     _with_config(tmp_path, monkeypatch, "[vad]\nsilero_assist = 1\n")
 
     with pytest.raises(ValueError, match="true or false"):
-        vad_asr.resolve_vad_silero_assist()
+        settings.VAD_SILERO_ASSIST.resolve()
 
 
 def test_the_cli_can_still_turn_the_silero_assist_off(monkeypatch) -> None:
@@ -1013,6 +1015,61 @@ def test_pipeline_uses_custom_artifact_dir_for_summary_and_report(
     assert not paths.task_artifact_dir.exists()
 
 
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({"llm_difficulty": "efficiency", "knowledge": "update"}, "efficiency"),
+        ({"knowledge": "read", "refined_srt": "refined.srt"}, "--refined-srt"),
+    ],
+)
+def test_a_contradictory_llm_request_fails_before_separation(
+    tmp_path, monkeypatch, options, message
+) -> None:
+    """The LLM keys are packed and checked before the expensive half runs;
+    finding the contradiction after ASR is finding it at the worst moment."""
+
+    from finesub.llm.correction_request import CorrectionRequestError
+
+    source = tmp_path / "input.wav"
+    source.write_bytes(b"fake")
+    monkeypatch.setattr(
+        stages.vocal_separation, "run_vocal_separation",
+        lambda *a, **k: pytest.fail("separation ran before the request was checked"),
+    )
+    with pytest.raises(CorrectionRequestError, match=message):
+        pipeline.run_pipeline(
+            source,
+            output_path=tmp_path / "out" / "final.srt",
+            stage="translated-srt",
+            llm_media="text",
+            llm_retrieval="none",
+            **options,
+        )
+
+
+def test_an_efficiency_style_update_fails_before_separation(tmp_path, monkeypatch) -> None:
+    """Efficiency caps the style mode at read; an explicit update is refused
+    from `run_pipeline`, not after ASR."""
+
+    from finesub.llm.knowledge.style import StyleSelectionError
+
+    source = tmp_path / "input.wav"
+    source.write_bytes(b"fake")
+    monkeypatch.setattr(
+        stages.vocal_separation, "run_vocal_separation",
+        lambda *a, **k: pytest.fail("separation ran before the request was checked"),
+    )
+    with pytest.raises(StyleSelectionError, match="efficiency"):
+        pipeline.run_pipeline(
+            source,
+            output_path=tmp_path / "out" / "final.srt",
+            stage="translated-srt",
+            llm_difficulty="efficiency",
+            style_mode="update",
+            knowledge_root=tmp_path / "knowledge",
+        )
+
+
 def test_pipeline_passes_llm_profile_args_through(tmp_path, monkeypatch) -> None:
     import finesub.llm.correction_translation as ct
 
@@ -1025,11 +1082,11 @@ def test_pipeline_passes_llm_profile_args_through(tmp_path, monkeypatch) -> None
     paths.raw_srt.write_text("", encoding="utf-8")
     seen: dict[str, object] = {}
 
-    def fake_run_full_correction(**kwargs):
-        seen.update(kwargs)
-        return paths.translated_srt
+    def fake_run_correction_task(request):
+        seen.update(vars(request))
+        return ct.CorrectionOutcome(result=paths.translated_srt)
 
-    monkeypatch.setattr(ct, "run_full_correction", fake_run_full_correction)
+    monkeypatch.setattr(ct, "run_correction_task", fake_run_correction_task)
 
     pipeline.run_pipeline(
         source,
@@ -1043,12 +1100,15 @@ def test_pipeline_passes_llm_profile_args_through(tmp_path, monkeypatch) -> None
     )
 
     assert seen["profile"].profile_id == (
-        "correction_media=text,planning_media=text,retrieval=none,"
+        "correction_media=text,retrieval=none,"
         "difficulty=efficiency,continuity=serial"
     )
     assert seen["profile"].output_scale == 1.5
     assert seen["fast"] == "off"
     assert seen["video_path"] is None
+    # Where each switch came from reaches the task, for resolved-switches.json.
+    assert seen["switch_sources"]["media"] == "explicit"
+    assert seen["switch_sources"]["knowledge"] == "default"
 
 
 def test_pipeline_url_input_takes_the_audio_path_only_when_asked(
@@ -1135,14 +1195,14 @@ def test_pipeline_url_input_mm_high_downloads_video_for_llm(tmp_path, monkeypatc
         Path(kwargs["output_path"]).write_text("", encoding="utf-8")
         return Path(kwargs["output_path"])
 
-    def fake_correction(**kwargs):
-        seen["correction"] = kwargs
-        return Path(kwargs["output_path"])
+    def fake_correction(request):
+        seen["correction"] = vars(request)
+        return ct.CorrectionOutcome(result=Path(request.output_path))
 
     monkeypatch.setattr(stages.vocal_separation, "run_vocal_separation", fake_separate)
     monkeypatch.setattr(stages.vad_asr, "run_vad_asr", fake_vad_asr)
     monkeypatch.setattr(stages.to_srt, "convert_json_to_srt", fake_to_srt)
-    monkeypatch.setattr(ct, "run_full_correction", fake_correction)
+    monkeypatch.setattr(ct, "run_correction_task", fake_correction)
 
     output = tmp_path / "out" / "final-dir" / "final.srt"
     pipeline.run_pipeline(
@@ -1180,7 +1240,6 @@ def test_explicit_llm_video_satisfies_a_video_switch_on_audio_input(
         stage="translated-srt",
         llm_media="video",
         llm_video=str(video),
-        llm_correction_media="video",
     )
 
     assert media == "video"
@@ -1188,23 +1247,8 @@ def test_explicit_llm_video_satisfies_a_video_switch_on_audio_input(
     assert notice == ""
 
 
-def test_video_switch_without_any_video_source_is_an_error(tmp_path) -> None:
-    source = tmp_path / "input.wav"
-    source.write_bytes(b"fake")
-
-    with pytest.raises(ValueError, match="--llm-video"):
-        stages.resolve_llm_media_for_source(
-            source_path=source,
-            stage="translated-srt",
-            llm_media="video",
-            llm_video=None,
-            llm_correction_media="video",
-        )
-
-
-def test_convenience_video_default_still_downgrades_on_audio_only(tmp_path) -> None:
-    """Only the *explicit* per-task override is an error; the convenience
-    default keeps downgrading with a notice (plan v2 D20)."""
+def test_video_switch_downgrades_on_audio_only_input(tmp_path) -> None:
+    """``--llm-media video`` on an audio-only input downgrades with a notice."""
 
     source = tmp_path / "input.wav"
     source.write_bytes(b"fake")
@@ -1468,29 +1512,6 @@ def test_pyproject_pins_the_stack_the_pipeline_needs() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_an_unset_knowledge_switch_resolves_against_the_difficulty() -> None:
-    """`efficiency` disables knowledge by construction.
-
-    Resolving only in the pipeline CLI left `run_pipeline` handing "collect"
-    to an efficiency run, which the LLM layer refuses with a ValueError --
-    *after* ASR has already finished, the most expensive place to find out.
-    The desktop worker passes `request.knowledge` straight through, and the
-    batch runner copies every CLI default into every item, so both were
-    exposed to exactly that.
-    """
-
-    from finesub.stages import resolve_knowledge_switch
-
-    assert resolve_knowledge_switch(None, "quality") == "collect"
-    assert resolve_knowledge_switch(None, "intermediate") == "collect"
-    assert resolve_knowledge_switch(None, "efficiency") == "none"
-    # An explicit switch is a user statement and passes through untouched --
-    # including the contradiction, which stays the LLM layer's hard error.
-    assert resolve_knowledge_switch("update", "quality") == "update"
-    assert resolve_knowledge_switch("collect", "efficiency") == "collect"
-    assert resolve_knowledge_switch("none", "quality") == "none"
-
-
 def test_every_front_end_leaves_the_switch_unset_by_default(monkeypatch) -> None:
     """A concrete default anywhere upstream would shadow the shared rule.
 
@@ -1654,14 +1675,109 @@ def test_a_skipped_separation_is_not_announced_as_reused(
 def test_separate_is_on_unless_something_says_otherwise(tmp_path, monkeypatch) -> None:
     _with_config(tmp_path, monkeypatch, "[providers]\ntavily = false\n")
 
-    assert stages.vocal_separation.resolve_separate() is True
-    assert stages.vocal_separation.resolve_separate(False) is False
+    assert settings.SEPARATE.resolve() is True
+    assert settings.SEPARATE.resolve(False) is False
 
 
 def test_separate_comes_from_config_when_not_given(tmp_path, monkeypatch) -> None:
     _with_config(tmp_path, monkeypatch, "[separator]\nenabled = false\n")
 
-    assert stages.vocal_separation.resolve_separate() is False
+    assert settings.SEPARATE.resolve() is False
     # An explicit flag still outranks the file -- the chain is CLI, then config,
     # then the default, and only the first layer is a statement about this run.
-    assert stages.vocal_separation.resolve_separate(True) is True
+    assert settings.SEPARATE.resolve(True) is True
+
+
+def test_the_config_reaches_the_real_entry_point(tmp_path, monkeypatch) -> None:
+    """Through `run_pipeline`, not just the declaration: a call site that
+    pre-filled the default would leave every registry test green."""
+
+    _with_config(tmp_path, monkeypatch, "[separator]\nenabled = false\n")
+    source = tmp_path / "input.wav"
+    source.write_bytes(b"fake")
+    _stage_fakes(monkeypatch)
+
+    def fail_separate(*args, **kwargs):
+        raise AssertionError("`[separator] enabled = false` must skip separation")
+
+    def encode(source_path, output_path, **kwargs):
+        Path(output_path).write_bytes(b"v")
+        return Path(output_path)
+
+    monkeypatch.setattr(stages.vocal_separation, "run_vocal_separation", fail_separate)
+    monkeypatch.setattr(stages.vocal_separation, "encode_asr_delivery", encode)
+
+    paths = pipeline.run_pipeline(source, output_path=tmp_path / "out" / "final.srt")
+
+    assert paths.vocal_audio.read_bytes() == b"v"
+
+
+def test_a_manifest_string_false_is_refused_not_read_as_true(tmp_path, monkeypatch) -> None:
+    """`{"separate": "false"}` used to reach `bool("false")` -- True -- so the
+    separation the row turned off ran anyway. Now it is refused, before any
+    stage does work."""
+
+    _with_config(tmp_path, monkeypatch, "[providers]\ntavily = false\n")
+    source = tmp_path / "input.wav"
+    source.write_bytes(b"fake")
+    _stage_fakes(monkeypatch)
+    ran: list[str] = []
+    monkeypatch.setattr(
+        stages.vocal_separation, "run_vocal_separation", lambda *a, **k: ran.append("separate")
+    )
+
+    with pytest.raises(ValueError, match="separator.enabled must be true or false"):
+        pipeline.run_pipeline(
+            source, output_path=tmp_path / "out" / "final.srt", separate="false"
+        )
+    assert ran == []
+
+
+@pytest.mark.parametrize(
+    ("option", "value", "key"),
+    [
+        ("vad_silero_assist", "false", "vad.silero_assist"),
+        ("split_length_scale", "0.8", "segmentation.length_scale"),
+    ],
+)
+def test_a_bad_recognition_option_fails_before_separation_runs(
+    tmp_path, monkeypatch, option, value, key
+) -> None:
+    """These two are resolved inside the recognition stage, which comes after
+    separation; checking them only there would spend the heaviest stage first."""
+
+    _with_config(tmp_path, monkeypatch, "[providers]\ntavily = false\n")
+    source = tmp_path / "input.wav"
+    source.write_bytes(b"fake")
+    _stage_fakes(monkeypatch)
+    ran: list[str] = []
+    monkeypatch.setattr(
+        stages.vocal_separation, "run_vocal_separation", lambda *a, **k: ran.append("separate")
+    )
+
+    with pytest.raises(ValueError, match=key):
+        pipeline.run_pipeline(
+            source, output_path=tmp_path / "out" / "final.srt", **{option: value}
+        )
+    assert ran == []
+
+
+@pytest.mark.parametrize("key", ["max_window_subtitle_tokens", "research_transcript_max_tokens"])
+def test_a_bad_chunking_cap_fails_before_the_speech_stages(tmp_path, monkeypatch, key) -> None:
+    """Read only when the LLM stage starts; checked up front so a run that
+    reaches it does not spend separation and recognition first."""
+
+    _with_config(tmp_path, monkeypatch, f"[chunking]\n{key} = true\n")
+    source = tmp_path / "input.wav"
+    source.write_bytes(b"fake")
+    _stage_fakes(monkeypatch)
+    ran: list[str] = []
+    monkeypatch.setattr(
+        stages.vocal_separation, "run_vocal_separation", lambda *a, **k: ran.append("separate")
+    )
+
+    with pytest.raises(ValueError, match=f"chunking.{key}"):
+        pipeline.run_pipeline(
+            source, output_path=tmp_path / "out" / "final.srt", stage="translated-srt"
+        )
+    assert ran == []

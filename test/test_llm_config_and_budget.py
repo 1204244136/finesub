@@ -101,16 +101,6 @@ def test_default_role_configs_use_expected_endpoint_chains() -> None:
     ]
     assert GEMINI_35_FLASH_LITE not in general_models
 
-    # Lightweight roles prefer 3.5 Flash Lite (纠错 r1 MM + search-loop text);
-    # 3.1-lite left the group in the same acceptance edit.
-    lightweight_mm = configs[LLMRole.LIGHTWEIGHT_MULTIMODAL]
-    lite_models = [
-        ep.api_model_id for ep in lightweight_mm.endpoints(test_profile=False)
-    ]
-    assert lite_models == [GEMINI_35_FLASH_LITE, GEMINI_35_FLASH_LITE]
-    assert GEMINI_31_FLASH_LITE not in lite_models
-    assert GEMINI_36_FLASH not in lite_models
-    assert lightweight_mm.thinking_level == "medium"
     assert configs[LLMRole.AUDIO_MULTIMODAL].thinking_level == "medium"
     # Native search is a per-call capability now (plan v2 D4): the packaged
     # native-capable group exists but is not bound by the default preset.
@@ -144,37 +134,20 @@ def test_model_catalog_loads_gemini_tier_psv_facts() -> None:
     assert len(free_entries) == 8
     assert len(paid_entries) == 3
     assert [(entry.fact_id, entry.api_model_id) for entry in local_entries] == [
-        ("local-codex-gpt-5_6-luna", "gpt-5.6-luna"),
-        ("local-codex-gpt-5_6-terra", "gpt-5.6-terra"),
-        ("local-codex-gpt-5_6-sol", "gpt-5.6-sol"),
+        ("local-codex-gpt-6-luna", "gpt-6-luna"),
+        ("local-codex-gpt-6_1-sol", "gpt-6.1-sol"),
     ]
     # By fact_id, not by position: this list is one people insert into, and an
     # index would quietly start checking the neighbour's row instead of failing.
     codex = {entry.fact_id: entry for entry in local_entries}
-    assert codex["local-codex-gpt-5_6-luna"].thinking_levels == (
+    assert codex["local-codex-gpt-6-luna"].thinking_levels == (
         "xhigh",
         "high",
         "medium",
     )
-    assert codex["local-codex-gpt-5_6-luna"].quality_score == 70
-    # Terra takes luna's ladder because its own default reasoning level is
-    # `medium` too (sol's is `low`). The score is the owner's call (2026-09-03):
-    # between Sonnet 5 (77) and Opus 5 (88), which also keeps it between its own
-    # siblings luna (70) and sol (90) -- the vendor catalog orders those three by
-    # `priority`, which supports the ordering and not the number. Unmeasured.
-    assert codex["local-codex-gpt-5_6-terra"].thinking_levels == (
-        "xhigh",
-        "high",
-        "medium",
-    )
-    assert codex["local-codex-gpt-5_6-terra"].quality_score == 82
-    sonnet = next(
-        e for e in entries if e.fact_id == "local-claude-sonnet-5"
-    ).quality_score
-    opus = next(e for e in entries if e.fact_id == "local-claude-opus-5").quality_score
-    assert sonnet < codex["local-codex-gpt-5_6-terra"].quality_score < opus
-    assert codex["local-codex-gpt-5_6-sol"].thinking_levels == ("high", "high", "low")
-    assert codex["local-codex-gpt-5_6-sol"].quality_score == 90
+    assert codex["local-codex-gpt-6-luna"].quality_score == 70
+    assert codex["local-codex-gpt-6_1-sol"].thinking_levels == ("high", "high", "low")
+    assert codex["local-codex-gpt-6_1-sol"].quality_score == 90
     agy = get_model_catalog_entry_for_tier(
         "gemini-3.8-flash", "LOCAL_AGY"
     )
@@ -212,33 +185,15 @@ def test_model_catalog_loads_gemini_tier_psv_facts() -> None:
     assert gemma4.tpm == -1
     assert gemma4.rpd == 1500
     assert gemma4.supports_native_search is True
-    non_gemma_entries = [
-        e
-        for e in entries
-        if e.api_model_id != "gemini/gemma-4-31b-it"
-        and e.provider_tier != "LOCAL_WORKBUDDY"
-    ]
-    # Not one number: the catalog states each vendor's real ceiling —
-    # DeepSeek 256k, Opus/Sonnet 128k, Haiku 64k (owner-confirmed; the old
-    # uniform 65,536 OVERSTATED Haiku, which mattered because max_output is
-    # the truncation denominator). What the guard is for is a row that
-    # forgot to say anything.
-    assert all(entry.max_output_tokens >= 64_000 for entry in non_gemma_entries)
-    # WorkBuddy's ceilings are genuinely below that floor and are exempted
-    # rather than rounded up: each was read off the CLI's own `modelUsage`
-    # (2026-09-04). Pinned by value so the exemption cannot become a place a
-    # forgotten row hides -- CATALOG_WINDOWS carries the same three numbers.
-    assert {
+    # 64k is the floor a forgotten max_output used to land on. Rows genuinely
+    # below it have to be named here; a new sub-64k ceiling, or raising one of
+    # these to the floor, turns this red instead of hiding in a WB exclusion.
+    below_floor = {
         e.fact_id: e.max_output_tokens
         for e in entries
-        if e.provider_tier == "LOCAL_WORKBUDDY"
-    } == {
-        "local-workbuddy-hy3": 64_000,
-        "local-workbuddy-hy4": 64_000,
-        "local-workbuddy-glm-5_3-flash": 32_000,
-        "local-workbuddy-deepseek-v4-flash": 50_000,
-        "local-workbuddy-deepseek-v4-pro": 50_000,
+        if e.max_output_tokens < 64_000
     }
+    assert below_floor == OUTPUT_BELOW_FLOOR
     lite = get_model_catalog_entry_for_tier(
         "gemini/gemini-3.1-flash-lite", "GEMINI_FREE"
     )
@@ -300,85 +255,150 @@ def test_thinking_budget_derives_from_level_share_of_output_limit() -> None:
         assert config.thinking_budget == thinking_budget_for_level(config.thinking_level)
 
 
-#: Every packaged row's three window numbers, and the input envelope they imply.
-#: Written out rather than recomputed from the file: this table *is* what
-#: `docs/plans/model-window-limits-plan.md` §4 was audited against, so it has to fail
-#: when the file changes rather than follow it.
-#:
-#: A blank `context_window` in the file means "input and output are independent
-#: pools" and is stored as their sum, which is why every such row's envelope is
-#: exactly its `max_input_tokens` -- the joint constraint cannot bind there.
-CATALOG_WINDOWS = {
-    # single pool: the answer is spent out of the same budget as the prompt
-    "local-codex-gpt-5_6-luna": (272_000, 272_000, 65_536, 206_464),
-    "local-codex-gpt-5_6-terra": (272_000, 272_000, 65_536, 206_464),
-    "local-codex-gpt-5_6-sol": (272_000, 272_000, 65_536, 206_464),
-    "local-claude-opus-5": (1_000_000, 1_000_000, 128_000, 872_000),
-    "local-claude-sonnet-5": (1_000_000, 1_000_000, 128_000, 872_000),
-    "local-claude-haiku-4_5": (200_000, 200_000, 64_000, 136_000),
-    "local-agy-gemini-3_8-flash": (1_048_576, 1_048_576, 65_536, 983_040),
-    "local-agy-gemini-3_7-flash": (1_048_576, 1_048_576, 65_536, 983_040),
-    "gemini-paid-3_8-flash": (1_048_576, 1_048_576, 65_536, 983_040),
-    "gemini-paid-3_7-flash": (1_048_576, 1_048_576, 65_536, 983_040),
-    "gemini-paid-3_5-flash-lite": (1_048_576, 1_048_576, 65_536, 983_040),
-    "local-dsh-deepseek-v4-flash": (1_000_000, 1_000_000, 256_000, 744_000),
-    "local-dsh-deepseek-v4-pro": (1_000_000, 1_000_000, 256_000, 744_000),
-    # Owner-supplied (2026-09-04), and they are NOT the CLI's self-report:
-    # `modelUsage.contextWindow` answers 1000000 for every model on this tier,
-    # which `hy3` shows to be a placeholder -- there the CLI says 192000/64000
-    # and the owner's numbers agree exactly. The rest take the owner's.
-    "local-workbuddy-hy3": (192_000, 192_000, 64_000, 128_000),
-    "local-workbuddy-hy4": (300_000, 300_000, 64_000, 236_000),
-    # 32000, not 64000: the CLI's own `modelUsage` said so from the first
-    # probe and the owner confirmed it (2026-09-04). It matters beyond
-    # planning -- the worker is told this number, and a wrong one is why a
-    # `high`-effort window reasoned past the ceiling instead of pausing
-    # (docs/llm_local_agent.md §12.1.5).
-    "local-workbuddy-glm-5_3-flash": (300_000, 300_000, 32_000, 268_000),
-    "local-workbuddy-deepseek-v4-flash": (300_000, 300_000, 50_000, 250_000),
-    "local-workbuddy-deepseek-v4-pro": (300_000, 300_000, 50_000, 250_000),
-    # independent pools: `context_window` left blank in the file
-    "local-agy-opus-4_6": (259_536, 194_000, 65_536, 194_000),
-    "gemini-free-3_8-flash": (259_536, 194_000, 65_536, 194_000),
-    "gemini-free-3_7-flash": (259_536, 194_000, 65_536, 194_000),
-    "gemini-free-3_6-flash": (259_536, 194_000, 65_536, 194_000),
-    "gemini-free-3_5-flash": (259_536, 194_000, 65_536, 194_000),
-    "gemini-free-3_5-flash-lite": (259_536, 194_000, 65_536, 194_000),
-    "gemini-free-3_1-flash-lite": (259_536, 194_000, 65_536, 194_000),
-    "gemini-free-2_5-flash": (259_536, 194_000, 65_536, 194_000),
-    "gemini-free-gemma-4-31b": (48_768, 16_000, 32_768, 16_000),
-    "local-conversational-agent": (259_536, 194_000, 65_536, 194_000),
+#: Rows whose max_output is genuinely below the 64k floor a forgotten cell
+#: used to land on. A new sub-64k ceiling has to be named here; raising one
+#: of these to the floor means deleting it. glm 32000 is the CLI's own
+#: `modelUsage` (2026-09-04); CodeBuddy v4-pro 50000 is owner-supplied on the
+#: same date and has not been restated since -- the CLI's `modelUsage`
+#: answers a placeholder 1000000 for every model on that tier; Gemma is the
+#: Gemini exception already in the catalog.
+OUTPUT_BELOW_FLOOR = {
+    "gemini-free-gemma-4-31b": 32_768,
+    "local-codebuddy-glm-5_3-flash": 32_000,
+    "local-codebuddy-deepseek-v4-pro": 50_000,
 }
 
 
 def test_every_catalog_row_states_its_window_and_derives_its_envelope() -> None:
-    """The three numbers per row, and what the planner makes of them.
+    """Live catalog invariants, not a second copy of every row's numbers.
 
     `context_window` exists because `max_input_tokens` used to answer two
     questions at once -- "how big is the pool" for the planning envelope and
     "what will the API accept" at dispatch -- and on a single-pool provider
-    those want different values.
+    those want different values. A blank cell means independent pools and is
+    stored as their sum, so the joint constraint cannot bind there.
     """
 
     default_model_catalog.cache_clear()
     entries = {entry.fact_id: entry for entry in default_model_catalog()}
 
-    assert set(entries) == set(CATALOG_WINDOWS), "a catalog row was added or removed"
-    for fact_id, (ctx, max_in, max_out, envelope) in CATALOG_WINDOWS.items():
-        entry = entries[fact_id]
-        assert (
-            entry.context_window,
-            entry.max_input_tokens,
-            entry.max_output_tokens,
-        ) == (ctx, max_in, max_out), fact_id
-        # The loader's invariant, restated where a reader of the table sees it.
+    below_floor = {
+        fact_id: entry.max_output_tokens
+        for fact_id, entry in entries.items()
+        if entry.max_output_tokens < 64_000
+    }
+    assert below_floor == OUTPUT_BELOW_FLOOR
+
+    for fact_id, entry in entries.items():
         assert entry.context_window >= max(
             entry.max_input_tokens, entry.max_output_tokens
         ), fact_id
-        assert (
-            min(entry.max_input_tokens, entry.context_window - entry.max_output_tokens)
-            == envelope
-        ), fact_id
+        envelope = min(
+            entry.max_input_tokens,
+            entry.context_window - entry.max_output_tokens,
+        )
+        assert envelope > 0, fact_id
+        # Independent pools (blank context_window) store the sum, so the
+        # joint constraint cannot bind and the envelope is just max_input.
+        if entry.context_window == entry.max_input_tokens + entry.max_output_tokens:
+            assert envelope == entry.max_input_tokens, fact_id
+
+
+#: What the planner makes of the catalog, one file, regenerated on demand.
+#:
+#: Not a second copy of the psv. `context_window` / `max_input_tokens` /
+#: `max_output_tokens` are already on the review surface -- the psv is a
+#: tracked file and its diff shows them -- and the table that used to restate
+#: them here cost a hand transcription per catalog edit for nothing. What a
+#: psv diff does **not** show is what those numbers become: a row's planning
+#: envelope, and above all each **group's**, where one row's edit lands on a
+#: window size nobody looked at. Raising `deepseek-v4.1-flash` from 50000 to
+#: 128000 (2026-09-11) moved no group at all -- `glm-5.3-flash`'s 32000 floors
+#: both CodeBuddy groups -- and neither the old table nor the live invariants
+#: above could have said so.
+#:
+#: Regenerate with::
+#:
+#:     python -m pytest test/test_llm_config_and_budget.py --regenerate-goldens
+#:
+#: then read the diff. Like the prompt goldens this is a **review surface, not
+#: a correctness check**: regenerating without reading passes. Anything that
+#: must hold unconditionally belongs in an assertion instead -- see
+#: `test_the_output_cap_binds_a_window_before_the_input_ceiling_does`, which
+#: is a property over every row and needs no per-row upkeep.
+CATALOG_DERIVED_GOLDEN = Path(__file__).parent / "data" / "catalog_derived.txt"
+
+
+def _render_catalog_derived() -> str:
+    from finesub.llm.routing.model_routes import default_model_routes
+
+    default_model_catalog.cache_clear()
+    default_model_routes.cache_clear()
+    routes = default_model_routes()
+
+    lines = [
+        "# Derived from model_catalog.psv + model_routes.toml. Generated --",
+        "# see CATALOG_DERIVED_GOLDEN in test_llm_config_and_budget.py.",
+        "",
+        "## groups: planning envelope (input ceiling, min max_output)",
+        "##         declared minima (min max_input, min max_output)",
+        "",
+    ]
+    for group_id in sorted(routes.model_groups):
+        envelope = routes.group_planning_envelope(group_id)
+        minima = routes.group_declared_minima(group_id)
+        members = len(routes.model_groups[group_id].target_ids)
+        lines.append(
+            f"group {group_id:<26} envelope={envelope[0]},{envelope[1]} "
+            f"minima={minima[0]},{minima[1]} members={members}"
+        )
+
+    lines += [
+        "",
+        "## facts: input envelope, and the resolved quota allowance it draws on",
+        "",
+    ]
+    # Both columns are derived, never a psv cell read back: `effective_quota_pool`
+    # resolves the blank and `per-model` spellings into the pool a spent
+    # allowance actually freezes. `fallback_model` is deliberately absent -- it
+    # is a raw cell, and which rows may bill is pinned by value in
+    # `test_the_paid_twin_is_offered_only_where_the_catalog_says_so`; listing it
+    # here too would make one owner decision a two-file edit.
+    for fact_id in sorted(routes.facts):
+        fact = routes.facts[fact_id]
+        envelope = min(
+            fact.max_input_tokens, fact.context_window - fact.max_output_tokens
+        )
+        lines.append(
+            f"fact  {fact_id:<36} envelope={envelope:<8} "
+            f"pool={fact.effective_quota_pool}"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def test_the_derived_catalog_surface_matches_its_golden(request) -> None:
+    """One catalog edit, one regenerate, one diff to read.
+
+    The group block is the point: it is the only place a reviewer sees that
+    editing one row did (or did not) move a window that gets planned against.
+    """
+
+    rendered = _render_catalog_derived()
+    if request.config.getoption("--regenerate-goldens"):
+        CATALOG_DERIVED_GOLDEN.parent.mkdir(parents=True, exist_ok=True)
+        CATALOG_DERIVED_GOLDEN.write_text(rendered, encoding="utf-8")
+        return
+    assert CATALOG_DERIVED_GOLDEN.exists(), (
+        f"{CATALOG_DERIVED_GOLDEN.name} is missing -- run "
+        "--regenerate-goldens"
+    )
+    assert CATALOG_DERIVED_GOLDEN.read_text(encoding="utf-8") == rendered, (
+        "the catalog's derived surface moved. Regenerate with "
+        "`python -m pytest test/test_llm_config_and_budget.py "
+        "--regenerate-goldens` and read the diff -- a row added or removed is "
+        "one line, and a group whose envelope moved is the part a psv diff "
+        "cannot show you."
+    )
 
 
 def test_a_context_window_below_either_half_is_a_declaration_error(
@@ -473,14 +493,14 @@ def test_a_blank_context_window_means_two_independent_pools(tmp_path: Path) -> N
 def test_token_budget_uses_fixed_output_limit_and_profile_output_estimate() -> None:
     assert requested_output_limit() == 65_536
 
-    # Default profile is mm-med: expected output = 5.0 x csv tokens.
+    # Default profile is mm-med: expected output = 4.5 x csv tokens (media adds nothing).
     budget = build_correction_budget(
         input_tokens=20_000,
         subtitle_input_tokens=1_000,
         token_counter_source="test",
     )
     validate_correction_budget(budget)
-    assert budget.estimated_output_tokens == 5_000
+    assert budget.estimated_output_tokens == 4_500
 
     # efficiency lost its coefficient discount: c is 3.5 like quality.
     text_low = build_correction_budget(
@@ -1110,7 +1130,7 @@ def test_a_single_pool_request_is_clamped_to_what_context_is_left() -> None:
     from finesub.llm.client import _clamp_request_to_context, _output_budget
     from finesub.llm.routing.model_catalog import get_model_catalog_entry_for_tier
 
-    single_pool = get_model_catalog_entry_for_tier("claude-opus-5", "LOCAL_CLAUDE")
+    single_pool = get_model_catalog_entry_for_tier("opus", "LOCAL_CLAUDE")
     assert single_pool is not None
     assert single_pool.context_window == 1_000_000
 
@@ -1164,3 +1184,24 @@ def test_the_session_reserve_is_decimal_and_below_every_shipped_ceiling() -> Non
         f"ceiling in any model group ({smallest}); it would skip that candidate "
         "on the reserve alone"
     )
+
+
+def test_a_budget_model_sends_its_own_budgets_not_the_derived_ones() -> None:
+    """Gemini 2.5 takes only a token budget, and 2.5 Flash's ceiling (24576)
+    is below the derived medium/high (26214 / 39321): the API rejected every
+    call. Its row maps the levels to integers, which go out as the budget."""
+
+    from finesub.llm.routing.model_catalog import (
+        dispatched_thinking,
+        get_model_catalog_entry_by_fact,
+    )
+
+    entry = get_model_catalog_entry_by_fact("gemini-free-2_5-flash")
+    sent = {
+        level: dispatched_thinking(entry, level, thinking_budget_for_level(level))
+        for level in ("high", "medium", "low")
+    }
+    assert sent == {"high": ("", 24576), "medium": ("", 16384), "low": ("", 8192)}
+    # A word mapping still goes out as a word, next to the derived budget.
+    word = get_model_catalog_entry_by_fact("gemini-free-3_7-flash")
+    assert dispatched_thinking(word, "medium", 26214) == ("medium", 26214)

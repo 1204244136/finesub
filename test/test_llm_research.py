@@ -18,9 +18,7 @@ from finesub.llm.research import (
     parse_round2_output,
     plan_research_chunks,
     render_research_transcript,
-    resolve_research_transcript_cap,
     resolve_round1_entries,
-    run_research,
 )
 from finesub.llm.web_search import QuerySearchResult, SearchResultItem, QueryExtractResult
 
@@ -98,7 +96,6 @@ def test_parse_round1_output_reads_tag_blocks() -> None:
     assert result.keep_entries == ()
     assert result.search_queries == ("游戏B 剧情", "游戏B 角色名")
     assert result.analysis_notes == ""
-    assert result.research_contract == ""
 
 
 def test_resolve_round1_entries_caps_channels_and_merges_keep_first(
@@ -221,29 +218,6 @@ def test_parse_round1_output_reads_optional_analysis_notes() -> None:
     assert result.analysis_notes == "主播在玩游戏B（待定）。"
 
 
-def test_parse_round1_output_contract_required_only_in_multi_round() -> None:
-    contract = '{"goal": "查证游戏B", "facts": [], "out_of_scope": []}'
-    text = (
-        "<analysis_notes></analysis_notes>\n"
-        f"<research_contract>\n{contract}\n</research_contract>\n"
-        "<requested_entries></requested_entries>\n"
-        "<keep_entries></keep_entries>\n"
-        "<search_queries>\n游戏B 剧情\n</search_queries>"
-    )
-
-    result = parse_round1_output(text, expect_contract=True)
-    assert result.research_contract == contract
-
-    without_contract = (
-        "<requested_entries></requested_entries>\n"
-        "<keep_entries></keep_entries>\n"
-        "<search_queries></search_queries>"
-    )
-    assert parse_round1_output(without_contract).research_contract == ""
-    with pytest.raises(ValueError, match="research_contract"):
-        parse_round1_output(without_contract, expect_contract=True)
-
-
 def test_parse_round1_output_requires_both_blocks() -> None:
     with pytest.raises(ValueError, match="search_queries"):
         parse_round1_output(
@@ -276,12 +250,11 @@ def test_parse_round2_output_reads_context_pack_tag() -> None:
     assert pack.unbound_window_contexts == {"0001": "背景一"}
 
 
-def test_parse_round2_output_falls_back_to_bare_json() -> None:
+def test_parse_round2_output_rejects_bare_json() -> None:
     payload = {"general_context": {"global_summary": "摘要"}, "window_contexts": []}
 
-    pack = parse_round2_output(json.dumps(payload, ensure_ascii=False))
-
-    assert pack.general_context["global_summary"] == "摘要"
+    with pytest.raises(ValueError, match="exactly one <context_pack>"):
+        parse_round2_output(json.dumps(payload, ensure_ascii=False))
 
 
 def test_check_research_input_limit_raises_on_overflow() -> None:
@@ -294,138 +267,6 @@ def test_check_research_input_limit_raises_on_overflow() -> None:
             limits=type("L", (), {"prompt_input_limit": 10})(),
             counter=FakeTokenCounter(),
         )
-
-
-def test_run_research_two_rounds_with_local_search(tmp_path) -> None:
-    knowledge_root = tmp_path / "knowledge"
-    (knowledge_root / "streamer").mkdir(parents=True)
-    (knowledge_root / "common").mkdir(parents=True)
-    (knowledge_root / "streamer" / "index.md").write_text(
-        "- 主播A | エーちゃん | 测试主播\n", encoding="utf-8"
-    )
-    (knowledge_root / "streamer" / "主播A.md").write_text(
-        "# 主播A\n\n## 档案\n\n关西腔。\n", encoding="utf-8"
-    )
-    (knowledge_root / "common" / "index.md").write_text("", encoding="utf-8")
-
-    round1 = (
-        "<requested_entries>\nエーちゃん\n未知条目\n</requested_entries>\n"
-        "<keep_entries></keep_entries>\n"
-        "<search_queries>\n游戏B 剧情\n</search_queries>"
-    )
-    round2_payload = {
-        "general_context": {"global_summary": "主播A 在玩游戏B。"},
-        "window_contexts": [{"window_id": "0001", "context": "开场杂谈"}],
-    }
-    round2 = (
-        f"<context_pack>\n{json.dumps(round2_payload, ensure_ascii=False)}\n</context_pack>"
-    )
-    responses = [round1, round2]
-    seen = []
-
-    class FakeClient:
-        def complete(self, role, messages, **kwargs):
-            seen.append((role, messages, kwargs))
-            return LLMCallResult(
-                content=responses.pop(0),
-                role=role,
-                model="fake",
-                fallback_used=False,
-                raw_response={
-                    "usageMetadata": {"candidatesTokenCount": 200, "thoughtsTokenCount": 50}
-                },
-            )
-
-    search_client = FakeSearchClient(
-        [
-            QuerySearchResult(
-                query="游戏B 剧情",
-                provider="tavily",
-                items=(
-                    SearchResultItem(
-                        title="wiki", url="https://example.test", snippet="恐怖游戏"
-                    ),
-                ),
-            )
-        ]
-    )
-
-    payload = run_research(
-        transcript="--- window 0001 ---\n1|こんにちは\n",
-        extra_info="来源 URL",
-        knowledge_root=knowledge_root,
-        client=FakeClient(),
-        search_client=search_client,
-        task_artifact_dir=tmp_path / "artifacts",
-        task_id="task-1",
-        search_rounds=1,
-        token_counter=FakeTokenCounter(),
-    )
-
-    assert [role for role, _, _ in seen] == [LLMRole.GENERAL_CAPABLE] * 2
-    assert search_client.calls == [(("游戏B 剧情",), 8)]
-    round2_user = seen[1][1][1]["content"]
-    assert "关西腔" in round2_user
-    assert "恐怖游戏" in round2_user
-    assert "https://example.test" in round2_user
-    assert payload["injected_entries"] == ["主播A"]
-    assert payload["missing_entries"] == ["未知条目"]
-    assert payload["round1"]["search_queries"] == ["游戏B 剧情"]
-    assert payload["search_results"][0]["provider"] == "tavily"
-
-    # `run_research` returns the model's shape: notes named by window id only.
-    # Attaching source ranges is `run_research_stage`'s job (it owns the window
-    # list), so this payload is not yet a loadable artifact -- and a file in that
-    # shape is refused rather than injected without its window notes.
-    context_path = tmp_path / "research-context.json"
-    context_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    assert ContextPack.from_dict(payload["context_pack"]).has_unbound_window_contexts
-    with pytest.raises(ValueError, match="no source-id ranges"):
-        load_research_context(context_path)
-
-    # The pre-interval on-disk shape is refused the same way -- notably *not*
-    # read as "this context simply had no window notes".
-    legacy = dict(payload)
-    legacy["context_pack"] = {
-        "general_context": {"global_summary": "旧"},
-        "window_contexts": {"0001": "开场杂谈"},
-    }
-    context_path.write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
-    with pytest.raises(ValueError, match="predates source-interval addressing"):
-        load_research_context(context_path)
-
-    artifacts = [
-        json.loads(line)
-        for line in (tmp_path / "artifacts" / "task-artifacts.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    kinds = [artifact["kind"] for artifact in artifacts]
-    assert kinds == [
-        "research_round1_response",
-        "research_search_results",
-        "research_round2_response",
-        "token_distribution_report",
-    ]
-    report = payload["token_report"]
-    assert report["phase"] == "research"
-    assert [row["call"] for row in report["rows"]] == [
-        "research_round1",
-        "research_round2",
-    ]
-    assert report["rows"][0]["tokens"]["output_tokens"] == 200
-    assert report["totals"]["thinking_tokens"] == 100
-    assert report["totals"]["call_count"] == 2
-
-    exchanges = sorted((tmp_path / "artifacts" / "exchanges").glob("*.md"))
-    assert [path.name for path in exchanges] == [
-        "001-research-round1-attempt0.md",
-        "002-research-round2-attempt0.md",
-    ]
-    round1_exchange = exchanges[0].read_text(encoding="utf-8")
-    assert "## 请求（user）" in round1_exchange
-    assert "エーちゃん" in round1_exchange
-    assert "恐怖游戏" in exchanges[1].read_text(encoding="utf-8")
 
 
 def _knowledge_root(tmp_path, *, with_index: bool):
@@ -444,598 +285,51 @@ def _knowledge_root(tmp_path, *, with_index: bool):
     return root
 
 
-class _RecordingClient:
-    """Replies in order and records every (role, messages) it was called with."""
+def test_a_note_for_a_window_outside_the_plan_warns_instead_of_crashing(tmp_path, monkeypatch) -> None:
+    """The preparation task may name a window the plan does not have; the
+    note is dropped with a warning and the run goes on (the warning call once
+    passed a keyword the reporter does not take and killed the whole task)."""
 
-    def __init__(self, responses) -> None:
-        self.responses = list(responses)
-        self.calls: list[tuple] = []
+    from finesub.llm.routing.profiles import resolve_profile
+    from finesub.llm.research import run_research_stage
 
-    def complete(self, role, messages, **kwargs):
-        self.calls.append((role, messages, kwargs))
-        return LLMCallResult(
-            content=self.responses.pop(0) if self.responses else "",
-            role=role,
-            model="fake",
-            fallback_used=False,
-            raw_response={},
-        )
-
-
-_R1_ENTRIES_ONLY = (
-    "<analysis_notes>要点</analysis_notes>\n"
-    "<requested_entries>\n主播A\n</requested_entries>\n"
-    "<keep_entries></keep_entries>"
-)
-_R2_PACK = (
-    '<context_pack>{"general_context": {"global_summary": "摘要"},'
-    ' "window_contexts": []}</context_pack>'
-)
-
-
-def test_retrieval_none_without_an_index_runs_no_research_round(tmp_path) -> None:
-    """Neither half applies: no search agent to serve queries, no index to read."""
-
-    client = _RecordingClient([])
-    search_client = FakeSearchClient()
-    payload = run_research(
-        transcript="1|你好\n",
-        knowledge_root=_knowledge_root(tmp_path, with_index=False),
-        client=client,
-        search_client=search_client,
-        profile=resolve_profile("text", "none", "quality"),
-        token_counter=FakeTokenCounter(),
+    stable_json = tmp_path / "clip-stable.json"
+    stable_json.write_text(
+        json.dumps({"segments": [{"id": "1", "start": 0.0, "end": 1.0, "text": "一。"}]}),
+        encoding="utf-8",
     )
-
-    assert client.calls == []
-    assert search_client.calls == []
-    assert payload["rounds"] == {
-        "round1": False,
-        "round2": False,
-        "local_search": False,
-        "native_search": False,
-        "entries_available": False,
-    }
-    assert payload["context_pack"]["general_context"] == {}
-
-
-def test_retrieval_none_with_an_index_runs_r1_only_to_pick_entries(tmp_path) -> None:
-    client = _RecordingClient([_R1_ENTRIES_ONLY])
-    payload = run_research(
-        transcript="1|你好\n",
-        knowledge_root=_knowledge_root(tmp_path, with_index=True),
-        client=client,
-        search_client=FakeSearchClient(),
-        profile=resolve_profile("text", "none", "quality"),
-        token_counter=FakeTokenCounter(),
-    )
-
-    assert len(client.calls) == 1, "R2 has no external input to digest"
-    system = client.calls[0][1][0]["content"]
-    assert "<requested_entries>" in system
-    assert "<search_queries>" not in system, "no local agent would execute them"
-    # R2 is skipped, so nothing downstream would ever read analysis_notes.
-    assert "<analysis_notes>" not in system
-    assert payload["rounds"]["round1"] is True
-    assert payload["rounds"]["round2"] is False
-    # The picked entries still reach the first correction window.
-    assert payload["keep_entries"] == ["主播A"]
-
-
-def test_retrieval_native_runs_r2_with_the_models_own_search(tmp_path) -> None:
-    client = _RecordingClient([_R1_ENTRIES_ONLY, _R2_PACK])
-    search_client = FakeSearchClient()
-    payload = run_research(
-        transcript="1|你好\n",
-        knowledge_root=_knowledge_root(tmp_path, with_index=True),
-        client=client,
-        search_client=search_client,
-        profile=resolve_profile("text", "native", "quality"),
-        token_counter=FakeTokenCounter(),
-    )
-
-    assert len(client.calls) == 2
-    assert search_client.calls == [], "native search never uses the local agent"
-    assert client.calls[1][2]["retrieval"] == "native"
-    r2_system = client.calls[1][1][0]["content"]
-    assert "你具备联网搜索能力" in r2_system
-    assert "<search_results>" not in client.calls[1][1][1]["content"]
-    # No query round downstream, so R2 is not asked to prune.
-    assert "<keep_entries>" not in r2_system
-    assert payload["keep_entries"] == ["主播A"]
-    assert payload["context_pack"]["general_context"]["global_summary"] == "摘要"
-
-
-def test_r1_gets_the_whole_entry_budget_when_it_is_the_only_pick(tmp_path) -> None:
-    """No per-window query round means the increment-sized reserve is pure loss."""
-
-    knowledge_root = _knowledge_root(tmp_path, with_index=True)
-    local = _RecordingClient(
-        [_R1_ENTRIES_ONLY + "\n<search_queries></search_queries>", _R2_PACK]
-    )
-    run_research(
-        transcript="1|你好\n",
-        knowledge_root=knowledge_root,
-        client=local,
-        search_client=FakeSearchClient(),
-        profile=resolve_profile("text", "local", "quality"),
-        search_rounds=1,
-        token_counter=FakeTokenCounter(),
-    )
-    none = _RecordingClient([_R1_ENTRIES_ONLY])
-    run_research(
-        transcript="1|你好\n",
-        knowledge_root=knowledge_root,
-        client=none,
-        search_client=FakeSearchClient(),
-        profile=resolve_profile("text", "none", "quality"),
-        token_counter=FakeTokenCounter(),
-    )
-
-    assert "单独上限 8 条" in local.calls[0][1][0]["content"]
-    assert "单独上限 12 条" in none.calls[0][1][0]["content"]
-
-
-def test_run_research_resumes_both_validated_sessions(tmp_path) -> None:
     knowledge_root = tmp_path / "knowledge"
     (knowledge_root / "streamer").mkdir(parents=True)
     (knowledge_root / "common").mkdir(parents=True)
-    artifact_dir = tmp_path / "artifacts"
     responses = [
-        "<reasoning>分析字幕。</reasoning>\n"
-        "<analysis_notes>没有待查事实。</analysis_notes>\n"
         "<requested_entries></requested_entries>\n"
         "<keep_entries></keep_entries>\n"
         "<search_queries></search_queries>",
-        "<reasoning>整理上下文。</reasoning>\n"
-        '<context_pack>{"general_context":{"global_summary":"摘要"},'
-        '"window_contexts":[]}</context_pack>\n'
-        "<keep_entries></keep_entries>",
+        '<context_pack>{"general_context": {}, "window_contexts": '
+        '[{"window_id":"9999","context":"背景"}]}</context_pack>',
     ]
 
-    class FirstClient:
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
         def complete(self, role, messages, **kwargs):
             return LLMCallResult(
-                content=responses.pop(0),
-                role=role,
-                model="fake",
-                fallback_used=False,
-                raw_response={},
+                content=responses.pop(0), role=role, model="fake", fallback_used=False, raw_response={}
             )
 
-    class BlockingClient:
-        def complete(self, role, messages, **kwargs):
-            raise AssertionError("validated research session should resume")
-
-    kwargs = dict(
-        transcript="--- window 0001 ---\n1|你好\n",
+    monkeypatch.setattr("finesub.llm.research.RoleClient", FakeClient)
+    context_path = tmp_path / "clip-research-context.json"
+    run_research_stage(
+        stable_json=stable_json,
+        context_path=context_path,
         knowledge_root=knowledge_root,
-        search_client=FakeSearchClient(),
-        search_rounds=1,
-        task_artifact_dir=artifact_dir,
         token_counter=FakeTokenCounter(),
-    )
-    first = run_research(client=FirstClient(), **kwargs)
-    resumed = run_research(client=BlockingClient(), **kwargs)
-
-    assert not responses
-    assert resumed["context_pack"] == first["context_pack"]
-    assert (artifact_dir / "research-round1-input.json").exists()
-    assert (artifact_dir / "research-round2-input.json").exists()
-    records = [
-        json.loads(line)
-        for line in (artifact_dir / "session-checkpoints.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    assert [record["session"] for record in records] == [
-        "research-r1",
-        "research-r2",
-    ]
-    artifacts = [
-        json.loads(line)
-        for line in (artifact_dir / "task-artifacts.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    assert [
-        item["payload"]["session"]
-        for item in artifacts
-        if item["kind"] == "session_checkpoint_replay"
-    ] == ["research-r1", "research-r2"]
-
-
-def test_run_research_retries_on_parse_error(tmp_path) -> None:
-    knowledge_root = tmp_path / "knowledge"
-    (knowledge_root / "streamer").mkdir(parents=True)
-    (knowledge_root / "common").mkdir(parents=True)
-
-    responses = [
-        "这不是任何标签块",
-        "<requested_entries></requested_entries>\n"
-        "<keep_entries></keep_entries>\n"
-        "<search_queries></search_queries>",
-        '<context_pack>{"general_context": {"global_summary": "摘要"},'
-        ' "window_contexts": []}</context_pack>',
-    ]
-
-    class FakeClient:
-        def complete(self, role, messages, **kwargs):
-            return LLMCallResult(
-                content=responses.pop(0),
-                role=role,
-                model="fake",
-                fallback_used=False,
-                raw_response={},
-            )
-
-    payload = run_research(
-        transcript="1|你好\n",
-        knowledge_root=knowledge_root,
-        client=FakeClient(),
-        search_client=FakeSearchClient(),
-        search_rounds=1,
-        token_counter=FakeTokenCounter(),
+        profile=resolve_profile("audio", "local", "quality"),
     )
 
-    assert payload["context_pack"]["general_context"]["global_summary"] == "摘要"
-    assert not responses
-
-
-def test_run_research_multi_round_uses_search_loop_and_evidence_pack(tmp_path) -> None:
-    knowledge_root = tmp_path / "knowledge"
-    (knowledge_root / "streamer").mkdir(parents=True)
-    (knowledge_root / "common").mkdir(parents=True)
-
-    contract = {
-        "goal": "查证游戏B的剧情",
-        "facts": [
-            {"id": "F1", "fact": "游戏B BOSS名", "priority": 5, "done_when": "找到官方名"}
-        ],
-        "out_of_scope": [],
-    }
-    round1 = (
-        "<analysis_notes>\n主播在玩游戏B（待定）。\n</analysis_notes>\n"
-        f"<research_contract>\n{json.dumps(contract, ensure_ascii=False)}\n</research_contract>\n"
-        "<requested_entries></requested_entries>\n"
-        "<keep_entries></keep_entries>\n"
-        "<search_queries>\n游戏B 剧情\n</search_queries>"
-    )
-    loop1 = (
-        "<progress_update>\nF1: partial 找到候选名 (https://example.test)\n</progress_update>\n"
-        "<search_queries>\nF1|游戏B BOSS 官方名\n</search_queries>"
-    )
-    loop2 = (
-        "<progress_update>\nF1: confirmed 官方名为「王」 (https://example.test/wiki)\n</progress_update>\n"
-        "<evidence_pack>\n## 结论\nF1 confirmed：BOSS 官方名「王」\n## 关键证据摘录\n（略）\n## 未解决\n（无）\n</evidence_pack>"
-    )
-    round2 = (
-        '<context_pack>{"general_context": {"global_summary": "摘要"},'
-        ' "window_contexts": []}</context_pack>'
-    )
-    responses = [round1, loop1, loop2, round2]
-    seen = []
-
-    class FakeClient:
-        def complete(self, role, messages, **kwargs):
-            seen.append((role, messages, kwargs))
-            return LLMCallResult(
-                content=responses.pop(0),
-                role=role,
-                model="fake",
-                fallback_used=False,
-                raw_response={},
-            )
-
-    search_client = FakeSearchClient(
-        [
-            QuerySearchResult(
-                query="游戏B 剧情",
-                provider="tavily",
-                items=(
-                    SearchResultItem(
-                        title="wiki", url="https://example.test", snippet="恐怖游戏"
-                    ),
-                ),
-            )
-        ]
-    )
-
-    payload = run_research(
-        transcript="--- window 0001 ---\n1|こんにちは\n",
-        extra_info="来源 URL",
-        knowledge_root=knowledge_root,
-        client=FakeClient(),
-        search_client=search_client,
-        task_artifact_dir=tmp_path / "artifacts",
-        task_id="task-1",
-        search_rounds=3,
-        token_counter=FakeTokenCounter(),
-    )
-
-    # round1 (general) + 2 loop calls (lightweight) + round2 (general)
-    roles = [role for role, _, _ in seen]
-    assert roles == [
-        LLMRole.GENERAL_CAPABLE,
-        LLMRole.LIGHTWEIGHT,
-        LLMRole.LIGHTWEIGHT,
-        LLMRole.GENERAL_CAPABLE,
-    ]
-    # Thinking comes from the preset knob via the search_judge cell config
-    # now, not per-call kwargs.
-    assert "thinking_level" not in seen[1][2]
-    from finesub.llm.routing.config import role_config_for
-
-    assert role_config_for("search_judge", "quality").thinking_level == "medium"
-    # Round 1 prompt asks for a Research Contract.
-    assert "<research_contract>" in seen[0][1][0]["content"]
-    # Loop prompts carry background (extra_info + analysis notes).
-    loop_user = seen[1][1][1]["content"]
-    assert "来源 URL" in loop_user
-    assert "主播在玩游戏B（待定）。" in loop_user
-    # Two search rounds executed: round 0 plus the loop's follow-up.
-    assert [call[0] for call in search_client.calls] == [
-        ("游戏B 剧情",),
-        ("游戏B BOSS 官方名",),
-    ]
-    # Round 2 receives the evidence pack, not raw results; system prompt uses
-    # the evidence-pack fragment, and round-1 notes are injected.
-    round2_system = seen[3][1][0]["content"]
-    round2_user = seen[3][1][1]["content"]
-    assert "Evidence Pack" in round2_system
-    assert "BOSS 官方名「王」" in round2_user
-    assert "<round1_notes>" in round2_user
-    assert "主播在玩游戏B（待定）。" in round2_user
-
-    assert payload["round1"]["analysis_notes"] == "主播在玩游戏B（待定）。"
-    assert json.loads(payload["round1"]["research_contract"])["goal"] == "查证游戏B的剧情"
-    loop_meta = payload["search_loop"]
-    assert loop_meta["degraded"] is False
-    assert loop_meta["search_rounds_executed"] == 2
-    assert loop_meta["contract"]["facts"][0]["priority"] == 4
-    assert payload["search_results"] == []
-
-    artifacts = [
-        json.loads(line)
-        for line in (tmp_path / "artifacts" / "task-artifacts.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    kinds = [artifact["kind"] for artifact in artifacts]
-    assert kinds.count("search_loop_round") >= 2
-    summary = next(a for a in artifacts if a["kind"] == "research_search_results")
-    assert summary["payload"]["multi_round"] is True
-    assert summary["payload"]["search_loop"]["search_rounds_executed"] == 2
-
-
-def test_run_research_preextracts_urls_from_extra_info(tmp_path) -> None:
-    knowledge_root = tmp_path / "knowledge"
-    (knowledge_root / "streamer").mkdir(parents=True)
-    (knowledge_root / "common").mkdir(parents=True)
-    (knowledge_root / "streamer" / "index.md").write_text("", encoding="utf-8")
-    (knowledge_root / "common" / "index.md").write_text("", encoding="utf-8")
-
-    round1 = (
-        "<requested_entries></requested_entries>\n"
-        "<keep_entries></keep_entries>\n"
-        "<search_queries></search_queries>"
-    )
-    round2 = (
-        '<context_pack>\n{"general_context": {}, "window_contexts": []}\n</context_pack>'
-    )
-    responses = [round1, round2]
-    seen = []
-
-    class FakeClient:
-        def complete(self, role, messages, **kwargs):
-            seen.append(messages)
-            return LLMCallResult(
-                content=responses.pop(0),
-                role=role,
-                model="fake",
-                fallback_used=False,
-                raw_response={"usageMetadata": {"candidatesTokenCount": 10}},
-            )
-
-    class ExtractClient:
-        calls: list[list[str]] = []
-
-        def search_many(self, queries, *, max_queries=None):
-            return []
-
-        def extract_many(self, requests, *, max_urls=None):
-            ExtractClient.calls.append([req.url for req in requests])
-            return [
-                QueryExtractResult(
-                    url=requests[0].url,
-                    provider="exa",
-                    title="Video",
-                    content="official synopsis text",
-                )
-            ]
-
-    run_research(
-        transcript="1|hello",
-        extra_info="素材来源: https://www.youtube.com/watch?v=abc 的切片",
-        knowledge_root=knowledge_root,
-        client=FakeClient(),
-        search_client=ExtractClient(),
-        search_rounds=1,
-        task_artifact_dir=tmp_path / "artifacts",
-        task_id="t1",
-    )
-
-    round1_user = seen[0][1]["content"]
-    assert "official synopsis text" in round1_user
-    assert "<note_url_extracts>" in round1_user
-    assert ExtractClient.calls == [["https://www.youtube.com/watch?v=abc"]]
-
-
-def test_run_research_content_filter_ladder_drops_toxic_note_extract(
-    tmp_path, monkeypatch
-) -> None:
-    """Round 1 leave-one-out identifies a toxic URL extract and blacklists it."""
-
-    knowledge_root = tmp_path / "knowledge"
-    (knowledge_root / "streamer").mkdir(parents=True)
-    (knowledge_root / "common").mkdir(parents=True)
-    (knowledge_root / "streamer" / "index.md").write_text("", encoding="utf-8")
-    (knowledge_root / "common" / "index.md").write_text("", encoding="utf-8")
-
-    round1 = (
-        "<requested_entries></requested_entries>\n"
-        "<keep_entries></keep_entries>\n"
-        "<search_queries></search_queries>"
-    )
-    round2 = (
-        '<context_pack>\n{"general_context": {}, "window_contexts": []}\n</context_pack>'
-    )
-    # First complete is blocked (empty + content_filter); after the toxic
-    # extract is dropped the same round-1 body must succeed.
-    blocked_raw = {
-        "choices": [{"finish_reason": "content_filter", "message": {}}],
-        "usageMetadata": {"candidatesTokenCount": 0},
-    }
-    ok_raw = {"usageMetadata": {"candidatesTokenCount": 10}}
-    responses: list[tuple[str, dict]] = [
-        ("", blocked_raw),  # full set
-        ("", blocked_raw),  # leave-one-out dropped the safe URL
-        (round1, ok_raw),  # leave-one-out dropped the toxic URL
-        (round2, ok_raw),
-    ]
-    seen_extracts: list[str] = []
-
-    class FakeClient:
-        def complete(self, role, messages, **kwargs):
-            user = messages[1]["content"]
-            seen_extracts.append(user)
-            content, raw = responses.pop(0)
-            return LLMCallResult(
-                content=content or None,
-                role=role,
-                model="fake",
-                fallback_used=False,
-                raw_response=raw,
-            )
-
-    class ExtractClient:
-        def search_many(self, queries, *, max_queries=None):
-            return []
-
-        def extract_many(self, requests, *, max_urls=None):
-            return [
-                QueryExtractResult(
-                    url=req.url,
-                    provider="exa",
-                    title="page",
-                    content=("TOXIC_PAYLOAD" if "bad" in req.url else "safe synopsis"),
-                )
-                for req in requests
-            ]
-
-    monkeypatch.setattr("finesub.llm.content_filter.time.sleep", lambda _s: None)
-    artifacts = tmp_path / "artifacts"
-    run_research(
-        transcript="1|hello",
-        extra_info=(
-            "链接: https://example.test/good 与 https://example.test/bad-page"
-        ),
-        knowledge_root=knowledge_root,
-        client=FakeClient(),
-        search_client=ExtractClient(),
-        search_rounds=1,
-        task_artifact_dir=artifacts,
-        task_id="t1",
-    )
-
-    # First attempt had both extracts; a later attempt dropped the toxic one.
-    assert any("TOXIC_PAYLOAD" in text for text in seen_extracts)
-    assert any(
-        "safe synopsis" in text and "TOXIC_PAYLOAD" not in text
-        for text in seen_extracts
-    )
-    from finesub.llm.content_filter import BLACKLIST_ARTIFACT_KIND, LADDER_ARTIFACT_KIND
-
-    kinds = {
-        json.loads(line)["kind"]
-        for line in (artifacts / "task-artifacts.jsonl").read_text(
-            encoding="utf-8"
-        ).splitlines()
-        if line.strip()
-    }
-    assert LADDER_ARTIFACT_KIND in kinds
-    assert BLACKLIST_ARTIFACT_KIND in kinds
-
-
-def test_run_research_preinjects_note_matched_entries_into_round1(tmp_path) -> None:
-    knowledge_root = tmp_path / "knowledge"
-    (knowledge_root / "streamer").mkdir(parents=True)
-    (knowledge_root / "common").mkdir(parents=True)
-    (knowledge_root / "streamer" / "index.md").write_text(
-        "- 主播A | エーちゃん | 测试主播\n", encoding="utf-8"
-    )
-    (knowledge_root / "streamer" / "主播A.md").write_text(
-        "# 主播A\n\n## 档案\n\n关西腔。\n", encoding="utf-8"
-    )
-    (knowledge_root / "common" / "index.md").write_text("", encoding="utf-8")
-
-    round1 = (
-        "<requested_entries></requested_entries>\n"
-        "<keep_entries>エーちゃん</keep_entries>\n"
-        "<search_queries></search_queries>"
-    )
-    round2 = '<context_pack>{"general_context": {}, "window_contexts": []}</context_pack>'
-    responses = [round1, round2]
-    seen = []
-
-    class FakeClient:
-        def complete(self, role, messages, **kwargs):
-            seen.append((role, messages, kwargs))
-            return LLMCallResult(
-                content=responses.pop(0),
-                role=role,
-                model="fake",
-                fallback_used=False,
-                raw_response={},
-            )
-
-    payload = run_research(
-        transcript="--- window 0001 ---\n1|こんにちは\n",
-        extra_info="今天是エーちゃん的杂谈回",
-        knowledge_root=knowledge_root,
-        client=FakeClient(),
-        task_artifact_dir=tmp_path / "artifacts",
-        task_id="task-1",
-        search_rounds=1,
-        token_counter=FakeTokenCounter(),
-    )
-
-    round1_user = seen[0][1][1]["content"]
-    assert "<preinjected_entries>" in round1_user
-    assert "# 主播A" in round1_user
-    assert "## 主播A" not in round1_user
-    assert "关西腔。" in round1_user
-    round2_user = seen[1][1][1]["content"]
-    assert "<knowledge_entries>" in round2_user
-    assert "关西腔。" in round2_user
-
-    artifacts = [
-        json.loads(line)
-        for line in (tmp_path / "artifacts" / "task-artifacts.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    preinjection = [a for a in artifacts if a["kind"] == "knowledge_preinjection"]
-    assert preinjection
-    report = preinjection[0]["payload"]
-    assert report["source"] == "research_round1"
-    assert report["matches"][0]["key"] == "主播A"
-    assert report["matches"][0]["matched_terms"] == ["エーちゃん"]
-    assert report["included"] == ["主播A"]
-    assert payload["round1"]["keep_entries"] == ["エーちゃん"]
-    assert payload["injected_entries"] == ["主播A"]
-    assert payload["ignored_keep_entries"] == []
-    assert payload["context_pack"] == {"general_context": {}, "window_contexts": []}
+    payload = json.loads(context_path.read_text(encoding="utf-8"))
+    assert payload["window_context_bind_report"]["unplaceable_window_ids"] == ["9999"]
 
 
 def test_run_research_stage_writes_planning_metadata(tmp_path, monkeypatch) -> None:
@@ -1081,7 +375,6 @@ def test_run_research_stage_writes_planning_metadata(tmp_path, monkeypatch) -> N
         stable_json=stable_json,
         context_path=context_path,
         knowledge_root=knowledge_root,
-        search_rounds=1,
         token_counter=FakeTokenCounter(),
         profile=resolve_profile("audio", "local", "quality"),
     )
@@ -1091,7 +384,7 @@ def test_run_research_stage_writes_planning_metadata(tmp_path, monkeypatch) -> N
     assert planning["prompt_version"] == PROMPT_VERSION
     assert planning["context_reserve_tokens"] == WINDOW_PLANNING_CONTEXT_RESERVE_TOKENS
     assert planning["profile_id"] == (
-        "correction_media=audio,planning_media=audio,retrieval=local,"
+        "correction_media=audio,retrieval=local,"
         "difficulty=quality,continuity=serial"
     )
     assert planning["output_scale"] == 1.0
@@ -1099,7 +392,6 @@ def test_run_research_stage_writes_planning_metadata(tmp_path, monkeypatch) -> N
     assert planning["extra_info_hash"].startswith("sha256:")
     assert planning["knowledge_inputs_hash"].startswith("sha256:")
     assert planning["knowledge_enabled"] is True
-    assert planning["search_rounds"] == 1
     assert planning["collect_task_feedback"] is False
     assert payload["context_pack"]["window_contexts"] == [
         {
@@ -1123,7 +415,6 @@ def test_knowledge_tri_state_remains_in_research_audit_metadata(tmp_path) -> Non
         stable_json=stable,
         knowledge_root=knowledge_root,
         extra_info="",
-        search_rounds=1,
         max_window_subtitle_tokens=None,
     )
     off = planning_metadata(
@@ -1156,7 +447,6 @@ def test_difficulty_is_normalized_in_research_audit_metadata(tmp_path) -> None:
         stable_json=stable,
         knowledge_root=_knowledge_root(tmp_path, with_index=True),
         extra_info="",
-        search_rounds=1,
         max_window_subtitle_tokens=None,
         knowledge_enabled=True,
         collect_task_feedback=False,
@@ -1200,7 +490,6 @@ def test_every_planning_field_is_classified_as_gate_or_audit(tmp_path) -> None:
         stable_json=stable,
         knowledge_root=_knowledge_root(tmp_path, with_index=True),
         extra_info="",
-        search_rounds=2,
         max_window_subtitle_tokens=None,
         knowledge_enabled=True,
         collect_task_feedback=False,
@@ -1212,11 +501,9 @@ def test_every_planning_field_is_classified_as_gate_or_audit(tmp_path) -> None:
     assert set(research_reuse_key(planning)) == set(RESEARCH_REUSE_GATES)
 
 
-def test_retrieval_mode_gates_research_reuse_even_when_rounds_match(
-    tmp_path, monkeypatch
-) -> None:
-    """`none` and `native` both leave search_rounds at 0, so the narrow
-    `research_semantics_id` must distinguish them after geometry is removed."""
+def test_retrieval_mode_gates_research_reuse(tmp_path, monkeypatch) -> None:
+    """`research_semantics_id` (= retrieval) is what separates a context whose
+    preparation could fetch nothing from one that searched."""
 
     from finesub.llm.research import planning_metadata, research_reuse_key
 
@@ -1226,7 +513,6 @@ def test_retrieval_mode_gates_research_reuse_even_when_rounds_match(
         stable_json=stable,
         knowledge_root=_knowledge_root(tmp_path, with_index=True),
         extra_info="",
-        search_rounds=2,
         max_window_subtitle_tokens=None,
         knowledge_enabled=True,
         collect_task_feedback=False,
@@ -1235,42 +521,8 @@ def test_retrieval_mode_gates_research_reuse_even_when_rounds_match(
     native = planning_metadata(resolve_profile("audio", "native", "quality"), **common)
     local = planning_metadata(resolve_profile("audio", "local", "quality"), **common)
 
-    # The cheap discriminator is genuinely blind here...
-    assert none["search_rounds"] == native["search_rounds"] == 0
-    assert local["search_rounds"] == 2
-    # ...so the reuse key has to carry the mode itself.
     assert research_reuse_key(none) != research_reuse_key(native)
     assert research_reuse_key(none) != research_reuse_key(local)
-
-
-def test_planning_media_never_reaches_the_research_rounds(tmp_path) -> None:
-    """`planning_media` is the *query* round's clip, not the research round's.
-
-    It does not belong in the L3 key: `build_research_round1_messages` takes no
-    profile at all, research R1/R2 pass no `file_ref` (fast round 1 is the only
-    caller that does, and it carries the *correction* clip), `planning_task_group`
-    is referenced only from `stages/correction`, and `research_stage_runs`
-    reads `retrieval` alone. L3 therefore uses `research_semantics_id=retrieval`.
-    """
-
-    import inspect
-
-    from finesub.llm import research as research_module
-    from finesub.llm.prompts import build_research_round1_messages
-
-    assert "profile" not in inspect.signature(build_research_round1_messages).parameters
-    source = inspect.getsource(research_module)
-    # The one place research.py forwards a media handle is the shared round
-    # runner's own signature/pass-through, never a research call site.
-    assert source.count("file_ref=file_ref") == 1
-
-    knowledge_root = _knowledge_root(tmp_path, with_index=True)
-    profile = resolve_profile("audio", "local", "quality")
-    assert research_module.research_stage_runs(
-        profile, knowledge_root=knowledge_root
-    ) is research_module.research_stage_runs(
-        replace(profile, planning_media="text"), knowledge_root=knowledge_root
-    )
 
 
 def test_native_sources_are_flagged_when_the_backend_reports_no_urls() -> None:
@@ -1336,6 +588,31 @@ def test_marking_skips_rounds_that_are_not_context_packs() -> None:
         "<search_queries></search_queries>"
     )
     assert _mark_unverified_sources(round1, []) is round1
+
+
+def test_marking_reaches_a_pack_wrapped_in_a_preparation_reply() -> None:
+    """The preparation task parses into its own reply type, not a bare pack --
+    and the mark is what stops a native agent's self-reported `verified=true`
+    from reaching the windows unchallenged. A request turn carries no pack and
+    is handed back untouched."""
+
+    from finesub.llm.research import _mark_unverified_sources
+    from finesub.llm.stages.prepare_task import PrepareReply
+
+    agy = [{"backend": "local_agent", "search_events": [{"tool": "search_web", "urls": []}]}]
+    reply = PrepareReply(
+        raw="",
+        context_pack=ContextPack(
+            general_context={"sources": [{"title": "Some Wiki", "verified": True}]}
+        ),
+    )
+
+    marked = _mark_unverified_sources(reply, agy)
+
+    assert marked is not reply
+    assert marked.context_pack.general_context["sources"][0]["verified"] is False
+    assert "无法核对" in marked.context_pack.general_context["sources_note"]
+    assert _mark_unverified_sources(PrepareReply(raw="x"), agy).context_pack is None
 
 
 def test_gemini_native_sources_are_not_stamped_unverified() -> None:
@@ -1433,30 +710,51 @@ def test_merged_general_context_is_deterministic_and_capped() -> None:
     assert kept[0] == "c01"  # earlier material survives
 
 
-def test_research_transcript_cap_reads_config(monkeypatch) -> None:
-    from finesub.llm.routing import api_keys
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("", 100_000),  # default ON (plan W7)
+        ("research_transcript_max_tokens = 0\n", 0),
+        ("research_transcript_max_tokens = 50000\n", 50_000),
+    ],
+)
+def test_research_transcript_cap_reads_config(tmp_path, monkeypatch, body, expected) -> None:
+    from finesub import config as app_config
+    from finesub import settings
 
-    monkeypatch.setattr(api_keys, "read_config", lambda: {})
-    assert resolve_research_transcript_cap() == 100_000  # default ON (plan W7)
-    monkeypatch.setattr(
-        api_keys,
-        "read_config",
-        lambda: {"chunking": {"research_transcript_max_tokens": 0}},
+    path = tmp_path / "config.toml"
+    path.write_text("[chunking]\n" + body, encoding="utf-8")
+    monkeypatch.setenv("FINESUB_CONFIG_FILE", str(path))
+    app_config.clear_config_cache()
+
+    assert settings.RESEARCH_TRANSCRIPT_MAX_TOKENS.resolve() == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["-1", "true", "2.5", '"50000"'],
+    ids=["negative", "bool", "float", "string"],
+)
+def test_a_malformed_chunking_cap_is_an_error_not_a_guess(tmp_path, monkeypatch, value) -> None:
+    """`int(raw)` used to turn `true` into a 1-token cap, `2.5` into 2 and
+    `"50000"` into 50000, all silently. Each is now an error naming the key."""
+
+    from finesub import config as app_config
+    from finesub import settings
+
+    path = tmp_path / "config.toml"
+    path.write_text(
+        f"[chunking]\nresearch_transcript_max_tokens = {value}\n"
+        f"max_window_subtitle_tokens = {value}\n",
+        encoding="utf-8",
     )
-    assert resolve_research_transcript_cap() == 0
-    monkeypatch.setattr(
-        api_keys,
-        "read_config",
-        lambda: {"chunking": {"research_transcript_max_tokens": 50_000}},
-    )
-    assert resolve_research_transcript_cap() == 50_000
-    monkeypatch.setattr(
-        api_keys,
-        "read_config",
-        lambda: {"chunking": {"research_transcript_max_tokens": -1}},
-    )
+    monkeypatch.setenv("FINESUB_CONFIG_FILE", str(path))
+    app_config.clear_config_cache()
+
     with pytest.raises(ValueError, match="research_transcript_max_tokens"):
-        resolve_research_transcript_cap()
+        settings.RESEARCH_TRANSCRIPT_MAX_TOKENS.resolve()
+    with pytest.raises(ValueError, match="max_window_subtitle_tokens"):
+        settings.MAX_WINDOW_SUBTITLE_TOKENS.resolve()
 
 
 def test_chunked_research_merges_packs_and_replays_finished_chunks(
@@ -1491,7 +789,6 @@ def test_chunked_research_merges_packs_and_replays_finished_chunks(
             "token_report": {"totals": {"total_tokens": 10}},
         }
 
-    monkeypatch.setattr(research_mod, "run_research", fake_run_research)
     kwargs = dict(
         segments=segments,
         context_file=tmp_path / "research-context.json",
@@ -1502,7 +799,7 @@ def test_chunked_research_merges_packs_and_replays_finished_chunks(
         test_profile=True,
         task_artifact_dir=None,
         task_id="t",
-        search_rounds=1,
+        research_runner=fake_run_research,
         token_counter=FakeTokenCounter(),
         collect_task_feedback=False,
         resume=True,
@@ -1528,11 +825,166 @@ def test_chunked_research_merges_packs_and_replays_finished_chunks(
     def exploding_run_research(**_kwargs):
         raise AssertionError("a finished chunk was re-run")
 
-    monkeypatch.setattr(research_mod, "run_research", exploding_run_research)
-    replayed = research_mod._run_chunked_research(chunk_plan, **kwargs)
+    replayed = research_mod._run_chunked_research(
+        chunk_plan, **{**kwargs, "research_runner": exploding_run_research}
+    )
     assert [record["replayed"] for record in replayed["research_chunks"]] == [True] * 3
     assert replayed["keep_entries"] == payload["keep_entries"]
     assert replayed["context_pack"] == payload["context_pack"]
+
+
+def _vote(key: str) -> dict:
+    return {"intent": "auto", "outcome": "selected" if key else "none", "key": key, "reason": "r", "rev": 3}
+
+
+def _chunked_with_votes(tmp_path, votes, *, knowledge_root=None, catalog=None, seen=None, context_name="research-context.json"):
+    import finesub.llm.research as research_mod
+    from finesub.llm.knowledge.style import StyleCatalog
+    from finesub.llm.routing.profiles import DEFAULT_PROFILE
+
+    segments, windows = _many_windows()
+    order = iter(votes)
+
+    def fake_run_research(*, transcript, chunk_label, **kwargs):
+        if seen is not None:
+            seen.append({"chunk_label": chunk_label, **kwargs})
+        return {
+            "context_pack": {"general_context": {}, "window_contexts": []},
+            "keep_entries": [],
+            "rounds": {},
+            "injected_entries": [],
+            "token_report": {"totals": {"total_tokens": 1}},
+            "style_selection": _vote(next(order)),
+        }
+
+    catalog = catalog or StyleCatalog.from_keys(["甲组", "乙组", "default_style"], rev=3)
+    return research_mod._run_chunked_research(
+        [[window] for window in windows[: len(votes)]],
+        segments=segments,
+        context_file=tmp_path / context_name,
+        extra_info="",
+        knowledge_root=knowledge_root if knowledge_root is not None else tmp_path,
+        knowledge_enabled=False,
+        profile=DEFAULT_PROFILE,
+        test_profile=True,
+        task_artifact_dir=None,
+        task_id="t",
+        research_runner=fake_run_research,
+        research_runner_kwargs={"style_catalog": catalog, "extra_style": "口语一些"},
+        token_counter=FakeTokenCounter(),
+        collect_task_feedback=False,
+        resume=True,
+        client=object(),
+        transcript_cap=1000,
+    )
+
+
+def test_chunked_research_picks_the_style_by_votes(tmp_path) -> None:
+    """auto-style-gaps plan B (owner 2026-10-01): every chunk sees the catalog
+    and votes with its own forced pick; the most votes win, and the reason
+    lists the tally."""
+
+    seen: list[dict] = []
+    payload = _chunked_with_votes(tmp_path, ["甲组", "乙组", "甲组"], seen=seen)
+
+    assert seen and all(kwargs["style_catalog"] for kwargs in seen)
+    assert all(kwargs["extra_style"] == "口语一些" for kwargs in seen)
+    choice = payload["style_selection"]
+    assert choice["outcome"] == "selected" and choice["key"] == "甲组" and choice["rev"] == 3
+    assert "甲组 2 票（c01、c03）" in choice["reason"] and "乙组 1 票（c02）" in choice["reason"]
+
+
+def test_a_chunk_saved_without_a_vote_runs_again(tmp_path) -> None:
+    """A chunk finished before chunks voted (or under a run without auto) has
+    no vote; replaying it would lose one, so that chunk -- only that one --
+    runs again. Chunks that carry a vote replay."""
+
+    seen: list[dict] = []
+    _chunked_with_votes(tmp_path, ["甲组", "乙组"], seen=seen)
+    stale = tmp_path / "research-context-c01.json"
+    saved = json.loads(stale.read_text(encoding="utf-8"))
+    del saved["style_selection"]
+    stale.write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
+
+    seen.clear()
+    payload = _chunked_with_votes(tmp_path, ["乙组"], seen=seen)
+    assert [kwargs["chunk_label"] for kwargs in seen] == ["c01"]
+    assert payload["style_selection"]["key"] == "乙组"  # c01 now votes 乙组, c02 replays 乙组
+
+
+def test_a_tie_breaks_by_usage_then_revision_then_name() -> None:
+    from finesub.llm.knowledge.style import StyleCatalog, StyleChoice, StyleVoteFacts, tally_style_votes
+
+    catalog = StyleCatalog.from_keys(["甲组", "乙组", "丙组"], rev=9)
+
+    def votes(*keys):
+        return [(f"c{i + 1:02d}", StyleChoice(outcome="selected", key=k, rev=9)) for i, k in enumerate(keys)]
+
+    by_usage = tally_style_votes(
+        votes("甲组", "乙组"), catalog, StyleVoteFacts(usage={"甲组": 1, "乙组": 4}, last_rev={"甲组": 8, "乙组": 2})
+    )
+    assert by_usage.key == "乙组" and "使用率：乙组 4、甲组 1" in by_usage.reason
+
+    by_rev = tally_style_votes(
+        votes("甲组", "乙组"), catalog, StyleVoteFacts(usage={"甲组": 2, "乙组": 2}, last_rev={"甲组": 8, "乙组": 2})
+    )
+    assert by_rev.key == "甲组" and "最近修订（rev）：乙组 2、甲组 8" in by_rev.reason
+
+    unreadable = tally_style_votes(
+        votes("乙组", "甲组"), catalog, StyleVoteFacts(usage=None, last_rev={"甲组": 5, "乙组": 5})
+    )
+    assert unreadable.key == "乙组" and "使用率读不到，跳过" in unreadable.reason  # 乙 < 甲 by code point
+    assert "按名字字典序" in unreadable.reason
+    # Deterministic: the same votes and facts, the same answer, in any order.
+    again = tally_style_votes(
+        votes("甲组", "乙组"), catalog, StyleVoteFacts(usage=None, last_rev={"甲组": 5, "乙组": 5})
+    )
+    assert again.key == unreadable.key
+
+
+def test_a_style_beats_none_on_a_tie() -> None:
+    from finesub.llm.knowledge.style import StyleCatalog, StyleChoice, StyleVoteFacts, tally_style_votes
+
+    catalog = StyleCatalog.from_keys(["甲组"], rev=1)  # no default_style: "none" is a legal vote
+    choice = tally_style_votes(
+        [("c01", StyleChoice(outcome="none", rev=1)), ("c02", StyleChoice(outcome="selected", key="甲组", rev=1))],
+        catalog,
+        StyleVoteFacts(usage=None),
+    )
+    assert choice.outcome == "selected" and choice.key == "甲组"
+    assert "与「不用风格」打平时选风格" in choice.reason
+    none_wins = tally_style_votes(
+        [("c01", StyleChoice(outcome="none", rev=1)), ("c02", StyleChoice(outcome="none", rev=1)),
+         ("c03", StyleChoice(outcome="selected", key="甲组", rev=1))],
+        catalog,
+        StyleVoteFacts(usage=None),
+    )
+    assert none_wins.outcome == "none" and none_wins.key == ""
+
+
+def test_the_tie_break_reads_usage_and_revision_off_the_store(tmp_path) -> None:
+    """The facts come from the store as of the catalog's revision (a later
+    edit does not change a replay's answer) and from the `style_injected`
+    usage ledger; both are written into the reason."""
+
+    from finesub.llm.knowledge.maintain import main as maintain_main
+    from finesub.llm.knowledge.node.repo import KnowledgeRepo
+    from finesub.llm.knowledge.node.signals import book_style_injected
+    from finesub.llm.knowledge.style import load_style_catalog
+
+    root = tmp_path / "kb"
+    maintain_main(["--root", str(root), "new", "style", "甲组", "--intro", "甲"])
+    maintain_main(["--root", str(root), "new", "style", "乙组", "--intro", "乙"])
+    KnowledgeRepo.forget(root)
+    repo = KnowledgeRepo.open(root)
+    for task in ("t1", "t2"):
+        book_style_injected(repo, ["style/乙组"], task_id=task)
+    book_style_injected(repo, ["style/甲组"], task_id="t1")
+    catalog = load_style_catalog(root)
+
+    payload = _chunked_with_votes(tmp_path, ["甲组", "乙组"], knowledge_root=root, catalog=catalog)
+    assert payload["style_selection"]["key"] == "乙组"
+    assert "使用率：乙组 2、甲组 1" in payload["style_selection"]["reason"]
 
 
 def test_chunked_research_fans_out_under_parallel_continuity(tmp_path, monkeypatch) -> None:
@@ -1581,7 +1033,6 @@ def test_chunked_research_fans_out_under_parallel_continuity(tmp_path, monkeypat
             "token_report": {"totals": {"total_tokens": 1}},
         }
 
-    monkeypatch.setattr(research_mod, "run_research", fake_run_research)
     payload = research_mod._run_chunked_research(
         chunk_plan,
         segments=segments,
@@ -1593,7 +1044,7 @@ def test_chunked_research_fans_out_under_parallel_continuity(tmp_path, monkeypat
         test_profile=True,
         task_artifact_dir=None,
         task_id="t",
-        search_rounds=1,
+        research_runner=fake_run_research,
         token_counter=FakeTokenCounter(),
         collect_task_feedback=False,
         resume=True,
@@ -1656,7 +1107,6 @@ def test_chunked_research_stays_serial_on_a_conversational_backend(tmp_path, mon
         def warning(self, code, message, *, impact="", action="") -> None:
             warnings.append(code)
 
-    monkeypatch.setattr(research_mod, "run_research", fake_run_research)
     with reporting_to(_Reporter()):
         research_mod._run_chunked_research(
             chunk_plan,
@@ -1669,7 +1119,7 @@ def test_chunked_research_stays_serial_on_a_conversational_backend(tmp_path, mon
             test_profile=True,
             task_artifact_dir=None,
             task_id="t",
-            search_rounds=1,
+            research_runner=fake_run_research,
             token_counter=FakeTokenCounter(),
             collect_task_feedback=False,
             resume=True,
@@ -1713,7 +1163,6 @@ def test_chunked_research_stays_serial_without_parallel_continuity(tmp_path, mon
             "token_report": {"totals": {}},
         }
 
-    monkeypatch.setattr(research_mod, "run_research", fake_run_research)
     research_mod._run_chunked_research(
         chunk_plan,
         segments=segments,
@@ -1725,7 +1174,7 @@ def test_chunked_research_stays_serial_without_parallel_continuity(tmp_path, mon
         test_profile=True,
         task_artifact_dir=None,
         task_id="t",
-        search_rounds=1,
+        research_runner=fake_run_research,
         token_counter=FakeTokenCounter(),
         collect_task_feedback=False,
         resume=True,
@@ -1764,7 +1213,6 @@ def test_chunk_resume_honours_the_stage_level_reuse_gates(tmp_path, monkeypatch)
             "token_report": {"totals": {}},
         }
 
-    monkeypatch.setattr(research_mod, "run_research", fake_run_research)
     profile = resolve_profile()
 
     def run(**overrides):
@@ -1778,7 +1226,7 @@ def test_chunk_resume_honours_the_stage_level_reuse_gates(tmp_path, monkeypatch)
             test_profile=True,
             task_artifact_dir=None,
             task_id="t",
-            search_rounds=1,
+            research_runner=fake_run_research,
             token_counter=FakeTokenCounter(),
             collect_task_feedback=False,
             resume=True,

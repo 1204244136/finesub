@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from finesub.llm.chunking import (
     SubtitleSegment,
     SubtitleWindow,
@@ -8,6 +10,7 @@ from finesub.llm.chunking import (
 )
 from finesub.llm.routing.config import CapabilityTier
 from finesub.llm.output_protocol import (
+    LEAKED_THOUGHT_ERROR,
     OUTPUT_CSV_HEADER,
     OUTPUT_CSV_HEADER_WITH_START,
     TranslatedCsvSegment,
@@ -1013,7 +1016,7 @@ def _mostly_discarded_output(kept: int, discarded: int) -> tuple[str, list[Subti
     return "<translated>\n" + "\n".join(rows) + "\n</translated>", source
 
 
-def test_a_window_that_discards_most_of_itself_is_rejected() -> None:
+def test_a_window_that_keeps_almost_nothing_is_rejected() -> None:
     """The 2026-08-22 canary: one `sub` row plus `discard` for everything else.
 
     Every structural check passed -- ids covered, order kept, one valid row --
@@ -1021,26 +1024,33 @@ def test_a_window_that_discards_most_of_itself_is_rejected() -> None:
     window text produces exactly this shape, so the rejection has to happen
     here, at the same seam `agent-task lint` uses, and not by eye downstream.
     """
-    output, source = _mostly_discarded_output(kept=1, discarded=19)
+    output, source = _mostly_discarded_output(kept=1, discarded=59)
     result = validate_translated_csv_text(output, source, require_singles=False)
     assert not result.ok
-    assert any("over the 50% limit" in e for e in result.errors), result.errors
+    assert any("at or under the floor" in e for e in result.errors), result.errors
     # Not the coverage error: every id *was* accounted for.
     assert not any("missing source id" in e for e in result.errors), result.errors
 
 
-def test_a_heavily_but_not_mostly_discarded_window_still_passes() -> None:
-    """The threshold is a wrongness detector, not a quality knob.
+@pytest.mark.parametrize(
+    ("kept", "discarded", "ok"),
+    [
+        (10, 30, False),  # 40 sources: the floor is min(10, 20 - 10) = 10
+        (11, 30, True),
+        (10, 290, False),  # big windows: still 10, however many were dropped
+        (11, 289, True),
+        (5, 25, False),  # 30 sources: the floor is min(10, 15 - 10) = 5
+        (6, 24, True),
+        (2, 4, True),  # a short, mostly-song clip: 6 sources, the floor is negative
+        (5, 15, True),  # 20 sources: floor 0, only all-discard is left
+    ],
+)
+def test_the_kept_floor_is_min_10_or_half_the_window_less_10(kept, discarded, ok) -> None:
+    """Owner rule 2026-09-30: reject when kept <= min(10, total * 0.5 - 10)."""
 
-    Real production discards up to 21.9% of a window (the singing/English-PV
-    material, where dropping most of a song is correct); p95 is 9.6%. A window
-    at twice that maximum must still pass, or the gate starts eating the very
-    material it was measured against.
-    """
-    output, source = _mostly_discarded_output(kept=11, discarded=9)
+    output, source = _mostly_discarded_output(kept=kept, discarded=discarded)
     result = validate_translated_csv_text(output, source, require_singles=False)
-    assert result.ok, result.errors
-    assert len(result.discarded_ids) == 9
+    assert result.ok is ok, result.errors
 
 
 def _mostly_discarded_window_output(
@@ -1069,53 +1079,31 @@ def _window(chunk_id: str, sources: list[SubtitleSegment]) -> SubtitleWindow:
     )
 
 
-def test_a_split_leaf_may_discard_most_of_itself() -> None:
-    """The ratio was measured on whole windows, so it only applies to those.
+def test_a_split_leaf_is_held_to_the_same_floor() -> None:
+    """A leaf is its own call, so a reply that never saw the body can land
+    there too. The old 50% ratio could not be applied to leaves (the worst
+    correct half in the archive discards 43.8%); an absolute floor can."""
 
-    `tools/discard_ratio_scan.py` over the archive (63 whole windows / 49
-    runs), replaying each through the production `split_window_in_half`: the
-    worst whole window discards 21.9%, but the worst half reaches **43.8%** --
-    a stretch of song inside a window that averages far less. That leaf is
-    *correct* output. Gating it would fail validation, burn the retries and
-    stop the task on an answer that was right, and 0.5 is only 1.14x above it
-    besides. Full record: `bench-baselines.md` 二十五.
-
-    This case is synthetic (5 kept / 15 discarded) because the archive holds
-    only four real leaves and all four discard nothing -- rarity, not safety.
-    What it pins is the *rule*, not the distribution.
-    """
-
-    output, sources = _mostly_discarded_window_output(kept=5, discarded=15)
+    output, sources = _mostly_discarded_window_output(kept=1, discarded=59)
     leaf = _window("0007-a", sources)
     result = validate_correction_window_output(
         output, leaf, variant=resolve_variant("capableB")
     )
-    assert result.ok, result.errors
-    assert len(result.discarded_ids) == 15
-
-
-def test_a_whole_window_is_still_held_to_the_limit() -> None:
-    """Same reply, same shape, unsplit id: the canary case stays caught.
-
-    It has to be this way round -- `attempts.py` only ever splits after an
-    output-limited or truncated reply, so an agent answering without reading
-    the window text is judged here, on attempt one, before any split exists.
-    """
-
-    output, sources = _mostly_discarded_window_output(kept=5, discarded=15)
-    whole = _window("0007", sources)
-    result = validate_correction_window_output(
-        output, whole, variant=resolve_variant("capableB")
-    )
     assert not result.ok
-    assert any("over the 50% limit" in e for e in result.errors), result.errors
+    assert any("at or under the floor" in e for e in result.errors), result.errors
+    # The 43.8% half that passed before still passes.
+    output, sources = _mostly_discarded_window_output(kept=72, discarded=56)
+    result = validate_correction_window_output(
+        output, _window("0007-a", sources), variant=resolve_variant("capableB")
+    )
+    assert result.ok, result.errors
 
 
 def test_split_depth_has_one_owner() -> None:
-    """The retry loop's split budget and this gate read the same rule.
+    """The retry loop's split budget reads the lineage off the window id.
 
-    A second copy of "the id is the lineage" in either place is the silent
-    drift this repo keeps getting bitten by, so both go through the window.
+    A second copy of "the id is the lineage" anywhere is the silent drift this
+    repo keeps getting bitten by, so every reader goes through the window.
     """
 
     from finesub.llm.stages.correction.context import WindowGeometry
@@ -1124,13 +1112,6 @@ def test_split_depth_has_one_owner() -> None:
         window = _window(chunk_id, [SubtitleSegment("1", 0.0, 1.0, "x")])
         assert window.split_depth == depth
         assert WindowGeometry.split_depth(window) == depth
-
-
-def test_the_discard_limit_is_exclusive_at_exactly_half() -> None:
-    """Half discarded still yields half a window of subtitles: not a failure."""
-    output, source = _mostly_discarded_output(kept=10, discarded=10)
-    result = validate_translated_csv_text(output, source, require_singles=False)
-    assert result.ok, result.errors
 
 
 def test_empty_translated_stays_ok_when_the_window_has_no_sources() -> None:
@@ -1429,3 +1410,56 @@ def test_the_count_is_still_normalized_either_way() -> None:
     assert {segment.char_count for segment in result.segments} == {
         format_weighted_char_count(weighted_char_count(_TEN))
     }
+
+
+class TestLeakedThoughtReply:
+    """agy sometimes ships its reasoning as the answer: the reply opens with
+    `thought\\n` and English prose (docs/llm_local_agent_agy.md §7). The output
+    contract is the only defence on the correction path; these pin what it
+    does with each shape such a reply can take."""
+
+    SOURCE = [SubtitleSegment("1", 0.0, 1.0, "a")]
+    ANSWER = f"<translated>\n{OUTPUT_CSV_HEADER}\nsub|1|1.0|0.0|a|甲|high|1|\n</translated>"
+
+    def _validate(self, text: str):
+        return validate_correction_output_text(
+            text, self.SOURCE, variant=resolve_variant(None, CapabilityTier.CAPABLE)
+        )
+
+    def test_reasoning_alone_is_rejected_and_the_repair_says_why(self) -> None:
+        result = self._validate("thought\nThe user wants row 1 corrected. I should keep it.")
+
+        assert not result.ok
+        assert result.errors[0] == LEAKED_THOUGHT_ERROR
+
+    def test_reasoning_with_an_incomplete_draft_is_rejected(self) -> None:
+        draft = f"thought\nDraft:\n<translated>\n{OUTPUT_CSV_HEADER}\n</translated>\nNow check coverage."
+
+        result = self._validate(draft)
+
+        assert not result.ok
+        assert result.errors[0] == LEAKED_THOUGHT_ERROR
+
+    def test_reasoning_that_names_the_tag_swallows_the_answer_and_is_rejected(self) -> None:
+        """Pinned as today's behaviour: the mention opens a block that closes
+        at the real answer's tag, so its first line is prose, not the header.
+        A false rejection, but on the safe side -- the repair round follows."""
+
+        result = self._validate("thought\nI will write <translated> with the header.\n" + self.ANSWER)
+
+        assert not result.ok
+        assert result.errors[0] == LEAKED_THOUGHT_ERROR
+
+    def test_reasoning_outside_a_complete_answer_is_accepted(self) -> None:
+        """Owner 2026-10-01: prose outside the blocks is not part of the
+        product, so a complete answer after leaked reasoning passes."""
+
+        result = self._validate("thought\nRow 1 is fine as is.\n" + self.ANSWER)
+
+        assert result.ok, result.errors
+
+    def test_an_ordinary_failure_gets_no_reasoning_hint(self) -> None:
+        result = self._validate("I could not finish.")
+
+        assert not result.ok
+        assert LEAKED_THOUGHT_ERROR not in result.errors

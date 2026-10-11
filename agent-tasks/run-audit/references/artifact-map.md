@@ -16,7 +16,7 @@ out/reference/<id>/            # reference_ingest；管线直跑为 out/<stem>/
   llm-artifacts/               # 管线直跑名为 <stem>.llm-artifacts/
     <id>-research-context.json # 背景调查结果（复用缓存；旧 run 也可能在目录根）
     task-artifacts.jsonl       # 结构化 artifact 流（见下）
-    session-checkpoints.jsonl  # research/query/search-judge/fast 的已验证 session 输出
+    session-checkpoints.jsonl  # 准备任务两条回复 / 每窗请求回合的已验证 session 输出
     correction-windows.jsonl   # 每窗口最终提交的输出（resume 缓存）
     exchanges/NNN-<session>.md # 每次 LLM 调用的完整 prompt+response（人类可读）；
                                # 纠错窗为 NNN-MM-<session>.md（NNN=按窗口序预领的
@@ -38,11 +38,11 @@ out/reference/<id>/            # reference_ingest；管线直跑为 out/<stem>/
 
 | kind | payload 关键字段 | 审什么 |
 | --- | --- | --- |
-| `correction_window_task_feedback` | `chunk_id`, `feedback`（`<task_update_feedback>` 的 JSON 体） | feedback v3 schema 合规（v17 起 hint 可带 `sub` 子词条定位） |
-| `research_task_feedback` | `feedback` | 同上（research 末轮/fast round 1） |
+| `correction_window_task_feedback` | `chunk_id`, `feedback`（`<task_update_feedback>` 的 JSON 体） | feedback v3 schema 合规（v17 起 hint 可带 `sub` 子词条定位）。只在 `--knowledge update` 与参考资料导入时出现；默认的 `read` 没有它，不是异常 |
+| `research_task_feedback` | `feedback` | 同上（准备任务的交付回复） |
 | `correction_window_response` | `response_content`, `validation_ok`, `validation_errors`, `model`, `usage`, `attempt`, `repair_round` | 输出契约、重试原因、token 分布；`repair_round=true` 表示这次 attempt 看到了上一轮的输出与错误（不是盲重掷） |
 | `knowledge_update_response` | `response_content`, `mode`, `chunk`, `entry_render_report`（截断名单！） | proposal 质量、注入截断 |
-| `fast_round1_response` / `search_loop_round` | `response_content` | research 侧输出契约 |
+| `prepare_task_request` / `prepare_task_response` | `response_content`, `emits_queries`, `emits_entries`, `agentic` | 准备任务两条回复的输出契约（请求批 / 交付） |
 | `content_filter_ladder` | `stage`, `level`, `attempts`, `dropped_units`, `identified_units` | PROHIBITED_CONTENT 阶梯恢复（level 1=URL leave-one-out 定位，2=丢全部 URL，3=丢全部检索注入） |
 | 任一 response 的 `execution_attempts[].search_events` | `{tool, query, queries, urls}` | **native 检索的出处**：Gemini `google_search` 从 groundingMetadata 解析（每次调用一行），Codex/Claude 从各自工具事件逐 call 记录。**agy 只报 query、零 URL**——做 native/local 检索质量对照时这条不对称必须算进去。exchange 的 Execution Attempts 表是固定列的，看不到这些，只在 artifacts 里 |
 | `content_filter_blacklist` | `content_hash`, `stable_id`, `kind`, `first_blocked_stage`, `located_level` | 同任务毒块黑名单；resume 时加载，后续窗口/轮次 render 前预剔除 |

@@ -60,7 +60,7 @@ def _render(switches, variant: str) -> str:
         window_context="（无）",
         entry_details="（无）",
         previous_advice="（无）",
-        pre_round_notes="（无）",
+        pre_round_notes="",
         search_results="（无）",
         preceding_context_csv="-1|-1.0|0.5|0.1|前文",
         current_asr_csv="1|0.0|1.0|0.0|テスト",

@@ -24,6 +24,7 @@ from finesub.llm.exchange_metadata import (
     extract_tagged_block,
     extract_top_level_tagged_blocks,
 )
+from finesub.llm.request_prompts import NOT_RETRIEVED_YET, SELF_RETRIEVED
 from finesub.llm.routing.profiles import (
     DEFAULT_PROFILE,
     TranslationProfile,
@@ -31,21 +32,20 @@ from finesub.llm.routing.profiles import (
     resolve_profile,
 )
 from finesub.llm.prompts import ContextPack
-from finesub.llm.search_loop import EVIDENCE_PACK_HEADER
 from finesub.llm.token_budget import CorrectionBudget
 from .exchange_parse import split_exchange_sections
 
 FIXTURE_VERSION = 1
 FIXTURES_DIRNAME = "session-fixtures"
-EMPTY_MARKERS = frozenset({"", "（无）", "（空）"})
+# ``NOT_RETRIEVED_YET`` is what the opening message of a task-flow window says
+# in its retrieval slots: a placeholder, never a result to freeze.
+EMPTY_MARKERS = frozenset({"", "（无）", "（空）", NOT_RETRIEVED_YET, SELF_RETRIEVED})
 # What every registered session reads out of an artifact dir. Used only to pick
 # between several candidate dirs left by one run -- not as a validity check.
 REPLAY_INPUT_MARKERS = (
     "exchanges",
     "correction-windows.jsonl",
-    "research-round1-input.json",
-    "research-round2-input.json",
-    "fast-round-input.json",
+    "research-prepare-input.json",
 )
 
 
@@ -55,7 +55,6 @@ class CorrectionFixture:
     version: int
     profile_id: str
     chunk_id: str
-    evidence_pack_mode: bool
     task_update_feedback: bool
     context_pack: Dict[str, Any]
     previous_advice: str
@@ -78,7 +77,6 @@ class CorrectionFixture:
             version=int(data.get("version") or FIXTURE_VERSION),
             profile_id=str(data.get("profile_id") or DEFAULT_PROFILE.profile_id),
             chunk_id=str(data.get("chunk_id") or "0001"),
-            evidence_pack_mode=bool(data.get("evidence_pack_mode")),
             task_update_feedback=bool(data.get("task_update_feedback")),
             context_pack=dict(data.get("context_pack") or {}),
             previous_advice=str(data.get("previous_advice") or ""),
@@ -282,33 +280,71 @@ def find_correction_exchange(artifact_dir: Path, chunk_id: str) -> Path | None:
         candidates = [
             p
             for p in sorted(exchanges.glob(f"*-correction-{chunk_id}.md"))
-            if "-query" not in p.name
+            if "-request" not in p.name
         ]
     return candidates[0] if candidates else None
 
 
-def find_query_exchange(artifact_dir: Path, chunk_id: str) -> Path | None:
-    """Locate the query-round exchange for a given chunk (if present)."""
+def find_request_exchange(artifact_dir: Path, chunk_id: str) -> Path | None:
+    """Locate the request-turn exchange for a given chunk (if present)."""
 
     exchanges = artifact_dir / "exchanges"
     if not exchanges.is_dir():
         return None
-    candidates = sorted(exchanges.glob(f"*-correction-{chunk_id}-query-*.md"))
+    candidates = sorted(exchanges.glob(f"*-correction-{chunk_id}-request-*.md"))
     return candidates[0] if candidates else None
 
 
 def extract_indexes_from_exchange(exchange_path: Path) -> dict[str, str]:
-    """Extract streamer_index and common_index blocks from a query exchange."""
+    """The rendered `<...._index>` blocks of a request-turn exchange, by key.
+
+    One block per matchable category, named by the category -- so this
+    reads the category list rather than the two names it used to know,
+    and a fixture recorded before a category existed simply has no block
+    for it.
+    """
 
     import re as _re
 
     text = exchange_path.read_text(encoding="utf-8")
     result: dict[str, str] = {}
-    for name in ("streamer_index", "common_index"):
+    for name in _index_keys():
         m = _re.search(rf"<{name}>(.*?)</{name}>", text, _re.DOTALL)
         if m:
             result[name] = m.group(1).strip()
     return result
+
+
+def _index_keys() -> tuple[str, ...]:
+    from finesub.llm.knowledge.node.presets import MATCHABLE_CATEGORIES
+
+    return tuple(f"{category}_index" for category in MATCHABLE_CATEGORIES)
+
+
+def indexes_from_fixture(fixture) -> dict[str, str]:  # type: ignore[no-untyped-def]
+    """`{category: index text}` for whatever the fixture recorded.
+
+    Two shapes are live, and neither is legacy. The round-input dumps store
+    the mapping the builders take (`knowledge_indexes`, keyed by bare
+    category); `extract_indexes_from_exchange` reads the rendered
+    `<streamer_index>` tags out of an exchange and is flat by construction.
+    Reading only the flat one replayed the current dumps with EMPTY indexes and
+    said nothing about it (review 2026-09-07, third round).
+    """
+
+    from finesub.llm.knowledge.node.presets import MATCHABLE_CATEGORIES
+
+    nested = fixture.get("knowledge_indexes") or {}
+    out: dict[str, str] = {}
+    for category in MATCHABLE_CATEGORIES:
+        body = ""
+        if isinstance(nested, Mapping):
+            body = str(nested.get(category) or "")
+        if not body.strip():
+            body = str(fixture.get(f"{category}_index", "") or "")
+        if body.strip():
+            out[category] = body
+    return out
 
 
 def _load_context_pack(
@@ -524,21 +560,33 @@ def extract_fixture_from_exchange(
     user = sections["user"]
     if not user.strip():
         raise ValueError(f"Exchange has empty user section: {exchange_path}")
+    # Task flow: the opening message carries the window's inputs (CSV, read-only
+    # context, advice, the *carried* entries) with placeholders in the retrieval
+    # slots; the fill turn -- a second user section, present only after a
+    # request batch -- carries what the batch produced. A direct delivery has
+    # no fill: its retrieval stays the placeholder, i.e. nothing.
+    users = sections.get("users") or [user]
+    fill = users[-1] if len(users) > 1 else ""
 
-    # A window whose query round found nothing still carries the block, with
+    # A window whose request turn found nothing still carries the block, with
     # the empty marker inside. That *is* the state to freeze, so presence of
     # the tag -- not a non-empty body -- is what the guard has to check;
     # otherwise a legitimately searchless run cannot be replayed at all.
     search_blocks = extract_top_level_tagged_blocks(user, "search_results")
-    # Evidence pack may be injected under the same slot or a dedicated tag.
-    evidence_blocks = extract_top_level_tagged_blocks(user, "evidence_pack")
+    fill_search = extract_top_level_tagged_blocks(fill, "search_results") if fill else []
     search_results = _normalize_block(
-        search_blocks[0] if search_blocks else ""
-    ) or _normalize_block(evidence_blocks[0] if evidence_blocks else "")
+        fill_search[0] if fill_search else (search_blocks[0] if search_blocks and not fill else "")
+    )
     window_notes = _normalize_block(extract_tagged_block(user, "pre_round_notes"))
-    entry_details = _normalize_block(extract_tagged_block(user, "entry_details"))
+    if fill and not window_notes:
+        # The request turn's notes live in the replayed assistant message.
+        window_notes = _normalize_block(
+            extract_tagged_block(str(sections.get("assistant") or ""), "window_notes")
+        )
+    fill_entries = extract_tagged_block(fill, "entry_details") if fill else ""
+    entry_details = _normalize_block(fill_entries or extract_tagged_block(user, "entry_details"))
     previous_advice = _normalize_block(extract_tagged_block(user, "previous_advice"))
-    if not search_blocks and not evidence_blocks:
+    if not search_blocks:
         raise ValueError(
             f"R2 exchange user section has no <search_results> block at all "
             f"(needed to freeze search+extract): {exchange_path}"
@@ -604,9 +652,6 @@ def extract_fixture_from_exchange(
     }
 
     profile_id = _infer_profile_id(layout, {})
-    evidence_pack_mode = search_results.lstrip().startswith(EVIDENCE_PACK_HEADER[:20]) or (
-        EVIDENCE_PACK_HEADER.split("\n", 1)[0] in search_results[:200]
-    )
     # Feedback was on for the reference sample; detect from system text.
     task_update_feedback = "task_update_feedback" in sections["system"]
 
@@ -619,9 +664,9 @@ def extract_fixture_from_exchange(
         legacy_source_ids=source_ids,
     ).to_dict()
 
-    # Inject knowledge-base indexes from the query exchange (query-round-only
-    # inputs not present in the R2 exchange the fixture is extracted from).
-    query_exch = find_query_exchange(artifact_dir, chunk_id)
+    # Inject knowledge-base indexes from the request-turn exchange (the
+    # delivery exchange the fixture is extracted from carries none).
+    query_exch = find_request_exchange(artifact_dir, chunk_id)
     if query_exch:
         for key, value in extract_indexes_from_exchange(query_exch).items():
             context_pack.setdefault(key, value)
@@ -641,7 +686,6 @@ def extract_fixture_from_exchange(
         version=FIXTURE_VERSION,
         profile_id=profile_id,
         chunk_id=chunk_id,
-        evidence_pack_mode=evidence_pack_mode,
         task_update_feedback=task_update_feedback,
         context_pack=context_pack,
         previous_advice=previous_advice,

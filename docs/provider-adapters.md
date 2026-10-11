@@ -17,7 +17,7 @@
 
 | 主题 | OpenAI 官方 | DeepSeek | Anthropic |
 | --- | --- | --- | --- |
-| ★ 模型名 | — | **`deepseek-chat`/`deepseek-reasoner` 已于 2026-07-24 停用**，现为 `deepseek-v4-flash`/`-pro` + thinking 开关 | — |
+| ★ 模型名 | — | **`deepseek-chat`/`deepseek-reasoner` 已于 2026-07-24 停用**。现为 `deepseek-flash`（V4.1 Flash，不带版本号）与 `deepseek-v4-pro` + thinking 开关：2026-09-12 实测传 `deepseek-v4.1-flash` 返回 `INVALID_REQUEST`，报错原文列出的受支持名只有这两个，所以旧的 `deepseek-v4-flash` 也不在其中 | — |
 | ★ reasoning 模型 × 采样参数 | 传 temperature 等 → **400** | 静默忽略 | 新模型（Opus 5/Sonnet 5 等）整体移除采样参数，传了 400 |
 | ★ 思考深度 | `reasoning_effort`（none…max，按模型） | `thinking:{type}` 或 `reasoning:{effort}` 两种方言 | `thinking:{type:"enabled",budget_tokens}`（另有 `output_config.effort`） |
 | ★ 截断 | `finish_reason="length"` | 同左；另有特有值 `insufficient_system_resource`（资源不足中断，宜重试） | `stop_reason="max_tokens"` |
@@ -44,8 +44,8 @@
 - **D18**：非 Gemini 一律**不传采样参数**；重掷扰动是 prompt 末尾 `(seed=N)` 文本
   （provider 无关，`chat_complete` 在分派前统一追加）。
 - **thinking**：抽象档位来自预设级思考旋钮（`[presets.<id>.thinking]`，难度回落、缺省
-  medium）；模型在 catalog/`[llm.models]` 的 `thinking` 列声明自己的映射。**缺省是恒等**
-  （`true`；2026-08-12 起也是 `[llm.models]` 不写该字段时的默认）——三家的档位词本来就同名：
+  medium）；模型在 catalog 的 `thinking` 列声明自己的映射。**缺省是恒等**
+  （`true`，这一列留空时也是它）——三家的档位词本来就同名：
   Gemini `thinkingLevel`、OpenAI 系 `reasoning_effort`、Anthropic `output_config.effort`
   都取 low/medium/high（前两者另有 xhigh/minimal 等扩展值）。端点用别的词才写
   `high映射,med映射,low映射` 三个取值覆盖；`false` = 不发思考参数（对未知字段会 400 的
@@ -56,7 +56,7 @@
   Gemini 结构化 `quotaId`，其他供应商的 429 归 rate_limit，撞满就退避重试。
 - **usage**：报告与校准以 API 返回值为准（缺失记 0 交由现有口径处理）。
 - **媒体**：第一刀不做（`supports_audio/video=false` 固定）；纯文本强模型用在音视频素材
-  上的路径是 `--correction-media text`。
+  上的路径是 `--media text`。
 - **key**：`FINESUB_KEY_<PROVIDER_TIER>`（可用 catalog 的 `key_env` 列覆盖），走 `secrets.py`
   同一条加密 `.env` 路径，不另开明文存放点。
 - **声明位置（2026-08-12 起）**：provider 方言与 base_url 是**事实**，写在数据根的

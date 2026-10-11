@@ -316,6 +316,123 @@ def test_refusing_backend_degrades_to_plaintext(env_file: Path, capsys) -> None:
         secrets.set_backend(None)
 
 
+def test_obfuscation_backend_writes_an_obf_keyring_and_says_so(
+    env_file: Path, capsys
+) -> None:
+    # What every non-Windows machine gets: no account binding, only obfuscation.
+    secrets.set_backend(secrets.ObfuscationBackend())
+    try:
+        assert secrets.protect_env_file(env_file) is True
+        text = env_file.read_bytes().decode("utf-8")
+        keyring = re.search(r"FINESUB_KEYRING=(\S+)", text).group(1)
+        assert keyring.startswith(secrets.OBF_PREFIX)
+        assert "混淆" in text and "Windows" not in text
+        for plain in ("AIzaMainKey1234567", "exa-key-one-abcdef"):
+            assert plain not in text
+        assert secrets.read_env_file(env_file) == SAMPLE_VALUES
+        notice = capsys.readouterr().err
+        assert "混淆" in notice and "加密。" in notice and "绑定" not in notice
+    finally:
+        secrets.set_backend(None)
+
+
+def test_obfuscated_keyring_opens_whatever_backend_this_machine_has(
+    env_file: Path,
+) -> None:
+    # A file obfuscated on Linux and opened on Windows (or anywhere) still reads:
+    # the prefix picks the backend, not the machine.
+    secrets.set_backend(secrets.ObfuscationBackend())
+    try:
+        secrets.protect_env_file(env_file)
+    finally:
+        secrets.set_backend(None)
+    secrets.set_backend(RefusingBackend())
+    try:
+        assert secrets.read_env_file(env_file) == SAMPLE_VALUES
+    finally:
+        secrets.set_backend(None)
+
+
+def test_wording_follows_the_keyring_the_file_has_not_this_machine(
+    env_file: Path, capsys
+) -> None:
+    # A `.env` carried from Linux to Windows keeps its obfuscated keyring, so a
+    # key added here is obfuscated too -- "bound to your Windows account" would
+    # be a lie about the value that was just written.
+    secrets.set_backend(secrets.ObfuscationBackend())
+    try:
+        secrets.protect_env_file(env_file)
+    finally:
+        secrets.set_backend(None)
+    with env_file.open("a", encoding="utf-8") as handle:
+        handle.write("ADDED_LATER=AIzaAddedOnWindows12\n")
+    capsys.readouterr()
+
+    secrets.set_backend(FakeBackend())  # this machine would write DPAPI
+    try:
+        assert secrets.protect_env_file(env_file) is True
+    finally:
+        secrets.set_backend(None)
+
+    text = env_file.read_bytes().decode("utf-8")
+    keyring = re.search(r"FINESUB_KEYRING=(\S+)", text).group(1)
+    assert keyring.startswith(secrets.OBF_PREFIX)
+    assert "AIzaAddedOnWindows12" not in text
+    assert "绑定" not in text and "混淆" in text
+    notice = capsys.readouterr().err
+    assert "混淆" in notice and "绑定" not in notice
+
+
+def test_rebuilt_keyring_takes_the_note_with_it(env_file: Path) -> None:
+    # The other direction: a keyring this machine cannot open, with every
+    # ciphertext re-entered, is rebuilt here -- and the note above it described
+    # the backend that just went away.
+    secrets.set_backend(FakeBackend())
+    try:
+        secrets.protect_env_file(env_file)
+    finally:
+        secrets.set_backend(None)
+    text = env_file.read_bytes().decode("utf-8")
+    keyring_line = next(
+        line for line in text.splitlines() if line.startswith(secrets.KEYRING_NAME)
+    )
+    note = next(line for line in text.splitlines() if line.startswith("# FineSub"))
+    assert "绑定" in note
+    env_file.write_text(
+        note + "\n" + keyring_line + "\nRE_ENTERED=AIzaReenteredKey123\n",
+        encoding="utf-8",
+    )
+
+    secrets.set_backend(secrets.ObfuscationBackend())
+    try:
+        assert secrets.protect_env_file(env_file) is True
+    finally:
+        secrets.set_backend(None)
+
+    text = env_file.read_bytes().decode("utf-8")
+    assert re.search(r"FINESUB_KEYRING=(\S+)", text).group(1).startswith(
+        secrets.OBF_PREFIX
+    )
+    assert "绑定" not in text and "混淆" in text
+    assert secrets.read_env_file(env_file) == {"RE_ENTERED": "AIzaReenteredKey123"}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="file modes are POSIX-only")
+def test_env_file_is_written_owner_only(tmp_path: Path) -> None:
+    path = tmp_path / ".env"
+    secrets.update_env_file(path, {"GEMINI_FREE": "AIzaOwnerOnlyKey123"})
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert secrets.read_env_file(path) == {"GEMINI_FREE": "AIzaOwnerOnlyKey123"}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="DPAPI exists on Windows")
+def test_windows_keyring_is_unreadable_elsewhere(tmp_path: Path) -> None:
+    secrets.set_backend(None)
+    token = secrets.KEK_PREFIX + secrets._b64encode(b"s" * 40)
+    with pytest.raises(secrets.SecretUnreadable, match="Windows account"):
+        secrets.unwrap_master(token)
+
+
 def test_ensure_protected_runs_once_per_process(
     backend, env_file: Path, monkeypatch
 ) -> None:

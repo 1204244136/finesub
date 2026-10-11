@@ -16,9 +16,11 @@ The predicate was removed on 2026-08-30; see `docs/bench-baselines.md` 17.12.)
 
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 import threading
+import ast
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -191,6 +193,8 @@ class TestWarmUpEncode:
         encoded: list[object] = []
 
         class FakeModel:
+            flash_attention = True
+
             def __init__(self) -> None:
                 self._encoder_cache = SimpleNamespace(clear=lambda: None)
 
@@ -212,6 +216,8 @@ class TestWarmUpEncode:
         pool.warm()
 
         assert len(encoded) == 2, "warm() built the pool without encoding"
+        # What the stage records as `fw_refine.ct2_flash_attention`.
+        assert pool.flash_attention is True
 
     def test_a_gemm_failure_reaches_the_caller_from_warm(
         self, monkeypatch, fw_refine_backend
@@ -442,3 +448,101 @@ class TestCt2ArchitectureFloor:
 
         assert reason is not None
         assert "no CUDA device" in reason
+
+
+def test_every_stage_profile_lookup_carries_the_device_request() -> None:
+    """A stage's tier lookup must carry the device request, or reuse a profile.
+
+    The tier is the same either way; what the argument carries is whether the
+    user asked for the CPU, and the only call that forgot it (the ASR stage's
+    decode-batch lookup) put the "your card is idle" hint back in front of
+    exactly the people who had already decided. Module-level lookups against a
+    fixed tier are exempt: they never detect anything.
+    """
+
+    root = Path(__file__).resolve().parents[1] / "src/finesub/speech"
+    # `runtime/resources.py` defines these; its own fallback serves callers
+    # that gave neither (the tier tests), and is not a stage lookup.
+    required = {"get_resource_profile": "device", "resolve_asr_decode_batch": "profile"}
+    offenders = []
+    for source in root.rglob("*.py"):
+        if source.name == "resources.py":
+            continue
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if name not in required:
+                continue
+            first = node.args[0] if node.args else None
+            if isinstance(first, ast.Name) and first.id == "DEFAULT_GPU_TIER":
+                continue
+            if not any(keyword.arg == required[name] for keyword in node.keywords):
+                offenders.append(f"{source.name}:{node.lineno} ({name})")
+    assert offenders == [], (
+        "these resolve a tier without the device request: " + ", ".join(offenders)
+    )
+
+
+def test_a_failed_backend_import_reaches_the_user_with_its_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stage wraps the import; the wrapper must not bury what went wrong.
+
+    It used to answer every failure with "install `[asr]`" -- advice that is
+    wrong on Windows + AMD, where `[asr]` replaces the ROCm torch with the
+    CUDA-less PyPI build.
+    """
+
+    from finesub.speech.runtime import cuda_libs
+
+    monkeypatch.setattr(cuda_libs.os, "name", "nt")
+    monkeypatch.setattr(cuda_libs, "_ct2_is_hip_build", lambda: True)
+
+    native = cuda_libs.missing_asr_backend_message(
+        ImportError("DLL load failed while importing _ext")
+    )
+    assert "rocm_sdk" in native and "ct2-wheel.md" in native
+    assert "[asr]" not in native  # not an install problem, so no install advice
+
+
+def test_a_missing_backend_package_is_not_reported_as_a_broken_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Walk the real import, because walking around it hid the bug.
+
+    A wrapper inside `fw_refine_backend` used to re-raise every failure as a
+    plain `ImportError`, which flattened `ModuleNotFoundError` -- and the
+    caller, which tells those two apart to decide what to advise, then told a
+    machine with no faster-whisper that its backend "is installed but would not
+    load". Feeding the exception straight to the message builder passed the
+    whole time.
+    """
+
+    from finesub.speech.runtime import cuda_libs
+
+    # Every cached piece has to go: with `faster_whisper.transcribe` still in
+    # `sys.modules` (some earlier test imported it), `from faster_whisper
+    # .transcribe import ...` is served from the cache and never notices the
+    # parent. That is why this passed alone and failed in the full suite.
+    for name in [key for key in sys.modules if key.split(".")[0] == "faster_whisper"]:
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    monkeypatch.setitem(sys.modules, "faster_whisper", None)
+    monkeypatch.delitem(
+        sys.modules, "finesub.speech.recognition.fw_refine_backend", raising=False
+    )
+
+    try:
+        # `import_module`, not `from ... import fw_refine_backend`: the latter
+        # finds the attribute still hanging off the parent package and never
+        # re-executes the module.
+        importlib.import_module("finesub.speech.recognition.fw_refine_backend")
+    except Exception as exc:  # what the stage's wrapper catches
+        said = cuda_libs.missing_asr_backend_message(exc)
+    else:
+        raise AssertionError("the import was supposed to fail")
+
+    assert "缺少 ASR 依赖" in said
+    assert "装着" not in said
+    assert "repo-install.md" in said

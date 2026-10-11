@@ -1,6 +1,16 @@
+# LF in the repo and every checkout, whatever core.autocrlf says; the lines below
+# override it for specific files.
+* text=auto eol=lf
+
 # cmd.exe reads a batch file line by line and mis-executes LF-only ones -- it
 # runs fragments of the following line ("'indowed' is not recognized"). That
 # depends on the checkout, not on the committed bytes, so pin it here instead
 # of relying on every clone having core.autocrlf=true.
 *.cmd text eol=crlf
 *.bat text eol=crlf
+# The reverse for shell scripts: bash reads a CRLF line as ending in "\r", and
+# the CTranslate2 build scripts run under Git Bash on Windows runners too.
+*.sh text eol=lf
+# The git hook has no extension, and is copied from the checkout into
+# .git/hooks as is.
+scripts/pre-push text eol=lf

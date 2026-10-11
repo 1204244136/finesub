@@ -133,7 +133,9 @@ def test_an_unreadable_opt_out_is_treated_as_opted_out(monkeypatch, tmp_path) ->
         '[cli]\nupdate_check = false\n', encoding="utf-8"
     )
 
-    monkeypatch.setattr(update_check, "_toml_parser", lambda: None)
+    from finesub_bootstrap import user_config
+
+    monkeypatch.setattr(user_config, "toml_parser", lambda: None)
     assert not enabled(command="run", user_data=tmp_path, isatty=True)
 
     # With no config file at all there is nothing to honour, parser or not.

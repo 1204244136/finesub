@@ -21,7 +21,7 @@ from finesub.llm.agent.local_agent import (
     CodexDriverConfig,
     DriverProbe,
     DshDriverConfig,
-    WorkBuddyDriverConfig,
+    CodeBuddyDriverConfig,
     driver_readiness,
 )
 
@@ -47,17 +47,18 @@ def _driver(version: str, *, min_version: str = "1.1.24", ready: bool = True):
 
 
 # What each vendor actually printed on the owner's machine (2026-09-02;
-# WorkBuddy 2026-09-04). These
+# CodeBuddy 2026-09-04; dsh re-read after its upgrade, 2026-09-12; codex
+# 2026-09-26). These
 # are the formats the shared parser has to keep reading: a vendor that changes
 # its wording turns the pin off, so the format itself is under test.
 VENDOR_VERSION_LINES = {
-    CodexDriverConfig: "codex-cli 0.147.0",
+    CodexDriverConfig: "codex-cli 0.160.0",
     ClaudeCodeDriverConfig: "2.1.231 (Claude Code)",
-    AgyDriverConfig: "1.1.24",
-    DshDriverConfig: "0.1.1-rc.2",
+    AgyDriverConfig: "1.2.16",
+    DshDriverConfig: "0.1.5-rc.1",
     # The only one with no vendor name at all, which is why the shared
     # parser has to accept a bare dotted number rather than a prefix.
-    WorkBuddyDriverConfig: "2.137.1",
+    CodeBuddyDriverConfig: "2.164.0",
 }
 
 
@@ -101,7 +102,8 @@ def test_trailing_zeros_are_not_older_than_a_shorter_pin(reported) -> None:
 
 
 def test_a_release_outranks_the_prerelease_it_is_pinned_to(reported) -> None:
-    """dsh's pin is `0.1.1-rc.2`; the eventual `0.1.1` must not read as older."""
+    """dsh pins prereleases (first `0.1.1-rc.2`, now `0.1.5-rc.1`); the release
+    that follows one must not read as older than it."""
 
     assert driver_readiness(_driver("0.1.1", min_version="0.1.1-rc.2")) == (True, "")
     assert reported.codes() == []

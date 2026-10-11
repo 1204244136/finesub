@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 import os
@@ -13,9 +12,9 @@ import pytest
 
 from finesub_bootstrap import environment as environment_module
 from finesub_bootstrap.paths import AppPaths
-from finesub_bootstrap.environment import (
+from finesub_bootstrap.environment import RuntimeEnvironment
+from finesub_bootstrap.runtime_health import (
     REQUIRED_RUNTIME_IMPORTS,
-    RuntimeEnvironment,
     runtime_probe_source,
 )
 from finesub_bootstrap.downloader import DownloadPaused
@@ -54,7 +53,7 @@ def _healthy_site_packages(python_executable: Path) -> Path:
     -- so a fake environment now has to look right on disk instead.
     """
 
-    from finesub_bootstrap.environment import REQUIRED_RUNTIME_PACKAGE_DIRS
+    from finesub_bootstrap.runtime_health import REQUIRED_RUNTIME_PACKAGE_DIRS
 
     site_packages = python_executable.parent.parent / "Lib" / "site-packages"
     for name in REQUIRED_RUNTIME_PACKAGE_DIRS:
@@ -877,7 +876,7 @@ def test_the_runtime_marker_matches_the_locked_ctranslate2() -> None:
 
     import tomllib
 
-    from finesub_bootstrap.environment import REQUIRED_CTRANSLATE2_LOCAL_LABEL
+    from finesub_bootstrap.runtime_health import REQUIRED_CTRANSLATE2_LOCAL_LABEL
 
     lock = (
         REPOSITORY_ROOT / "src" / "finesub_bootstrap" / "pylock.win-py312.toml"
@@ -940,47 +939,252 @@ def test_a_comment_or_line_ending_change_in_the_lock_is_not_a_dependency_change(
     assert runtime.status().state == "missing"
 
 
-def test_an_install_that_hashed_the_whole_lock_file_is_still_current(
-    tmp_path: Path, monkeypatch
+# ---- holding a new runtime to its lock ---------------------------------------
+
+
+def _hashed(content: bytes) -> str:
+    import base64
+    import hashlib
+
+    raw = hashlib.sha256(content).digest()
+    return "sha256=" + base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _put_silero(site_packages: Path, *, with_archive: bool) -> None:
+    """silero-vad as uv leaves it, optionally with its model quarantined."""
+
+    archive = b"torchscript archive"
+    dist_info = site_packages / "silero_vad-6.2.1.dist-info"
+    dist_info.mkdir(parents=True, exist_ok=True)
+    (dist_info / "RECORD").write_text(
+        f"silero_vad/data/silero_vad.jit,{_hashed(archive)},{len(archive)}\n"
+        "silero_vad-6.2.1.dist-info/RECORD,,\n",
+        encoding="utf-8",
+    )
+    target = site_packages / "silero_vad" / "data" / "silero_vad.jit"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if with_archive:
+        target.write_bytes(archive)
+    elif target.exists():
+        target.unlink()
+
+
+def _locked_runtime(
+    tmp_path: Path, *, archive_after_reinstall: bool, quarantine_first: bool = True
+) -> tuple[RuntimeEnvironment, list[list[str]], AppPaths]:
+    paths = AppPaths.for_root(tmp_path / "root")
+    app_source = _write_app_source(tmp_path)
+    lock = _runtime_lock(app_source)
+    lock.write_text(
+        'lock-version = "1.0"\n\n[[packages]]\nname = "silero-vad"\nversion = "6.2.1"\n',
+        encoding="utf-8",
+    )
+    uv_executable = tmp_path / "uv.exe"
+    uv_executable.write_bytes(b"uv")
+    commands: list[list[str]] = []
+    staging_python = paths.runtime / "python.staging" / "Scripts" / "python.exe"
+
+    def run(command, **kwargs):
+        commands.append(command)
+        if command[1:3] == ["venv", str(paths.runtime / "python.staging")]:
+            staging_python.parent.mkdir(parents=True)
+            staging_python.write_bytes(b"python")
+            _healthy_site_packages(staging_python)
+        elif command[1:3] == ["pip", "install"]:
+            reinstall = "--reinstall-package" in command
+            _put_silero(
+                staging_python.parent.parent / "Lib" / "site-packages",
+                with_archive=archive_after_reinstall if reinstall else not quarantine_first,
+            )
+        return subprocess.CompletedProcess(command, 0)
+
+    runtime = RuntimeEnvironment(
+        paths=paths,
+        app_source=app_source,
+        runtime_lock=lock,
+        uv_executable=lambda: uv_executable,
+        command_runner=run,
+        runtime_validator=lambda _python: (True, ""),
+        system_python_prober=lambda: None,
+    )
+    return runtime, commands, paths
+
+
+def test_a_file_missing_from_the_new_runtime_is_fetched_again(tmp_path: Path) -> None:
+    """The cache handed back a quarantined file: evict it, reinstall, recheck."""
+
+    runtime, commands, _paths = _locked_runtime(tmp_path, archive_after_reinstall=True)
+
+    assert runtime.install().state == "ready"
+
+    uv = commands[0][0]
+    assert [uv, "cache", "clean", "silero-vad"] in commands
+    reinstalls = [command for command in commands if "--reinstall-package" in command]
+    assert len(reinstalls) == 1 and reinstalls[0][-2:] == ["--reinstall-package", "silero-vad"]
+    assert (runtime.site_packages / "silero_vad" / "data" / "silero_vad.jit").is_file()
+
+
+def test_a_runtime_that_stays_broken_is_not_swapped_in(tmp_path: Path) -> None:
+    runtime, _commands, paths = _locked_runtime(tmp_path, archive_after_reinstall=False)
+
+    with pytest.raises(RuntimeError, match="白名单"):
+        runtime.install()
+
+    assert not runtime.python_executable.exists()
+    assert not (paths.runtime / "python.staging").exists()
+
+
+def test_a_rebuild_is_refused_while_another_run_uses_the_runtime(tmp_path: Path) -> None:
+    from finesub_bootstrap.environment import RuntimeInUse
+    from finesub_bootstrap.locks import holding_activity
+
+    runtime, _commands, paths = _locked_runtime(
+        tmp_path, archive_after_reinstall=True, quarantine_first=False
+    )
+    runtime.install()
+
+    with holding_activity(paths.user_data):
+        with pytest.raises(RuntimeInUse, match="FineSub"):
+            runtime.install(force=True)
+        # The one lease is the caller's own: nobody else is using it.
+        assert runtime.install(force=True, holds_lease=True).state == "ready"
+
+
+def test_force_rebuilds_a_runtime_that_looks_ready(tmp_path: Path) -> None:
+    runtime, commands, paths = _locked_runtime(
+        tmp_path, archive_after_reinstall=True, quarantine_first=False
+    )
+    runtime.install()
+    commands.clear()
+
+    runtime.install()
+    assert commands == []
+
+    runtime.install(force=True)
+    assert any(command[1:3] == ["venv", str(paths.runtime / "python.staging")] for command in commands)
+
+
+def test_extra_import_roots_reach_only_the_runtime_and_come_last(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Markers written before 0.5.0 carry the file digest, header included.
-    The one lock those installs have is grandfathered in by digest, and
-    nothing else is."""
+    from finesub_bootstrap.environment import EXTRA_PYTHONPATH_VARIABLE
 
-    runtime = _ready_runtime(tmp_path)
-    whole = hashlib.sha256(runtime.runtime_lock.read_bytes()).hexdigest()
-    monkeypatch.setattr(
-        environment_module, "_LEGACY_LOCK_FILE_DIGESTS", frozenset({whole})
+    runtime, _commands, _paths = _locked_runtime(tmp_path, archive_after_reinstall=True)
+    extra = str(tmp_path / "downstream-packages")
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    monkeypatch.setenv(EXTRA_PYTHONPATH_VARIABLE, extra)
+
+    context = runtime.worker_context(
+        ffmpeg_bin=None, extra_env={}, extra_python_path=[tmp_path / "yt-dlp"]
     )
-    marker = runtime._marker()
 
-    marker["runtimeLockHash"] = whole
-    runtime.marker_path.write_text(json.dumps(marker), encoding="utf-8")
-    assert runtime.status().state == "ready"
-
-    marker["runtimeLockHash"] = "some-other-lock"
-    runtime.marker_path.write_text(json.dumps(marker), encoding="utf-8")
-    assert runtime.status().state == "missing"
-
-    # The grace is for the digest alone: a different Python is still a rebuild.
-    marker["runtimeLockHash"] = whole
-    marker["pythonVersion"] = "3.11"
-    runtime.marker_path.write_text(json.dumps(marker), encoding="utf-8")
-    assert runtime.status().state == "missing"
+    entries = context.environment["PYTHONPATH"].split(os.pathsep)
+    assert entries[-1] == extra
+    assert entries.index(str(tmp_path / "yt-dlp")) < entries.index(extra)
+    assert entries[0] == str(runtime.app_source)
 
 
-def test_the_shipped_lock_is_one_of_the_grandfathered_digests() -> None:
-    """The constant has to name the lock as it is *committed*; a regeneration
-    that forgets to delete the constant would leave a stale digest that
-    matches nothing, which is harmless -- but one that edits the packages
-    and keeps the old digest would grandfather a lock that really changed."""
+def test_a_leftover_staging_tree_that_fails_its_check_is_rebuilt(tmp_path: Path) -> None:
+    """An earlier attempt built it but could not swap it in -- maybe because
+    something was quarantining files out of it at the time."""
 
-    lock = REPOSITORY_ROOT / "src" / "finesub_bootstrap" / "pylock.win-py312.toml"
-    content = lock.read_bytes().replace(b"\r\n", b"\n")
-    # Reconstruct the pre-0.5.0 header the digests were taken over.
-    old = content.replace(b"--extra runtime", b"--extra desktop-worker")
-    assert hashlib.sha256(old).hexdigest() in environment_module._LEGACY_LOCK_FILE_DIGESTS
-    assert (
-        hashlib.sha256(old.replace(b"\n", b"\r\n")).hexdigest()
-        in environment_module._LEGACY_LOCK_FILE_DIGESTS
+    runtime, commands, paths = _locked_runtime(
+        tmp_path, archive_after_reinstall=True, quarantine_first=False
     )
+    runtime.install()
+    staging = paths.runtime / "python.staging"
+    shutil.copytree(runtime.runtime_root, staging)
+    (staging / "Lib" / "site-packages" / "silero_vad" / "data" / "silero_vad.jit").unlink()
+    commands.clear()
+
+    runtime.install(force=True)
+
+    assert any(command[1:3] == ["venv", str(staging)] for command in commands)
+    assert (runtime.site_packages / "silero_vad" / "data" / "silero_vad.jit").is_file()
+
+
+def test_only_a_missing_runtime_directory_is_a_first_install(tmp_path: Path) -> None:
+    """A runtime that lost its interpreter still holds what was put into it."""
+
+    runtime, _commands, _paths = _locked_runtime(
+        tmp_path, archive_after_reinstall=True, quarantine_first=False
+    )
+    assert runtime.condition() == "absent"
+    runtime.install()
+
+    runtime.python_executable.unlink()
+    assert runtime.condition() == "damaged"
+    assert runtime.health_detail()
+
+    shutil.rmtree(runtime.runtime_root)
+    assert runtime.condition() == "absent"
+
+
+def test_a_run_that_starts_during_the_build_stops_the_swap(tmp_path: Path) -> None:
+    """Checked again right before the swap; the finished tree is kept."""
+
+    from contextlib import ExitStack
+
+    from finesub_bootstrap.environment import RuntimeInUse
+    from finesub_bootstrap.locks import holding_activity
+
+    runtime, commands, paths = _locked_runtime(
+        tmp_path, archive_after_reinstall=True, quarantine_first=False
+    )
+    runtime.install()
+    before = runtime.python_executable.stat().st_mtime_ns
+    leases = ExitStack()
+    build = runtime.command_runner
+
+    def build_while_a_run_starts(command, **kwargs):
+        if command[1:3] == ["pip", "install"]:
+            leases.enter_context(holding_activity(paths.user_data))
+        return build(command, **kwargs)
+
+    runtime.command_runner = build_while_a_run_starts
+    with leases:
+        with pytest.raises(RuntimeInUse):
+            runtime.install(force=True)
+        assert runtime.python_executable.stat().st_mtime_ns == before
+        assert (paths.runtime / "python.staging" / "finesub-runtime.json").is_file()
+
+    commands.clear()
+    runtime.command_runner = build
+    runtime.install(force=True)
+    # Finished from the kept tree: one rename, no second build.
+    assert not any(command[1:3] == ["pip", "install"] for command in commands)
+    assert not (paths.runtime / "python.staging").exists()
+
+
+def test_no_run_can_start_between_the_last_check_and_moving_the_old_runtime(
+    tmp_path: Path,
+) -> None:
+    """The window a check alone leaves: a run registering right after it.
+
+    The activity gate is held across the check and the rename, so a run
+    trying to publish its lease in that moment cannot.
+    """
+
+    from finesub_bootstrap.locks import LockUnavailable, holding_activity
+
+    runtime, _commands, paths = _locked_runtime(
+        tmp_path, archive_after_reinstall=True, quarantine_first=False
+    )
+    runtime.install()
+    real_check = runtime.refuse_if_in_use
+    attempts: list[str] = []
+
+    def check_then_a_run_tries_to_start(*, holds_lease: bool = False) -> None:
+        real_check(holds_lease=holds_lease)
+        try:
+            with holding_activity(paths.user_data, timeout=0):
+                attempts.append("registered")
+        except LockUnavailable:
+            attempts.append("kept out")
+
+    runtime.refuse_if_in_use = check_then_a_run_tries_to_start
+    runtime.install(force=True)
+
+    # Once from install()'s own check (no gate held), once inside the gate.
+    assert attempts == ["registered", "kept out"]
+    assert runtime.condition() == "ready"

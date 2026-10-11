@@ -1,0 +1,1019 @@
+[
+ {
+  "ident": "hina-10",
+  "people": 4,
+  "cap": 5,
+  "base_cost": 1660.0,
+  "cap_cost": 2253.0,
+  "base_tracks": 3,
+  "cap_tracks": 3,
+  "base_clusters": 23,
+  "cap_clusters": 3,
+  "suggestions": [
+   {
+    "track": 17,
+    "like": 12,
+    "distance": 0.5986
+   },
+   {
+    "track": 15,
+    "like": 12,
+    "distance": 0.4634
+   },
+   {
+    "track": 10,
+    "like": 12,
+    "distance": 0.5469
+   },
+   {
+    "track": 19,
+    "like": 12,
+    "distance": 0.6763
+   },
+   {
+    "track": 16,
+    "like": 12,
+    "distance": 0.6339
+   },
+   {
+    "track": 9,
+    "like": 12,
+    "distance": 0.5613
+   },
+   {
+    "track": 18,
+    "like": 12,
+    "distance": 0.5154
+   },
+   {
+    "track": 0,
+    "like": 14,
+    "distance": 1.0248
+   },
+   {
+    "track": 20,
+    "like": 13,
+    "distance": 0.7619
+   },
+   {
+    "track": 8,
+    "like": 11,
+    "distance": 0.7157
+   },
+   {
+    "track": 3,
+    "like": 12,
+    "distance": 0.6915
+   },
+   {
+    "track": 7,
+    "like": 12,
+    "distance": 0.7734
+   },
+   {
+    "track": 6,
+    "like": 14,
+    "distance": 0.7599
+   },
+   {
+    "track": 2,
+    "like": 13,
+    "distance": 0.6825
+   },
+   {
+    "track": 21,
+    "like": 13,
+    "distance": 0.7287
+   },
+   {
+    "track": 22,
+    "like": 14,
+    "distance": 0.7718
+   },
+   {
+    "track": 5,
+    "like": 14,
+    "distance": 0.8537
+   },
+   {
+    "track": 1,
+    "like": 13,
+    "distance": 0.7341
+   },
+   {
+    "track": 4,
+    "like": 12,
+    "distance": 0.7688
+   }
+  ]
+ },
+ {
+  "ident": "hina-11",
+  "people": 3,
+  "cap": 4,
+  "base_cost": 620.0,
+  "cap_cost": 1099.0,
+  "base_tracks": 3,
+  "cap_tracks": 3,
+  "base_clusters": 13,
+  "cap_clusters": 4,
+  "suggestions": [
+   {
+    "track": 2,
+    "like": 6,
+    "distance": 1.015
+   },
+   {
+    "track": 1,
+    "like": 6,
+    "distance": 0.9523
+   },
+   {
+    "track": 8,
+    "like": 5,
+    "distance": 0.6947
+   },
+   {
+    "track": 12,
+    "like": 6,
+    "distance": 0.9224
+   },
+   {
+    "track": 9,
+    "like": 6,
+    "distance": 0.8424
+   },
+   {
+    "track": 10,
+    "like": 7,
+    "distance": 0.7201
+   },
+   {
+    "track": 4,
+    "like": 7,
+    "distance": 0.6933
+   },
+   {
+    "track": 11,
+    "like": 6,
+    "distance": 0.7252
+   },
+   {
+    "track": 0,
+    "like": 7,
+    "distance": 0.9061
+   },
+   {
+    "track": 3,
+    "like": 7,
+    "distance": 0.8412
+   }
+  ]
+ },
+ {
+  "ident": "hina-13",
+  "people": 6,
+  "cap": 7,
+  "base_cost": 3872.0,
+  "cap_cost": 5225.0,
+  "base_tracks": 7,
+  "cap_tracks": 4,
+  "base_clusters": 8,
+  "cap_clusters": 3,
+  "suggestions": [
+   {
+    "track": 1,
+    "like": 7,
+    "distance": 0.8573
+   },
+   {
+    "track": 0,
+    "like": 7,
+    "distance": 0.7959
+   }
+  ]
+ },
+ {
+  "ident": "hina-14",
+  "people": 6,
+  "cap": 7,
+  "base_cost": 3583.0,
+  "cap_cost": 4445.0,
+  "base_tracks": 7,
+  "cap_tracks": 4,
+  "base_clusters": 9,
+  "cap_clusters": 3,
+  "suggestions": [
+   {
+    "track": 0,
+    "like": 7,
+    "distance": 0.8133
+   },
+   {
+    "track": 2,
+    "like": 6,
+    "distance": 0.9274
+   },
+   {
+    "track": 1,
+    "like": 7,
+    "distance": 0.9096
+   }
+  ]
+ },
+ {
+  "ident": "hina-15",
+  "people": 3,
+  "cap": 4,
+  "base_cost": 2135.0,
+  "cap_cost": 2721.0,
+  "base_tracks": 5,
+  "cap_tracks": 2,
+  "base_clusters": 8,
+  "cap_clusters": 1,
+  "suggestions": [
+   {
+    "track": 1,
+    "like": 0,
+    "distance": 0.2925
+   },
+   {
+    "track": 6,
+    "like": 0,
+    "distance": 0.7602
+   },
+   {
+    "track": 4,
+    "like": 5,
+    "distance": 0.3969
+   },
+   {
+    "track": 7,
+    "like": 3,
+    "distance": 0.7778
+   },
+   {
+    "track": 2,
+    "like": 3,
+    "distance": 0.9529
+   }
+  ]
+ },
+ {
+  "ident": "hina-16",
+  "people": 3,
+  "cap": 4,
+  "base_cost": 2032.0,
+  "cap_cost": 2574.0,
+  "base_tracks": 5,
+  "cap_tracks": 3,
+  "base_clusters": 8,
+  "cap_clusters": 2,
+  "suggestions": [
+   {
+    "track": 4,
+    "like": 3,
+    "distance": 0.6486
+   },
+   {
+    "track": 7,
+    "like": 2,
+    "distance": 0.8894
+   },
+   {
+    "track": 6,
+    "like": 3,
+    "distance": 0.6059
+   },
+   {
+    "track": 0,
+    "like": 3,
+    "distance": 0.7976
+   },
+   {
+    "track": 5,
+    "like": 1,
+    "distance": 0.8736
+   }
+  ]
+ },
+ {
+  "ident": "hina-17",
+  "people": 3,
+  "cap": 4,
+  "base_cost": 963.0,
+  "cap_cost": 1463.0,
+  "base_tracks": 5,
+  "cap_tracks": 4,
+  "base_clusters": 9,
+  "cap_clusters": 3,
+  "suggestions": [
+   {
+    "track": 3,
+    "like": 2,
+    "distance": 0.2889
+   },
+   {
+    "track": 4,
+    "like": 5,
+    "distance": 0.5147
+   },
+   {
+    "track": 8,
+    "like": 1,
+    "distance": 0.6822
+   },
+   {
+    "track": 7,
+    "like": 1,
+    "distance": 0.8078
+   },
+   {
+    "track": 0,
+    "like": 1,
+    "distance": 0.6752
+   },
+   {
+    "track": 6,
+    "like": 5,
+    "distance": 1.0008
+   }
+  ]
+ },
+ {
+  "ident": "hina-18",
+  "people": 3,
+  "cap": 4,
+  "base_cost": 1697.0,
+  "cap_cost": 1660.0,
+  "base_tracks": 7,
+  "cap_tracks": 4,
+  "base_clusters": 10,
+  "cap_clusters": 4,
+  "suggestions": [
+   {
+    "track": 3,
+    "like": 5,
+    "distance": 0.4375
+   },
+   {
+    "track": 7,
+    "like": 9,
+    "distance": 0.5982
+   },
+   {
+    "track": 2,
+    "like": 5,
+    "distance": 0.6154
+   },
+   {
+    "track": 1,
+    "like": 9,
+    "distance": 0.7188
+   },
+   {
+    "track": 4,
+    "like": 5,
+    "distance": 0.5554
+   },
+   {
+    "track": 8,
+    "like": 9,
+    "distance": 0.5469
+   },
+   {
+    "track": 0,
+    "like": 5,
+    "distance": 0.7986
+   }
+  ]
+ },
+ {
+  "ident": "hina-19",
+  "people": 2,
+  "cap": 3,
+  "base_cost": 1029.0,
+  "cap_cost": 1695.0,
+  "base_tracks": 3,
+  "cap_tracks": 4,
+  "base_clusters": 12,
+  "cap_clusters": 3,
+  "suggestions": [
+   {
+    "track": 8,
+    "like": 7,
+    "distance": 0.3017
+   },
+   {
+    "track": 11,
+    "like": 9,
+    "distance": 0.5746
+   },
+   {
+    "track": 4,
+    "like": 9,
+    "distance": 0.9295
+   },
+   {
+    "track": 10,
+    "like": 9,
+    "distance": 0.6737
+   },
+   {
+    "track": 6,
+    "like": 9,
+    "distance": 0.6731
+   },
+   {
+    "track": 5,
+    "like": 9,
+    "distance": 0.668
+   },
+   {
+    "track": 1,
+    "like": 7,
+    "distance": 0.9147
+   },
+   {
+    "track": 0,
+    "like": 9,
+    "distance": 0.8804
+   },
+   {
+    "track": 3,
+    "like": 7,
+    "distance": 0.6673
+   },
+   {
+    "track": 2,
+    "like": 9,
+    "distance": 0.7616
+   }
+  ]
+ },
+ {
+  "ident": "hina-20",
+  "people": 3,
+  "cap": 4,
+  "base_cost": 2114.0,
+  "cap_cost": 2172.0,
+  "base_tracks": 4,
+  "cap_tracks": 2,
+  "base_clusters": 6,
+  "cap_clusters": 1,
+  "suggestions": [
+   {
+    "track": 2,
+    "like": 1,
+    "distance": 0.3415
+   },
+   {
+    "track": 5,
+    "like": 4,
+    "distance": 0.713
+   },
+   {
+    "track": 0,
+    "like": 1,
+    "distance": 0.9059
+   }
+  ]
+ },
+ {
+  "ident": "hina-21",
+  "people": 3,
+  "cap": 4,
+  "base_cost": 1299.0,
+  "cap_cost": 1972.0,
+  "base_tracks": 9,
+  "cap_tracks": 2,
+  "base_clusters": 17,
+  "cap_clusters": 1,
+  "suggestions": [
+   {
+    "track": 16,
+    "like": 15,
+    "distance": 0.334
+   },
+   {
+    "track": 11,
+    "like": 15,
+    "distance": 0.2941
+   },
+   {
+    "track": 2,
+    "like": 4,
+    "distance": 0.5967
+   },
+   {
+    "track": 13,
+    "like": 15,
+    "distance": 0.4624
+   },
+   {
+    "track": 12,
+    "like": 15,
+    "distance": 0.4138
+   },
+   {
+    "track": 14,
+    "like": 15,
+    "distance": 0.4292
+   },
+   {
+    "track": 1,
+    "like": 4,
+    "distance": 0.6245
+   },
+   {
+    "track": 0,
+    "like": 4,
+    "distance": 0.5626
+   },
+   {
+    "track": 9,
+    "like": 8,
+    "distance": 0.4371
+   },
+   {
+    "track": 7,
+    "like": 8,
+    "distance": 0.6413
+   },
+   {
+    "track": 6,
+    "like": 8,
+    "distance": 0.6317
+   },
+   {
+    "track": 3,
+    "like": 4,
+    "distance": 0.69
+   },
+   {
+    "track": 10,
+    "like": 15,
+    "distance": 0.4712
+   },
+   {
+    "track": 5,
+    "like": 15,
+    "distance": 0.8585
+   }
+  ]
+ },
+ {
+  "ident": "hina-22",
+  "people": 4,
+  "cap": 5,
+  "base_cost": 2526.0,
+  "cap_cost": 3044.0,
+  "base_tracks": 9,
+  "cap_tracks": 2,
+  "base_clusters": 10,
+  "cap_clusters": 1,
+  "suggestions": [
+   {
+    "track": 3,
+    "like": 4,
+    "distance": 0.4545
+   },
+   {
+    "track": 7,
+    "like": 4,
+    "distance": 0.4973
+   },
+   {
+    "track": 2,
+    "like": 9,
+    "distance": 0.6654
+   },
+   {
+    "track": 5,
+    "like": 4,
+    "distance": 0.4709
+   },
+   {
+    "track": 1,
+    "like": 9,
+    "distance": 0.6831
+   },
+   {
+    "track": 0,
+    "like": 4,
+    "distance": 0.8352
+   }
+  ]
+ },
+ {
+  "ident": "hina-23",
+  "people": 2,
+  "cap": 3,
+  "base_cost": 1054.0,
+  "cap_cost": 1128.0,
+  "base_tracks": 7,
+  "cap_tracks": 3,
+  "base_clusters": 10,
+  "cap_clusters": 3,
+  "suggestions": [
+   {
+    "track": 8,
+    "like": 7,
+    "distance": 0.2643
+   },
+   {
+    "track": 6,
+    "like": 7,
+    "distance": 0.3469
+   },
+   {
+    "track": 5,
+    "like": 7,
+    "distance": 0.7926
+   },
+   {
+    "track": 1,
+    "like": 4,
+    "distance": 0.7202
+   },
+   {
+    "track": 0,
+    "like": 7,
+    "distance": 0.8492
+   },
+   {
+    "track": 3,
+    "like": 4,
+    "distance": 0.6072
+   },
+   {
+    "track": 2,
+    "like": 4,
+    "distance": 0.5748
+   },
+   {
+    "track": 9,
+    "like": 7,
+    "distance": 0.8097
+   }
+  ]
+ },
+ {
+  "ident": "hina-24",
+  "people": 3,
+  "cap": 4,
+  "base_cost": 2352.0,
+  "cap_cost": 2777.0,
+  "base_tracks": 4,
+  "cap_tracks": 3,
+  "base_clusters": 6,
+  "cap_clusters": 3,
+  "suggestions": [
+   {
+    "track": 5,
+    "like": 4,
+    "distance": 0.4468
+   },
+   {
+    "track": 3,
+    "like": 4,
+    "distance": 0.8266
+   },
+   {
+    "track": 0,
+    "like": 2,
+    "distance": 0.9973
+   }
+  ]
+ },
+ {
+  "ident": "hina-25",
+  "people": 3,
+  "cap": 4,
+  "base_cost": 1752.0,
+  "cap_cost": 2136.0,
+  "base_tracks": 5,
+  "cap_tracks": 2,
+  "base_clusters": 6,
+  "cap_clusters": 1,
+  "suggestions": [
+   {
+    "track": 1,
+    "like": 0,
+    "distance": 0.2354
+   },
+   {
+    "track": 5,
+    "like": 0,
+    "distance": 0.5822
+   },
+   {
+    "track": 2,
+    "like": 4,
+    "distance": 0.9321
+   }
+  ]
+ },
+ {
+  "ident": "hina-26",
+  "people": 3,
+  "cap": 4,
+  "base_cost": 2883.0,
+  "cap_cost": 3217.0,
+  "base_tracks": 9,
+  "cap_tracks": 3,
+  "base_clusters": 13,
+  "cap_clusters": 3,
+  "suggestions": [
+   {
+    "track": 10,
+    "like": 11,
+    "distance": 0.3068
+   },
+   {
+    "track": 8,
+    "like": 9,
+    "distance": 0.4156
+   },
+   {
+    "track": 2,
+    "like": 6,
+    "distance": 0.8411
+   },
+   {
+    "track": 7,
+    "like": 9,
+    "distance": 0.4713
+   },
+   {
+    "track": 1,
+    "like": 9,
+    "distance": 0.4848
+   },
+   {
+    "track": 4,
+    "like": 9,
+    "distance": 0.589
+   },
+   {
+    "track": 5,
+    "like": 11,
+    "distance": 0.559
+   },
+   {
+    "track": 12,
+    "like": 6,
+    "distance": 0.6112
+   },
+   {
+    "track": 3,
+    "like": 6,
+    "distance": 0.5827
+   },
+   {
+    "track": 0,
+    "like": 11,
+    "distance": 0.8531
+   }
+  ]
+ },
+ {
+  "ident": "hina-27",
+  "people": 3,
+  "cap": 4,
+  "base_cost": 1371.0,
+  "cap_cost": 1620.0,
+  "base_tracks": 4,
+  "cap_tracks": 3,
+  "base_clusters": 5,
+  "cap_clusters": 2,
+  "suggestions": [
+   {
+    "track": 0,
+    "like": 1,
+    "distance": 0.511
+   },
+   {
+    "track": 4,
+    "like": 3,
+    "distance": 0.7411
+   }
+  ]
+ },
+ {
+  "ident": "hina-28",
+  "people": 3,
+  "cap": 4,
+  "base_cost": 1937.0,
+  "cap_cost": 2419.0,
+  "base_tracks": 4,
+  "cap_tracks": 2,
+  "base_clusters": 8,
+  "cap_clusters": 2,
+  "suggestions": [
+   {
+    "track": 6,
+    "like": 3,
+    "distance": 0.4612
+   },
+   {
+    "track": 7,
+    "like": 2,
+    "distance": 0.6469
+   },
+   {
+    "track": 4,
+    "like": 2,
+    "distance": 0.9299
+   },
+   {
+    "track": 1,
+    "like": 2,
+    "distance": 0.9081
+   },
+   {
+    "track": 0,
+    "like": 3,
+    "distance": 1.0187
+   }
+  ]
+ },
+ {
+  "ident": "hina-29",
+  "people": 4,
+  "cap": 5,
+  "base_cost": 2804.0,
+  "cap_cost": 2928.0,
+  "base_tracks": 8,
+  "cap_tracks": 4,
+  "base_clusters": 9,
+  "cap_clusters": 3,
+  "suggestions": [
+   {
+    "track": 5,
+    "like": 2,
+    "distance": 0.5383
+   },
+   {
+    "track": 7,
+    "like": 8,
+    "distance": 0.2694
+   },
+   {
+    "track": 3,
+    "like": 6,
+    "distance": 0.3507
+   },
+   {
+    "track": 4,
+    "like": 6,
+    "distance": 0.4523
+   },
+   {
+    "track": 0,
+    "like": 6,
+    "distance": 0.9024
+   }
+  ]
+ },
+ {
+  "ident": "hina-30",
+  "people": 4,
+  "cap": 5,
+  "base_cost": 2603.0,
+  "cap_cost": 3216.0,
+  "base_tracks": 6,
+  "cap_tracks": 4,
+  "base_clusters": 7,
+  "cap_clusters": 4,
+  "suggestions": [
+   {
+    "track": 4,
+    "like": 5,
+    "distance": 0.2811
+   },
+   {
+    "track": 2,
+    "like": 3,
+    "distance": 0.4305
+   },
+   {
+    "track": 0,
+    "like": 1,
+    "distance": 0.8956
+   }
+  ]
+ },
+ {
+  "ident": "hina-31",
+  "people": 4,
+  "cap": 5,
+  "base_cost": 3333.0,
+  "cap_cost": 4159.0,
+  "base_tracks": 7,
+  "cap_tracks": 4,
+  "base_clusters": 7,
+  "cap_clusters": 3,
+  "suggestions": [
+   {
+    "track": 1,
+    "like": 5,
+    "distance": 0.5606
+   },
+   {
+    "track": 0,
+    "like": 5,
+    "distance": 0.7018
+   },
+   {
+    "track": 4,
+    "like": 6,
+    "distance": 0.4115
+   }
+  ]
+ },
+ {
+  "ident": "hina-32",
+  "people": 5,
+  "cap": 6,
+  "base_cost": 2187.0,
+  "cap_cost": 2762.0,
+  "base_tracks": 6,
+  "cap_tracks": 3,
+  "base_clusters": 7,
+  "cap_clusters": 2,
+  "suggestions": [
+   {
+    "track": 0,
+    "like": 2,
+    "distance": 0.728
+   },
+   {
+    "track": 6,
+    "like": 5,
+    "distance": 0.6924
+   }
+  ]
+ },
+ {
+  "ident": "hina-33",
+  "people": 4,
+  "cap": 5,
+  "base_cost": 2908.0,
+  "cap_cost": 3697.0,
+  "base_tracks": 5,
+  "cap_tracks": 2,
+  "base_clusters": 7,
+  "cap_clusters": 1,
+  "suggestions": [
+   {
+    "track": 2,
+    "like": 5,
+    "distance": 0.3154
+   },
+   {
+    "track": 0,
+    "like": 3,
+    "distance": 0.8612
+   },
+   {
+    "track": 6,
+    "like": 4,
+    "distance": 0.8709
+   }
+  ]
+ },
+ {
+  "ident": "hina-34",
+  "people": 3,
+  "cap": 4,
+  "base_cost": 4867.0,
+  "cap_cost": 5661.0,
+  "base_tracks": 4,
+  "cap_tracks": 3,
+  "base_clusters": 7,
+  "cap_clusters": 2,
+  "suggestions": [
+   {
+    "track": 4,
+    "like": 3,
+    "distance": 0.586
+   },
+   {
+    "track": 2,
+    "like": 6,
+    "distance": 0.7182
+   },
+   {
+    "track": 0,
+    "like": 5,
+    "distance": 0.8729
+   },
+   {
+    "track": 1,
+    "like": 3,
+    "distance": 0.8938
+   }
+  ]
+ }
+]

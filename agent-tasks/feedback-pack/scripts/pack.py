@@ -87,7 +87,7 @@ CONFIG_SECTION_WHITELIST = ("vad", "segmentation", "stabilize", "separator", "ll
 #: `[llm]` holds URLs (`proxy`, a custom `base_url`/`endpoint`) that may carry
 #: them in the userinfo part -- so every string value also has `user:pass@`
 #: stripped (`_strip_userinfo`). Deliberately not a per-key whitelist: the
-#: owner ruled that out (docs/plans/field-feedback-batch-plan.md §7 no. 7) --
+#: owner ruled that out (SKILL.md, 「隐私：这一段不能省」) --
 #: a pack is read file by file in MANIFEST.txt and sent by hand, and a value
 #: that *contains* a credential defeats either scheme.
 CONFIG_KEY_BLOCKLIST = (

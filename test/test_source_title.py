@@ -215,7 +215,7 @@ def test_no_title_leaves_no_gap(title) -> None:
 
 
 def test_a_run_that_never_reads_extra_info_does_not_probe(monkeypatch) -> None:
-    """`run_full_correction` is the only consumer, so a run stopping at the
+    """The correction task is the only consumer, so a run stopping at the
     default `raw-srt` must not pay a network round trip for a string nothing
     will look at."""
 

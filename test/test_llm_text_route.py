@@ -302,7 +302,8 @@ def test_window_without_a_query_round_keeps_every_entry(tmp_path, monkeypatch) -
 
 
 def test_window_without_a_query_round_is_not_asked_to_prune(tmp_path) -> None:
-    """The prompt must not request a block the harness ignores."""
+    """The prompt must not request a block the harness ignores: pruning is
+    asked for only where a later window can ask a dropped entry back."""
 
     from finesub.llm.prompt_compose import compose_correction_system
 
@@ -310,7 +311,11 @@ def test_window_without_a_query_round_is_not_asked_to_prune(tmp_path) -> None:
     assert "<keep_entries>" in injected
 
     for switches in (("text", "none", "quality"), ("text", "native", "quality")):
-        system = compose_correction_system(resolve_profile(*switches))
+        # Batched with a readable base: the entries-only request channel can
+        # ask back, so pruning is honoured (window-kb-request-channel plan).
+        assert "<keep_entries>" in compose_correction_system(resolve_profile(*switches)), switches
+        # No readable base: nothing to ask back, the harness passes the set through.
+        system = compose_correction_system(resolve_profile(*switches), knowledge_enabled=False)
         assert "<keep_entries>" not in system, switches
 
     # No knowledge base at all: nothing to keep either way.

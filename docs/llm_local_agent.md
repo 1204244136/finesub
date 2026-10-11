@@ -7,7 +7,7 @@
 
 - **当前实现**：Codex / Claude Code CLI 非交互 completion 与 Agy 多模态 completion；出厂默认
   `per-window` 档自 2026-08-22 起走 durable task runtime 的工具会话，`api` / `resume` 与任何带
-  媒体的调用仍走 capsule 窄路（传输由档位派生，见 §12.1）。
+  媒体的调用仍走 capsule 窄路（传输由档位派生，见 [§12.1 会话形态](#121-会话形态四档已决定什么还差什么接在哪)）。
 - **确定的目标架构**：长驻 assignment worker；`headless` 与 `conversational` 共用任务、工具、
   checkpoint 和提交协议，可在一个 conversation 中连续处理多个 harness task。
 
@@ -15,26 +15,26 @@
 一节直接描述现在是什么样，不需要先读一遍改动史。一句话概括：
 
 - **已在生产路径上跑**：Codex / Claude Code / agy 三家的 one-shot completion transport（dsh 是
-  第四家，但**只做工具会话**，见 §12.1.0；workbuddy 是第五家，Claude Code 的分支，四档都成立，
-  见 §12.1.5）、按协调域
-  解析的 episode 与显式清理、全调用 activity lease、订阅额度耗尽的识别与 tier 级冻结（§11.1）、
+  第四家，但**只做工具会话**，见 [§12.1.0 dsh](#1210-dsh第四家-driver只落在-per-window-一格2026-08-25-接线)；codebuddy 是第五家，Claude Code 的分支，四档都成立，
+  见 [§12.1.5 codebuddy](#1215-codebuddy第五家-driverclaude-code-的分支2026-09-04-接线)）、按协调域
+  解析的 episode 与显式清理、全调用 activity lease、订阅额度耗尽的识别与 tier 级冻结（[§11.1 订阅额度耗尽：按额度池冻结（已实施）](#111-订阅额度耗尽按额度池冻结已实施)）、
   agy 的受控 project 与媒体预处理（见 `llm_local_agent_agy.md`）。
-- **已实现并在生产路径上（传输按档位派生，不再有配置开关，§12 第 3 步）**：`agent_task_runtime.py` 的 durable task 协议（`agent-task-v4`，2026-08-21 自 v3 加拉取台账、`retire_task`、去重指纹：
+- **已实现并在生产路径上（传输按档位派生，不再有配置开关，[§12 模块边界与分阶段实施](#12-模块边界与分阶段实施) 第 3 步）**：`agent_task_runtime.py` 的 durable task 协议（`agent-task-v4`，2026-08-21 自 v3 加拉取台账、`retire_task`、去重指纹：
   多 worker、租约靠工作续期、blocked 出口、retrieval 三态、accepted-submit WAL）、
   `finesub agent-task` 的 conversational 控制入口、`HeadlessTaskWorker` 与
   `AssignmentHeadlessWorker` 两档基线、`KnowledgeSnapshot`。
-- **还没做**：`resume` 的效果观察与四档的行为/性能/质量对照（§14.2「尚缺的观察」）；
+- **还没做**：`resume` 进生产的两项前提（每窗只发增量、历史上限或轮换；对照已做、留实验档，见 [§14.2 Headless 会话模式开关](#142-headless-会话模式开关2026-08-14-三值2026-08-19-重定义为四档并接线)「观察」）；
   `pseudo-conversational` 与 conversational 的**真机实测**——两者的接线本身已于 2026-08-22 完成
-  （§12.1.3 / §12.1.4），自动化只覆盖到脚本化宿主。**逐项的缺口、接线位置与押后理由见 §12.1，
+  （[§12.1.3 pseudo-conversational](#1213-pseudo-conversational已接线2026-08-22形态如下) / [§12.1.4 conversational](#1214-conversational已接线2026-08-22)），自动化只覆盖到脚本化宿主。**逐项的缺口、接线位置与押后理由见 [§12.1 会话形态](#121-会话形态四档已决定什么还差什么接在哪)，
   那是唯一入口。**
 
 四道准入门（A 全调用 fencing、B 队列终止语义、C 知识库真快照、D 隐含历史进入调用身份）均已定案
 并实现，见各自章节。
 
-目标架构可以分阶段实施，但除 §13 明确列出的三项外，不再把正文中的能力视为待决方向。
+目标架构可以分阶段实施，但除 [§13 长期基线与明确暂缓的能力](#13-长期基线与明确暂缓的能力) 明确列出的三项外，不再把正文中的能力视为待决方向。
 
-**四道准入门必须在 §12 第 1 步之前定案**，它们不是"能力方向"而是正确性/安全前提：
-A 全调用 fencing（§4）、B 队列终止语义（§4）、C 知识库真快照（§8）、D 隐含历史进入调用身份（§7）。
+**四道准入门必须在 [§12 模块边界与分阶段实施](#12-模块边界与分阶段实施) 第 1 步之前定案**，它们不是"能力方向"而是正确性/安全前提：
+A 全调用 fencing（[§4 统一任务协议与状态机](#4-统一任务协议与状态机)）、B 队列终止语义（[§4 统一任务协议与状态机](#4-统一任务协议与状态机)）、C 知识库真快照（[§8 知识库：完整读取，协议写入](#8-知识库完整读取协议写入)）、D 隐含历史进入调用身份（[§7 Prompt、重复上下文与 compact](#7-prompt重复上下文与-compact)）。
 每一道都在所属章节就地展开；`docs/llm_followups.md` 只保留状态摘要，不重复内容。
 
 ---
@@ -80,29 +80,30 @@ completion/native **两个 target**：`retrieval=native` 的过滤先看 target 
 
 | target | provider tier | execution profile | 用途 |
 | --- | --- | --- | --- |
-| `local-codex-completion-gpt-5_6-luna` | `LOCAL_CODEX` | `codex-default` | Luna，不使用网络 |
-| `local-codex-native-gpt-5_6-luna` | `LOCAL_CODEX` | `codex-web-search` | Luna，`retrieval=native` |
-| `local-codex-completion-gpt-5_6-terra` | `LOCAL_CODEX` | `codex-default` | Terra，不使用网络 |
-| `local-codex-native-gpt-5_6-terra` | `LOCAL_CODEX` | `codex-web-search` | Terra，`retrieval=native` |
-| `local-codex-completion-gpt-5_6-sol` | `LOCAL_CODEX` | `codex-default` | Sol，不使用网络 |
-| `local-codex-native-gpt-5_6-sol` | `LOCAL_CODEX` | `codex-web-search` | Sol，`retrieval=native` |
-| `local-claude-completion-opus-5` | `LOCAL_CLAUDE` | `claude-code-default` | Opus 5，不使用网络 |
-| `local-claude-native-opus-5` | `LOCAL_CLAUDE` | `claude-code-web-search` | Opus 5，`retrieval=native` |
-| `local-claude-completion-sonnet-5` | `LOCAL_CLAUDE` | `claude-code-default` | Sonnet 5，不使用网络 |
-| `local-claude-native-sonnet-5` | `LOCAL_CLAUDE` | `claude-code-web-search` | Sonnet 5，`retrieval=native` |
-| `local-claude-completion-haiku-4_5` | `LOCAL_CLAUDE` | `claude-code-default` | Haiku 4.5，不使用网络 |
-| `local-claude-native-haiku-4_5` | `LOCAL_CLAUDE` | `claude-code-web-search` | Haiku 4.5，`retrieval=native` |
-| `local-agy-opus-4_6` | `LOCAL_AGY` | `agy-default` | Opus 4.6（`claude-opus-4-6-thinking`），**纯文本、不收 `--effort`**，额度池 `AGY_ANTHROPIC` |
+| `local-codex-completion-gpt-6-luna` | `LOCAL_CODEX` | `codex-default` | Luna，不使用网络 |
+| `local-codex-native-gpt-6-luna` | `LOCAL_CODEX` | `codex-web-search` | Luna，`retrieval=native` |
+| `local-codex-completion-gpt-6_1-sol` | `LOCAL_CODEX` | `codex-default` | Sol，不使用网络 |
+| `local-codex-native-gpt-6_1-sol` | `LOCAL_CODEX` | `codex-web-search` | Sol，`retrieval=native` |
+| `local-claude-completion-opus-5` | `LOCAL_CLAUDE` | `claude-code-default` | Opus，不使用网络 |
+| `local-claude-native-opus-5` | `LOCAL_CLAUDE` | `claude-code-web-search` | Opus，`retrieval=native` |
+| `local-claude-completion-sonnet-5` | `LOCAL_CLAUDE` | `claude-code-default` | Sonnet，不使用网络 |
+| `local-claude-native-sonnet-5` | `LOCAL_CLAUDE` | `claude-code-web-search` | Sonnet，`retrieval=native` |
+| `local-claude-completion-haiku-4_5` | `LOCAL_CLAUDE` | `claude-code-default` | Haiku，不使用网络 |
+| `local-claude-native-haiku-4_5` | `LOCAL_CLAUDE` | `claude-code-web-search` | Haiku，`retrieval=native` |
+| `local-agy-sonnet-5_5` | `LOCAL_AGY` | `agy-default` | Sonnet 5.5（`claude-sonnet-5-5`），**纯文本**，额度池 `AGY_ANTHROPIC`；出厂 agy 模型组的文字成员 |
+| `local-agy-opus-5_5` | `LOCAL_AGY` | `agy-default` | Opus 5.5（`claude-opus-5-5`），同上但**不进任何模型组**，只能 `--llm-model` 点名（2026-10-03 起组里换成 Sonnet） |
 | `local-agy-media-gemini-3_7-flash` | `LOCAL_AGY` | `agy-media` | Gemini 3.7 Flash，收音视频，额度池 `AGY_GEMINI`；**出厂模型组用的是这一对** |
-| `local-agy-native-gemini-3_7-flash` | `LOCAL_AGY` | `agy-web-search` | 同一个 fact，`retrieval=native` 专用（§5） |
+| `local-agy-native-gemini-3_7-flash` | `LOCAL_AGY` | `agy-web-search` | 同一个 fact，`retrieval=native` 专用（[§5 Bootstrap、授权与 Goal](#5-bootstrap授权与-goal)） |
 | `local-agy-media-gemini-3_8-flash` | `LOCAL_AGY` | `agy-media` | Gemini 3.8 Flash，同上但**不进任何模型组**，只能 `--llm-model` 点名（2026-09-03 换回 3.7） |
 | `local-agy-native-gemini-3_8-flash` | `LOCAL_AGY` | `agy-web-search` | 同一个 fact，`retrieval=native` 专用 |
 
-agy 也有 completion/native 两档（2026-08-15 打通，见 §5）：native 那档走**另一个 project**，
+Claude 的几行给 CLI 的是别名 `opus` / `sonnet` / `haiku`，Claude Code 每次解析到该系列的最新模型（2026-09-29：`claude-opus-5-5`、`claude-sonnet-5`、`claude-haiku-4-5-20251001`），升级不用改 catalog；target 名里的版本号是当初起的名字，不再对应实际版本。catalog 这几行的窗口与输出上限不随升级更新，换代时要核对。
+
+agy 也有 completion/native 两档（2026-08-15 打通，见 [§5 Bootstrap、授权与 Goal](#5-bootstrap授权与-goal)）：native 那档走**另一个 project**，
 在那里额外授权 agy 自己的 `search_web` 与 `read_url_content`；media 那档仍然只有
-project-bounded `view_file`。Opus 4.6 是纯文本、不参与检索，fact 仍为
+project-bounded `view_file`。agy 的 Claude 两行是纯文本、不参与检索，fact 仍为
 `supports_native_search=false`。同一个 tier 下的行分属两个额度池，因为 Antigravity 的 Gemini 与
-Opus 是分开计量的：冻结一个不该带走另一个。
+Claude 是分开计量的：冻结一个不该带走另一个。
 
 **provider tier 就是 driver 选择器**：`LOCAL_CODEX` → `CodexLocalAgentDriver`，`LOCAL_CLAUDE` →
 `ClaudeCodeLocalAgentDriver`，由 `execution_policy.driver_for_provider_tier` 单点决定，readiness
@@ -125,47 +126,48 @@ Opus 是分开计量的：冻结一个不该带走另一个。
 
 | 模型组 | 成员顺序 | 绑定的格子 |
 | --- | --- | --- |
-| `agy-capable` | free 3.7 Flash → agy Opus 4.6 → agy Gemini 3.7 Flash | correction-mm/text 的 quality+intermediate、knowledge/quality |
-| `agy-basic` | free 3.5 Flash → agy Opus 4.6 → agy Gemini 3.7 Flash | research、planning-mm/text、search_judge 的 quality |
+| `agy-capable` | free 3.7 Flash → free 3.8 Flash → agy Sonnet 5.5 → agy Gemini 3.7 Flash | correction-mm/text 的 quality+intermediate、knowledge/quality |
+| `agy-basic` | free 3.5 Flash → agy Sonnet 5.5 → agy Gemini 3.7 Flash | research 的 quality |
 
-Opus 是纯文本，排在媒体 target 之前是**有意的**：文本窗优先用它，带剪辑的窗在能力过滤时自动
+Sonnet 是纯文本，排在媒体 target 之前是**有意的**：文本窗优先用它，带剪辑的窗在能力过滤时自动
 跳过、落到 agy 前置的那个 Gemini。一个组、一次绑定，不需要为多模态再开一格。
 
 Codex / Claude Code 的那些 target 不再被任何出厂预设绑定，但仍然是**声明过的 target**：想用就在
 `[llm.model_groups]` 里列出来，或者直接把格子绑到 target id 上（快速选模型，见
 `docs/manual/model-routing.md`）。这也正是原先依赖 policy prepend 的人的迁移路径。
 
-**`--retrieval native` 三家都通**，绑 `local-*-native-*` 那一档即可（§14 有 Codex/Claude 的真机
+**`--retrieval native` 三家都通**，绑 `local-*-native-*` 那一档即可（[§14 当前实现与迁移注意事项](#14-当前实现与迁移注意事项) 有 Codex/Claude 的真机
 记录：Luna 真实 `web_search`，Sonnet/Haiku 真实 `WebSearch`+`WebFetch`，逐 call 记账与 URL
-provenance 完整；agy 见 §5）。**但三家的 provenance 不等价**：agy 只报查询词、不报来源 URL，
+provenance 完整；agy 见 [§5 Bootstrap、授权与 Goal](#5-bootstrap授权与-goal)）。**但三家的 provenance 不等价**：agy 只报查询词、不报来源 URL，
 所以它的 native 证据比另两家薄一档，做检索质量对照时必须把这条算进去。
 
 组内顺序 Codex（Luna → Sol）→ Claude Code（Opus → Sonnet → Haiku）是推荐写法：**顺序是 fallback
 链，不是质量排序**——`quality_score` 纯咨询、绝不参与路由。Codex 在前是因为它是已实测的后端；
 Claude 在后使得只装了其中一个 CLI 的机器仍有可用链路（readiness 预筛会丢掉缺失的那一家）。
 
-`quality_score`：Luna 70、**Terra 82（未实测，见下）**、Sol 90、Opus 5 88、Sonnet 5 77、
-Haiku 4.5 70、agy Opus 4.6 75、agy Gemini 3.7 与 3.8 Flash 都是 75。抽象 high/medium/low 的映射为
-Luna 与 Terra `xhigh/high/medium`、Sol `high/high/low`、Opus 5 `xhigh/high/low`、
-Sonnet 与 Haiku `high/medium/low`、agy Gemini 3.7 恒等而 **3.8 是 `medium/medium/low`**
+`quality_score`：Luna 70、Sol 90、Opus 5 88、Sonnet 5 77、
+Haiku 4.5 70、agy Opus 5.5 88、agy Sonnet 5.5 77（与 Claude Code 那两行是同一个模型，分数照抄）、agy Gemini 3.7 与 3.8 Flash 都是 75。抽象 high/medium/low 的映射为
+Luna `xhigh/high/medium`、Sol `high/high/low`、Opus 5 `xhigh/high/low`、
+Sonnet 与 Haiku `high/medium/low`、agy 的 Claude 两行与 Gemini 3.7 恒等，而 **agy Gemini 3.8 是 `medium/medium/low`**
 （它同档多想约 1.5 倍，high 被压回 medium；medium 那格故意不再下探，见
-`docs/manual/model-routing.md` 的 `thinking` 列）；
-**agy Opus 4.6 是 `thinking = false`**——agy 把思考档位烘进了模型名（`claude-opus-4-6-thinking`、
-`gpt-oss-120b-medium`），只有 Gemini 那几行按 `-high/-medium/-low` 分档并接受 `--effort`；
-给不接受的模型带上该 flag 是**发车前的硬失败**（2026-08-15 实测：
-`--effort is not supported for model "claude-opus-4-6-thinking"`），而硬失败归 transient，
-两次就会让额度探测把整个 `AGY_ANTHROPIC` 冻 2 小时。所以除了 catalog 那一列，
-`AgyLocalAgentDriver._argv` 也按 `_agy_model_takes_effort` 兜一道——
-`[llm].local_agent_reasoning_effort` 是直接进 driver config 的，绕得过 catalog。
-用 `agy models` 可以重新推导这个分界。
+`docs/manual/model-routing.md` 的 `thinking` 列）。
+**agy 的每个模型都收 `--effort low|medium|high`，Claude 不带就拒绝发车**（2026-10-03 实测，agy 1.2.16：
+`--model claude-sonnet-5-5 requires --effort (available: low, medium, high)`），所以 agy driver 只要有档位就带上。
+`[llm].local_agent_reasoning_effort` 直接进 driver config、绕过 catalog，它允许的 `xhigh` agy 没有，
+`AgyLocalAgentDriver._argv` 经 `_agy_effort` 按 `high` 发——不然是发车前的硬失败，归 transient，
+两次就会让额度探测把整个池冻 2 小时。agy 1.1.x 时 Claude 只有把档位烘进名字的 `claude-opus-4-6-thinking`，
+带 `--effort` 反而失败，那一行当时是 `thinking = false`；那个模型已下架。
 
-⚠ **Terra 的 82 是未实测值**（owner 2026-09-03）。定位依据是**跨家族**的：放在 Sonnet 5（77）
-与 Opus 5（88）之间；它同时也落在自家兄弟 luna（70）与 sol（90）之间，后一个区间有厂商依据
-——目录（`~/.codex/models_cache.json`）里 `priority` 是 sol 6 / terra 7 / luna 8，描述依次是
-reliable agentic workhorse / **balanced** agentic coding model / fast and affordable，但那
-**只支持次序，不支持数值**。三个 Codex 模型的上下文（272000）、模态（text+image）与搜索工具
-支持完全相同；thinking 阶梯取 luna 那档是因为 terra 自己的默认推理档也是 `medium`（sol 是
-`low`）。实测过请改 `model_catalog.psv`。
+Codex 两行 2026-09-26 从 GPT-5.6 换代到 GPT-6（Terra 同时拿掉），Sol 2026-10-03 再换到 GPT-6.1 Sol。两代的上下文（272000）、
+模态（text+image）、搜索工具与推理档位集合在目录（`~/.codex/models_cache.json`）里完全相同，
+所以窗口与分数原样沿用；6.1 Sol 的上下文同样是 272000（`codex debug models`）。⚠ **GPT-6 要较新的 CLI**：0.147.0 上服务端回 400
+"The 'gpt-6-luna' model is not supported when using Codex with a ChatGPT account"，同时 CLI 报本地没有该
+模型的元数据。driver 的 `min_version` 因此提到 **0.157.1**（后来随 6.1 Sol 再提到 0.160.0，见下；低于它的安装跑不了出厂行，
+见 [§11.2 CLI 版本钉与 dsh 插件白名单](#112-cli-版本钉与-dsh-插件白名单已实施2026-09-02)），在 0.157.1 + gpt-6-luna 上复验了三条路径：
+completion 探测、原生搜索（真实 `web_search` 事件与 URL 来源）、工具会话（对一个桩 MCP server 走
+`next_task → submit`，事件按 `(server, tool)` 判为授权内）。确切的最低可用版本没测。6.1 Sol 在 0.157.1 拉到的模型目录里还没有，
+0.160.0 上出现，`min_version` 随之提到 **0.160.0**。Sol 的 `high/high/low` 阶梯是按 **Sol 的默认推理档 `low`** 定的：
+5.6 Sol 是 low，6 Sol 曾是 `medium`，6.1 Sol 又回到 low，阶梯的前提重新成立；没有实测过，要调就改 `model_catalog.psv`。
 Codex 经 `model_reasoning_effort` config override 发出，Claude Code 直接用
 `--effort`（两边取值域一致，无需翻译表）。`[llm].local_agent_reasoning_effort` 留空（默认）时使用
 该映射，非空值对两家 driver 都是显式的全局兼容覆盖。
@@ -191,7 +193,7 @@ catalog 的模型事实列。Catalog 只保留模型能力、上下文、媒体�
 3. Agent 调用 `status()` / `next_task()` 领取 task，按需读取知识与 context pack、使用获准的搜索工具。
 4. Agent 调用 `submit()`；未获 `accepted` 就按 validation error 修复。
 5. 当前 task accepted 后继续领取，直到 `next_task()` 明确返回 `assignment_complete`。
-   收到 `waiting` 只表示此刻没有可领的（上游 task 可能仍在别处执行）；按 §4.2 启动
+   收到 `waiting` 只表示此刻没有可领的（上游 task 可能仍在别处执行）；按 [§4.2 等待、API 依赖与唤醒](#42-等待api-依赖与唤醒) 启动
    `await_next_task`，**不是**结束条件，也不让模型定时重试。
 
 用户不需要逐 task 复制完整 prompt。没有自动工具接入的宿主不属于正式 conversational 主路径；
@@ -231,7 +233,7 @@ release_task()          显式放弃/交回
 rehydrate()             compact/重连后恢复 active task
 ```
 
-（没有 `heartbeat` 子命令：租约由上面每一条调用顺带续期，见 §4.1。runtime 上仍保留同名方法，
+（没有 `heartbeat` 子命令：租约由上面每一条调用顺带续期，见 [§4.1 存活判定：靠工作，不靠心跳](#41-存活判定靠工作不靠心跳)。runtime 上仍保留同名方法，
 但没有任何东西依赖它。）
 
 Task 状态机：
@@ -253,7 +255,7 @@ queued ──→ leased → executing → submitted ──accepted──→ ✓
 | 返回 | 含义 | 下一步 | 预算 |
 | --- | --- | --- | --- |
 | `repairable` | 输出错了，指出来能改对 | **同一个租约、同一个会话**，带 `previous_output` + validation errors 重来 | `max_repair_attempts`，默认 5 |
-| ↑ | 「同一个会话」今天**只在 `AssignmentHeadlessWorker` 上成立**：`HeadlessTaskWorker` 的循环不传 `session_scope`，每轮都是新会话。接线时按 §12.1.1 的作用域划分统一 | | |
+| ↑ | 「同一个会话」今天**只在 `AssignmentHeadlessWorker` 上成立**：`HeadlessTaskWorker` 的循环不传 `session_scope`，每轮都是新会话。接线时按 [§12.1.1 档位是唯一配置面](#1211-档位是唯一配置面传输由它派生2026-08-22-起-per-window-默认即工具会话) 的作用域划分统一 | | |
 | `blocked` | 重试也没用（输入本身有问题等） | 丢弃会话，**回队列全重放**一次 | `blocked_requeues`，默认 2 |
 | `failed` | 入队额度用尽 | 无 | — |
 
@@ -545,7 +547,7 @@ artifact 与 route plan；区别只在 conversation 生命周期和 semantic ide
 先记住那句人话口径（[`llm_harness_behavior.md`](llm_harness_behavior.md)「LLM session 级
 resume」）：**一个 harness LLM session 跑完、校验通过，就是一个 checkpoint**。下面这三层回答的
 不是「复用单位是什么」，而是**「改了什么之后它不算数」**——严格程度是**故意**不同的（见
-`stages/correction/commit.py` 顶部与 §11）：
+`stages/correction/commit.py` 顶部与 [§11 安全、readiness 与 executi…](#11-安全readiness-与-execution-identity)）：
 
 | 层 | 单位 | 由什么决定 | C 动不动它 |
 | --- | --- | --- | --- |
@@ -553,7 +555,7 @@ resume」）：**一个 harness LLM session 跑完、校验通过，就是一个
 | L2 | **一个已提交的纠错窗口** | `WINDOW_INVALIDATION_INPUTS`——prompt version、用户指令、源字幕指纹、媒体身份等**内容与配置**，**不含 execution identity** | 不动 |
 | L3 | **一个已提交的 stage 产物** | `research.research_reuse_key` | 不动 |
 
-§11 的原则是「改变 execution identity 可以作废一次**未提交**的 worker 调用，**绝不作废**已提交的
+[§11 安全、readiness 与 executi…](#11-安全readiness-与-execution-identity) 的原则是「改变 execution identity 可以作废一次**未提交**的 worker 调用，**绝不作废**已提交的
 research/窗口/stage」。而 lineage 从来只在 L1 里。所以 C 的实际代价是：**在一条复用会话上跑的
 调用，崩在提交之前就得重发一次**（新会话、全重放），而**已经提交的窗口一个都不受影响**。
 
@@ -576,7 +578,7 @@ C 删掉的是 `conversation_epoch`、逐轮单调 fence、`parent_turn_identity
 
 **C 的代价几乎全部落在未经证实的那两档上**，因为「隐含历史」只在跨窗时才隐含：
 
-| 档（§12.1 四档表） | 跨窗是否携带历史 | C 的代价 |
+| 档（[§12.1 会话形态](#121-会话形态四档已决定什么还差什么接在哪) 四档表） | 跨窗是否携带历史 | C 的代价 |
 | --- | --- | --- |
 | `api` | 无 | **零** |
 | `per-window`（生产默认） | **无**——每窗一条新会话 | **零** |
@@ -598,7 +600,7 @@ turn generation、ack digest 不再进身份。`checkpoint_conversation` 的操�
 台账、fail-closed 回落全重放均保留——它们管理可丢的 provider cache，不再冒充输入身份。
 
 **拉取式会让 C 更好兑现**：模型自己决定读什么之后，隐含状态更不可知，B 那种建模只会更不够用；
-而静态块台账（[`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) §3）是一条**正向的送达
+而静态块台账（[`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) [§3 必读块台账与 submit 门](llm_agent_tool_protocol.md#3-必读块台账与-submit-门runtime-协议-v4)）是一条**正向的送达
 记录**——「这几块确实进了这个 context」，严格比「turn 5 接在 turn 4 之后」更有信息量，且完全是
 harness 自知的东西，正好是 C 要的那种身份材料。台账若权威（走 MCP），身份就可以由送达块的 digest
 集合构成。
@@ -626,7 +628,7 @@ Agent 可以自由发现、搜索、读取任意条目；harness 可给推荐条
 “完整”指**开启知识能力后不做条目白名单/预筛选**，不绕过用户的 `--knowledge` 选择：
 
 - `knowledge=none`：不挂载知识工具；
-- `knowledge=collect`：完整只读，并允许提交反馈/proposal，但不自动 apply；
+- `knowledge=read`：完整只读，不采集反馈、不提交 proposal；
 - `knowledge=update`：完整只读，proposal 通过原有 update 协议校验、apply/commit。
 
 **【准入门 C：知识库要真快照】** Task artifact 记录知识库版本（优先使用其嵌套 git commit/tree
@@ -643,7 +645,7 @@ identity。今天风险低（LLM 任务池 = 1、知识 apply 任务级有序）
 revision、路径、去重、测试与 apply/commit，产出新知识版本。Agent 不能在普通 correction/research
 task 中顺手修改 live knowledge。
 
-直接编辑隔离知识 worktree 是 §13 的未来能力；接口上预留 `KnowledgeWriteStrategy`，当前只有
+直接编辑隔离知识 worktree 是 [§13 长期基线与明确暂缓的能力](#13-长期基线与明确暂缓的能力) 的未来能力；接口上预留 `KnowledgeWriteStrategy`，当前只有
 `proposal` 实现。
 
 ## 9. Retrieval 三态
@@ -690,8 +692,7 @@ byte/token、墙钟与并发数。预算 ledger 持久化；compact、重连、e
 - **超限不撤销**：结果超出 bytes/tokens/结果数/墙钟时，调用记为 `budget_exhausted` 且不落盘
   正文——已经发生的检索不假装没发生（与 native 侧同一条原则）。
 - **拒绝文案必须区分「被拒」与「失败」**：`budget_exhausted` 的 reason 带上已完成调用数与已返回
-  结果数——2026-08-28 实跑里模型把「预算拒绝」读成「检索不可用」，连带把已核实的结论自我降级
-  （见当日实跑报告）。默认预算 2026-08-28 放松为 queries/fetches 12、results 60、
+  结果数——2026-08-28 实跑里模型把「预算拒绝」读成「检索不可用」，连带把已核实的结论降级成未核实。默认预算 2026-08-28 放松为 queries/fetches 12、results 60、
   response_tokens 192k、wall 600s（单次 search 实测 ~12k token，旧 64k 四次就见顶而
   次数没用完；`DEFAULT_RETRIEVAL_BUDGET`）。
 - **fetch 必须来自本 task 已完成的 search**：ledger 维护 `allowed_fetch_urls`，未展示过的 URL
@@ -709,7 +710,7 @@ Headless 可配置多个 Agent/driver 实例；conversational 也可以有多个
 
 - 一个 task 同时只有一个有效 lease；
 - lease 带 generation，过期提交无效；
-- 租约由每一次受栅栏的控制调用顺带续期，没有独立的心跳义务（§4.1）；
+- 租约由每一次受栅栏的控制调用顺带续期，没有独立的心跳义务（[§4.1 存活判定：靠工作，不靠心跳](#41-存活判定靠工作不靠心跳)）；
 - Agent 失联或 early-stop 耗尽后 task 回队列——回收在**读路径**上也会发生，因为停在等待里的
   worker 不会再调 `next_task`；
 - 每个 driver/profile 有独立 `max_parallel`，不复用 API RPM/TPM limiter；
@@ -718,19 +719,19 @@ Headless 可配置多个 Agent/driver 实例；conversational 也可以有多个
 - 第一版不做 speculative duplicate execution。
 
 `agent-task-v3` 的实现边界，扩多 worker 前先看：worker 注册基本是**单调**的——`worker_ids` 只在
-一种情况下缩减，就是一个 waiter 超过两倍等待上限没再露面（§4.1），那时它的名额被归还。除此之外
+一种情况下缩减，就是一个 waiter 超过两倍等待上限没再露面（[§4.1 存活判定：靠工作，不靠心跳](#41-存活判定靠工作不靠心跳)），那时它的名额被归还。除此之外
 名额用完就会**拒新 id**。因此重启的 worker 仍应沿用自己原来的 id（lease generation 会换，不影响
 正确性），只有确实要多开时才提高 `max_workers`。没有显式 de-register 命令：主动去掉一个注册意味着
-要同时判定它真的死了，那属于 §11 的 readiness 而不是队列语义；而 waiter 那条是超时判定，不是命令。
+要同时判定它真的死了，那属于 [§11 安全、readiness 与 executi…](#11-安全readiness-与-execution-identity) 的 readiness 而不是队列语义；而 waiter 那条是超时判定，不是命令。
 
 Task lease TTL 是正确性/回收机制，纳入正式实现。Provider conversation/cache 的 TTL 只是性能事实，
 不能决定 task 是否有效。Driver/profile 的 `conversation_ttl_seconds`（或 provider 返回的
 `expires_at`）**已实现**：未过期就优先复用，超期的会话在**发车前**退役——多花一次全重放，
 省下"用一次失败调用去发现供应商已经忘了这个会话"；driver 不知道自己的 TTL 就声明 0，一直复用
-到某次 resume 真的失败为止（回到 §3 的重建路径）。该参数不进入 checkpoint identity。
-通过 ping 主动保活 cache 明确延后到 §13。
+到某次 resume 真的失败为止（回到 [§3 两种正式模式](#3-两种正式模式) 的重建路径）。该参数不进入 checkpoint identity。
+通过 ping 主动保活 cache 明确延后到 [§13 长期基线与明确暂缓的能力](#13-长期基线与明确暂缓的能力)。
 
-**出厂数值**（都在 `agent_task_runtime.py` / `agent_transports.py` 里，改动前先读本节与 §4.1）：
+**出厂数值**（都在 `agent_task_runtime.py` / `agent_transports.py` 里，改动前先读本节与 [§4.1 存活判定：靠工作，不靠心跳](#41-存活判定靠工作不靠心跳)）：
 
 | 常量 | 值 | 为什么是这个值 |
 | --- | --- | --- |
@@ -741,8 +742,9 @@ Task lease TTL 是正确性/回收机制，纳入正式实现。Provider convers
 | `DEFAULT_BLOCKED_REQUEUES` | 2 | `blocked` 后最多重新入队（全重放）几次，用尽落 `failed` |
 | `max_repair_attempts` | 5 | 原地修带 `previous_output` + validation errors，比全重放便宜，所以预算给得多 |
 | `RETAINED_STATE_GENERATIONS` | 20 | `control/state/` 只有 `index.json` 指向的那一代会被读取，其余是取证；保留一段有界尾巴 |
-| `RETAINED_FAILED_EPISODES` | 20 | 一个运行域最多留几个失败现场，建新 episode 时按 mtime 滚动淘汰；同样是「取证要有界尾巴」，见 §2 |
-| `QUOTA_FREEZE_SECONDS` | 2 小时 | 见 §11.1 |
+| `RETAINED_FAILED_EPISODES` | 20 | 一个运行域最多留几个失败现场，建新 episode 时按 mtime 滚动淘汰；同样是「取证要有界尾巴」，见 [§2 它怎么进入现有模型路由](#2-它怎么进入现有模型路由) |
+| `RETAINED_UNACCEPTED_EPISODES` | 10 | harness 会话干净退出却没被 accept 时留下的现场，**单独一个池**、与上一行各自滚动，免得一批此类会话把 transport 失败全挤掉；带 `unaccepted-session.json` 标记。它是 transport 成功，按旧规则会被删，而文本又不是产物、失败轮不写 exchange——删了就什么都不剩。为什么在 driver 判断、为什么要在进程退出后再问一次 runtime：`docs/llm_local_agent_runtime.md`「目标形态」 |
+| `QUOTA_FREEZE_SECONDS` | 2 小时 | 见 [§11.1 订阅额度耗尽：按额度池冻结（已实施）](#111-订阅额度耗尽按额度池冻结已实施) |
 
 每 driver/profile 的 `max_parallel` **已实现**（三家默认均为 **4**，2026-08-14 由 1 提升）：driver
 实例自带信号量，`run()` 全程持有。逐调用新会话的档位（`api`，以及 `per-window` 的链首轮）下每个 task 本来就是一个独立进程、独立会话，
@@ -765,7 +767,7 @@ provenance 和 capsule 取证；这些继续保留。现状缺口也必须在目
 - 禁用 shell/MCP/文件读取优先用宿主或 OS 的事前隔离；事件类型事后拒绝不是安全边界；
 - 启动校验、逐候选过滤和 driver 发车使用同一个 readiness 判据；native readiness 必须携带本次
   `native_search=True` 条件；
-- probe 加锁，`max_parallel` 接独立信号量（两项均已实施，见 §10）；
+- probe 加锁，`max_parallel` 接独立信号量（两项均已实施，见 [§10 多 Agent、lease、TTL 与调度](#10-多-agentleasettl-与调度)）；
 - headless workspace-write 只有 OS 级隔离后才允许；
 - conversational 的权限来自用户 bootstrap，control envelope 不能把 payload 里的指令升级为授权。
 
@@ -778,9 +780,20 @@ provenance 和 capsule 取证；这些继续保留。现状缺口也必须在目
 去重靠进程级表而不是 `probe()` 缓存，因为一次 run 里 driver 随 `RoleClient` 各建一份。拒绝理由
 落进 route decision trace（`provider_disabled` 旁的 `detail`）、链路耗尽摘要与 `ensure_eligible_target`
 的报错文本，事后能回答「那天为什么没走 agy」。整组落空本就报错（无候选），现在带着上述理由。
-契约漂移 tripwire 的现状（agy hook fail closed、Claude `system.init` 只 warning）不动。缺
-`supports_mcp_config` 的回退 warning 在传输派生处发（§12.1）。**判定为可用之后**还会跑两项
-只警告不改判定的检查（CLI 版本钉、dsh 插件白名单），见 §11.2。
+契约漂移 tripwire 的现状（agy hook fail closed、Claude `system.init` 只 warning）不动；agy 的 agent 文档核对（2026-10-06）在工具 project 上 fail closed、在 capsule project 与 probe 上只发 `agent-cli-agent-document-ignored` / `agent-cli-agent-document-unverifiable`，见 [`llm_agent_tool_protocol.md`「6. 各 driver 接线」](llm_agent_tool_protocol.md#6-各-driver-接线)的 agy 一行。缺
+`supports_mcp_config` 的回退 warning 在传输派生处发（[§12.1 会话形态](#121-会话形态四档已决定什么还差什么接在哪)）。**判定为可用之后**还会跑两项
+只警告不改判定的检查（CLI 版本钉、dsh 插件白名单），见 [§11.2 CLI 版本钉与 dsh 插件白名单](#112-cli-版本钉与-dsh-插件白名单已实施2026-09-02)。
+
+**外泄风险：记录，不做工程（owner 2026-10-01）。** 值得担心的是 **driver 的读取范围隔离失效**：agent 一旦能读到
+受控目录之外，就可能把别处的重要信息（例如 `.env` 里的 key）连同知识库内容，经搜索词或 fetch 的 URL 发出去——字幕与抓来的
+网页按构造就不可信，注入可以诱导它这么做。定为不做，因为要同时失效四层才会发生：harness 的读取隔离、fetch 工具自带的
+安全防护、prompt 里的内容边界、模型自身的对齐。⚠ 第一层只在 agy 上是真隔离（`view_file` 按 realpath 限在受控目录内）；
+Codex、Claude Code、CodeBuddy 的 driver 都记着 `read_isolation: false`——Codex 的只读沙箱挡写不挡读，后两家靠关掉内置工具
+（`--tools ""`）而不是隔离；dsh 靠 `tool-fs` 加只读权限模式，同样只挡写不挡读。所以在这四家上实际只剩后三层。已有的收口：批量往返路径上模型
+不指定 fetch 目标（只剩 harness 对用户给的 URL 预提取）；agentic 路径的 `web_fetch` 目的地仍由模型指定，搜索词只发往检索
+服务、注入方读不到——所以搜索词不设限、也不该设长度上限，收口只针对 fetch（fetch 的目的地注入方看得见访问日志，搜索词
+没有接收端）。可选的服务端约束：任务级的知识读取范围，或禁止「完整知识只读」与「任意网络工具」同时出现。
+**重评条件**：任一层被证实失效，或无人在环的 headless 多 agent 真正上线。
 
 ### 11.1 订阅额度耗尽：按额度池冻结（已实施）
 
@@ -793,17 +806,78 @@ Codex 模型直接走到同订阅的另一个，再从一个 Claude 模型连走
 启动，每次调用重来一遍，进程重启后还要再来。冻结落 `.state`（与 Gemini 的日封禁同一套合并
 写入），`provider_enabled` 跳过所有同池 target，**任何一次成功调用立即解除**。
 
-**池默认就是 provider tier**，catalog 的 `quota_pool` 列留空即取该默认；写了才分家。两家写了：
-agy 的 `AGY_GEMINI` / `AGY_ANTHROPIC`（一个 CLI 后面两份分开计量的额度，按 tier 冻结会因为
-Gemini 用尽而把还能用的 Opus 一起停掉），以及 workbuddy 的**每行一个**（`WORKBUDDY_HY3` 等五个，
-2026-09-04 实测：一条免费线用光时同账号的另一条照常回答，见 §12.1.5）。
+**额度是厂商计量那条线的属性，catalog 行只是指向它**。`quota_pool` 列三种写法：留空 = 该
+provider tier 一份（一个订阅背着整个 tier 时才对）；哨兵 `per-model` = **这一行自己一份**，
+池名派生成 `<tier>:<model>`，于是新增一条独立计量的线不用起名字；写字面量 = 明确共享那个池。
+两家不是「一个订阅一份」：agy 的 `AGY_GEMINI` / `AGY_ANTHROPIC`（一个 CLI 后面两份分开计量的
+额度，按 tier 冻结会因为 Gemini 用尽而把还能用的 Claude 一起停掉），以及 codebuddy 的
+**一条免费线一份 + 全部付费共用 `CODEBUDDY_CREDITS`**（见 [§12.1.5 codebuddy](#1215-codebuddy第五家-driverclaude-code-的分支2026-09-04-接线)）。
+
+✱ **这两个 tier 上留空是加载期错误**（`TIERS_METERED_PER_LINE`），报错文本直接给出两个可写的
+值。理由是那里「留空」没有正确答案——不是猜错了，是没回答，而猜哪一边都会在某类行上错；
+`manual/model-routing.md` 又明确邀请用户自己加行，所以那句报错就是这条守卫的主体。
+另有一条**只告警**的：`is_free=true` 的行与 `is_free=false` 的行共用一个池必定有一个记错了帐
+——但 `is_free` 至今不驱动任何东西、全表的值都是没人有理由维护准的注解，把它升成硬闸会因为
+一列没人管的字段停掉能用的配置（它第一次运行就在 owner 本机的 override 上撞到了一条）。
+
+✱ **「花了谁的额度」与「这一行还跑不跑得动」是两个问题**（owner 2026-09-05）。记账池按实际
+应答者走；而**能不能路由**要问 `candidate_quota_sources` 列出的**每一份**额度
+（`candidate_out_of_quota`：全冻才算走不通）。声明了 `fallback_model` 的行由两份供能——自己的
+线，加上孪生的积分——**任一还活着就照跑**。
+
+⚠ 这里试过两种「只看一个池」的写法，**两种都错，方向相反**：只看本行自己的池，免费额度一空
+就把孪生从路由里删掉了（孪生只能经这一行到达），正是填那一列的反面；只看付费池，则积分是
+**共享**的，随便哪个付费模型把余额用光，都会连坐两条每日额度完好的免费线——那正是本方案从头
+在防的过度合并。清空该列的行只有一份额度，两个问题重合：耗尽即冻、换下一个候选、绝不扣积分。
+
+⚠ **一处已知的粗糙**：这条判断读的是 catalog 声明，而不是这台机器上的 CLI 真能不能用孪生。
+太旧的 codebuddy 不认 `--fallback-model`，driver 会告警并按纯免费线发车，但路由仍把它当两份
+额度的行——免费池冻着也照发，于是每个任务多一次失败的调用再往下走。owner 2026-09-05 判定
+降级记录：代价有界、不影响结果，修它要把 driver 探测结果接进路由层。
+
+✱ **认不出应答者时，先看还剩几份额度**：声明了孪生的行失败、而事件流没有命名任何模型
+（`answering_model_known=false`——`_answering_model` 只扫 `assistant` 事件，终结的 `result`
+不带模型名），这次花的是免费额度还是积分本身是分不出来的。分两种：
+
+- **两份都没冻** → 记哪边都是抛硬币，**记 `""`、只告警**；
+- **只剩一份没冻** → 记它，但**记成「不确定」**（`attribution_certain=False`）。⚠ 这里只是
+  「还值得一问的那份」，**不是「花掉的那份」**：冻结只挡路由、挡不住 CLI，`--fallback-model`
+  照样在 argv 上，孪生完全可以应答一个我们已经冻了积分池的调用。所以这一档**取消厂商 verdict
+  的免探测捷径**——否则「免费线撞小时级限流 → 切孪生 → 孪生报积分耗尽且未署名」会把那条**健康的
+  每日免费额度**冻掉，两池皆冻、整行错误下线。
+
+✱ **应答者报了一个认不出的名字**（别名、改名，既不是本行的模型也不是它声明的孪生）：这只是线索。
+记本行的池、探本行的模型，并告警一次；但除了只有一份额度的行（谁应答花的都是那一份），它同样记成「不确定」，
+厂商判定的免探测捷径对它不适用，必须先探——那个别名完全可能就是孪生换了个写法。
+猜中的池若已冻、而本行只剩另一份没冻，就改探那一份（与上面「未署名」共用 `_uncertain_target` 这一条规则：
+探一个已冻的池什么也学不到，剩下那份永远拿不到证据，这一行就被每个任务重试下去）。
+「没署名」只在**失败路径**上才弃权：成功的调用没署名等于没有切换，照记本行的池，也不告警。
+
+⚠ **`pseudo-conversational` 下这一整套分账不成立**：长驻 CLI 在 `started()` 抓的是启动时那份
+静态 attempt，逐 task 看不到孪生应答（owner
+判定记为已知瑕疵）。出厂默认 `per-window` 不受影响。
+
+✱ **探测不带付费 fallback**：`probing_driver` 剥掉 `--fallback-model` 再发车，两个探测点
+（`client._agent_failure` 与 `agent-ping`）都只经它。一次能从**另一份**额度拿到成功的探测，
+回答不了「这一份还活着吗」，还会为答错扣积分。⚠ 口径就到这里为止——它**不**等于「探测不花钱」：
+直接探那三条付费行本来就在调计费模型，一条最小 ping 的成本足够低（owner 2026-09-05）。
 
 **判据之外还有一条捷径**：厂商自己就说了额度用尽时，driver 直接抛 `LocalAgentQuotaError`，
-走上面代码里那支「没什么可探的」——今天只有 workbuddy 走这条（`errors_info[].code`，
-配合厂商自己的码表；见 §12.1.5）。这不与下面「不看措辞」冲突：那条禁的是从自由文本猜，
+走上面代码里那支「没什么可探的」——今天只有 codebuddy 走这条（`errors_info[].code`，
+配合厂商自己的码表；见 [§12.1.5 codebuddy](#1215-codebuddy第五家-driverclaude-code-的分支2026-09-04-接线)）。这不与下面「不看措辞」冲突：那条禁的是从自由文本猜，
 这里读的是类型字段，且字段消失时退回 `transient`。
 
 **判据只有一条：同一池连续失败 2 次 → 发一次 minimal ping → ping 也失败 → 冻结 2 小时。**
+✱ **一个池已经冻着的时候不再重复探测**（2026-09-05）。以前不需要这条：冻结即意味着该行不再被
+路由，根本不会有下一次调用。声明了付费孪生的行打破了这个前提——它由两份额度供能、**要两份都
+冻住才下线**，所以免费池冻着它照样跑、照样切——那条路必须自己检查，否则每一次调用都买一次
+真实的 CLI 启动，冻多久买多久。
+
+✱ **到达那个"2 次"有两条路**（2026-09-05）：真的失败两次，以及 **codebuddy 的付费孪生开口**
+——拦截器先用主模型重试一次、还不行才交给孪生，所以"孪生答了"按构造就是那条线连挂两次
+（`evaluate_fallback_switch`）。**后一条不许直接冻**：拦截器对持续限流也会切，"孪生答了"证明
+的是失败两次、不是额度耗尽，那一次 ping 就是用来分辨这两者的。它存在是因为**孪生救回调用时
+harness 只看到一次成功**，不补这条证据，免费线的耗尽就完全不可见、而积分在静静地流。
 
 - 为什么等第二次：一次失败是噪声，每次都探测等于给每一次网络抖动赔一次调用。
 - **那两次失败本身也持久化**（`failure_streaks`，2026-09-03）。此前只有冻结进 `.state`，
@@ -830,17 +904,33 @@ Gemini 用尽而把还能用的 Opus 一起停掉），以及 workbuddy 的**每
   ping 返回 unavailable 时不冻。
 - **已知且无法消除的盲区：探测分不出"没额度"和"这个 target 根本跑不起来"。** ping 复用同一个
   模型、同一份 driver config，所以一个永远失败的配置（CLI 不认的模型名、它不收的 flag）会让
-  探测确认它自己的错误猜测。2026-08-15 实测踩到过：agy 对 `claude-opus-4-6-thinking` 拒收
+  探测确认它自己的错误猜测。2026-08-15 实测踩到过：agy 1.1.x 对当时的 `claude-opus-4-6-thinking` 拒收
   `--effort`，那是发车前的硬失败、归 transient，两次就够冻掉整个 `AGY_ANTHROPIC` 2 小时。
   **要消除盲区就得让探测换一套已知可用的配置，那等于探测的不再是同一件事**，所以没做；
   改为让警告同时点名两种原因、并贴出实际失败原文（`agent_paths.vendor_error_text`，与
   `agent-ping` 共用）。那次具体的坑已在 catalog（`thinking = false`）与 driver
-  （`_agy_model_takes_effort`）两侧堵住，见 §2。
+  （`_agy_model_takes_effort`）两侧堵住，见 [§2 它怎么进入现有模型路由](#2-它怎么进入现有模型路由)。
 
 `finesub agent-ping` 把同一个探测单独暴露出来（**每个 (tier, 模型) 一次**极小调用，因此 agy 的
 两行各探一次），并把 CLI 的**原话**贴出来——代码不解释那句话。输出与 `--tier` 过滤都认额度池：
 同一个 tier 下两行分属两份额度时，只标注其中一行 frozen 才读得懂。失败调用与探测本身都会记进
-`agent-sessions.jsonl`（§14.3）。
+`agent-sessions.jsonl`（[§14.3 会话记录](#143-会话记录三处各自活多久2026-08-15)）。
+
+⚠ **dsh 的探测走命令行，不走工具协议**（2026-09-12 修）。dsh 只服务工具协议，没有 harness server
+的调用一律拒绝——而探测正是这样一次调用。于是此前 `agent-ping` 对每一行 dsh 都没发车就报
+`failed`，路由层对 dsh 的耗尽探测也从没真正发出过。现在 `probing_driver` 给 dsh 打开
+`inline_probe`：同一份 patch 去掉 MCP 那一条，那句 ping 原文放上命令行，其余隔离不变；超过
+`DSH_INLINE_PROBE_MAX_CHARS`（2000 字符）仍按原规则拒绝，所以真正的窗口依旧只能走工具协议。
+
+⚠ **改额度判据之前先读这四条**（额度池语义修正八轮复审留下的，那份改动里判据改了五次；过程在维护者的本地计划里）：
+
+1. **别把「我不知道」当成可以据以行动的答案。** 兜底范围过宽、探测绑错池、归属返回值缺一半——
+   三处都是拿一个未知信号推出了确定结论。
+2. **判据的产出点和使用点分开，就一定会漂。** 「这次归属靠不靠得住」只有做匹配的那段代码答得出；
+   调用方用代理指标（有没有名字、有几个池）算过两次，两次都错。同一个问题也不要在两个分支里各答一次。
+3. **只测 helper 的测试，保护的是 helper 的写法，不是系统的行为。** 判据类改动的契约测试要走真实
+   调用路径（`RoleClient._agent_failure`），并**验证它对修复前的代码会红**。
+4. **改完判据要重读所有描述它的段落**，而不是搜上一版的措辞——搜索只找得到你已经知道过时的东西。
 
 Execution identity 至少包含：route policy/routing digest、task protocol version、driver id + protocol
 version + 配置脚本 digest、model/profile、toolset、sandbox、reasoning effort/service tier、超时、隔离
@@ -849,7 +939,7 @@ opt-in、知识写策略。改变这些会使尚未提交、且无法证明状�
 
 ### 11.2 CLI 版本钉与 dsh 插件白名单（已实施，2026-09-02）
 
-§11 的分级只回答「这个 CLI 能不能用」。本节的两件事回答另一个问题：**它还是不是我们验证过的
+[§11 安全、readiness 与 executi…](#11-安全readiness-与-execution-identity) 的分级只回答「这个 CLI 能不能用」。本节的两件事回答另一个问题：**它还是不是我们验证过的
 那个东西**。两者都**只警告、不改判定**——那是分级判据的直接推论（可能改行为 → warning；违背
 显式意图才报错），实现上都走 `driver_readiness` 在判定可用**之后**的那段，共用
 `_warn_readiness_once` 的「每 driver 每种每进程一次」。
@@ -857,13 +947,13 @@ opt-in、知识写策略。改变这些会使尚未提交、且无法证明状�
 #### 版本钉
 
 每个 driver config 一个 `min_version`，取值是**该 driver 的行为最后一次被验证时的 CLI 版本**：
-codex `0.147.0` / claude `2.1.231` / agy `1.1.24` / dsh `0.1.1-rc.2` / workbuddy `2.137.1`。低于它报
+codex `0.160.0` / claude `2.1.231` / agy `1.2.16` / dsh `0.1.5-rc.1` / codebuddy `2.164.0`。低于它报
 `agent-cli-stale`，**仍然 ready**——做成闸门会把「用户还没升级」变成「这台机器没有 target」。
 
 - 读的是 probe **已经抓到**的 `--version` 串，不额外起进程。五家格式不同
-  （`codex-cli 0.147.0` / `2.1.231 (Claude Code)` / `1.1.24` / `0.1.1-rc.2` / `2.137.1`），由**一个正则取第一个
-  点分数字**统一解析，按 semver 序比较——dsh 那个是预发布版，所以正式版 `0.1.1` 必须排在
-  `0.1.1-rc.2` **之上**；workbuddy 那个连厂商名都没有，正是「解析不出来也要报」这条守卫的用武之地。
+  （`codex-cli 0.160.0` / `2.1.231 (Claude Code)` / `1.2.16` / `0.1.5-rc.1` / `2.164.0`），由**一个正则取第一个
+  点分数字**统一解析，按 semver 序比较——dsh 那个是预发布版，所以正式版 `0.1.5` 必须排在
+  `0.1.5-rc.1` **之上**；codebuddy 那个连厂商名都没有，正是「解析不出来也要报」这条守卫的用武之地。
 - **解析不出来也要报**（`agent-cli-version-unreadable`）。某家改了 `--version` 的措辞会让这个检查
   静默失效，而静默会被读成「绿」——守卫的扫描面本身就是守卫的一部分。
 - ✱ **版本不进 execution identity。** `local_agent_execution_profiles()` 的 docstring 定过调：probe
@@ -874,10 +964,33 @@ codex `0.147.0` / claude `2.1.231` / agy `1.1.24` / dsh `0.1.1-rc.2` / workbuddy
 
 dsh 没有能收窄工具集的开关，只能按 id 关插件，所以 `disabled_tool_plugins` 是**拒绝名单**，
 只能约束已经有人读过的那份 bundle。补法是把它**反过来用**：`expected_plugin_ids` 记下已核对
-bundle 的全部 **81 个 entry id**（dsh 0.1.1-rc.2 的 `--dump-config`），组成里出现而它没列的，
+bundle 的全部 **entry id**（dsh 0.1.1-rc.2 与 0.1.5-rc.1 两版 `--dump-config` 的并集，89 个），组成里出现而它没列的，
 (a) 报 `agent-cli-plugin-drift`，(b) 由 `deny_unknown_plugins`（**默认开**）在每次调用的 patch 里
 逐个关掉。dsh 不提供白名单，但它**肯枚举自己的组成**、而**枚举里的每个 id 都是可关的**
 ——「只跑已核对的那套」于是可表达。
+
+**0.1.5-rc.1 新增的 8 个插件，读过之后 7 个显式关掉、1 个随 native 轮开关**（2026-09-12）。没有一个
+注册面向模型的工具；各自的理由：`storage` / `storage-json` / `storage-domain` / `session-projection-cache` 是跨重启的会话
+历史列表缓存，写在 `dshHomePath('storages')`——也就是用户的 `$DSH_HOME` 里，违反本 driver「不碰用户
+设置」的原则，一次性 headless 调用也用不上；`deepseek-llm-api-extensions` 只是给官方 API 请求加顶层
+字段的注册表，存在的意义是下面两个；`plugin-package-inventory-deepseek` **默认开**，会把已加载插件包
+的名字与版本附在每个官方 API 请求上，供厂商诊断；`session-log-deepseek` 往官方 API 增量上传会话日志
+（默认关）。**`web-fetch-http` 不关，随 `tool-web` 走**（owner 2026-09-12）：它是 `web_fetch` 的后端，native
+检索轮本来就被授权整个 `tool-web`（搜索加抓取），非 native 轮两者一起关。⚠ 单独关它是**错的**：
+`dsh-tool-web` 按产品开关注册工具、不看后端在不在，后端缺了 `web_fetch` 照样出现在模型的工具表里，
+一调就返回 `WEB_PROVIDER_UNAVAILABLE`——第一版就这么写过，复审从 vendor 文档里查了出来。同一版删掉的 `tool-str-replace-editor`、`tool-subagent-report` 仍留在两份名单里，旧版 bundle
+还会组装它们。`min_version` 已提到 0.1.5-rc.1（owner 2026-09-12）：新版上验证过插件清单、inline 额度探测，以及两次合成的
+native 工具协议窗口——第一次 `next_task → web_search ×2 → web_fetch ×2 → pull_status → submit` 被接受；第二次在会话日志
+修复之后，搜索两次、提交被接受，`search_events` 读回 2 条（各 8 个来源），不再误报 `native_search_not_used`。
+更旧的安装照常能跑，只是每个进程报一次 `agent-cli-stale`。
+
+⚠ **0.1.5 把会话日志改名为 `session.v3.jsonl`**（原 `session.jsonl`）。`_dsh_session_rows` 只认旧名时一行都读不到，
+于是 dsh 的**全部**工具事件在审计里消失——搜索记成 `native_search_not_used`、未授权工具调用也查不出来，
+而测试仍是绿的。上面那次合成窗口就是这样暴露的：模型实际搜了两次、抓了两次，attempt 却写着没有搜索。
+现在认 `session.jsonl` 与 `session.v<N>.jsonl`；事件格式本身没变。`web_fetch` 与 `web_search` 一样记成检索行
+（与 Claude Code 的 `WebFetch`、agy 的抓取工具同形），但 `urls` 只取所抓的页面——参数里的地址，加上结果
+首行 `Fetched <url>` 给出的最终地址（重定向后两者不同）；正文里的链接不算来源，实测一个词典页的页脚作者链接
+就这样混进过检索记录。
 
 - **两个 dump 回答两个问题**：`--dump-config` 是真正会跑的那棵树，`--dump-default-config` 是同一棵
   树去掉用户层与 `--patch`，差集把漂移归给 `$DSH_HOME` 还是 bundle 升级。各 0.45s，**一起按
@@ -889,7 +1002,7 @@ bundle 的全部 **81 个 entry id**（dsh 0.1.1-rc.2 的 `--dump-config`），�
   readiness **直接判 `unusable`**，这个 driver 退出候选链；调用侧仍留一道
   `LocalAgentUnavailableError` 兜底。原先只警告不改判定，于是 target 留在链里、每个窗口都先撞一次
   再转下一个——而组成是按进程缓存的，本进程内它一次都跑不了，报 ready 是不诚实的。这**不违反**
-  §11 的分级：那条说的是「行为可能变 → warning」，这里是**根本不会跑**。同理，**dump 解析出
+  [§11 安全、readiness 与 executi…](#11-安全readiness-与-execution-identity) 的分级：那条说的是「行为可能变 → warning」，这里是**根本不会跑**。同理，**dump 解析出
   0 个 id 视为失败**：profile 不可能什么都不组成，当空 bundle 会让所有插件瞬间「已核对」。
   策略关着时清单缺失只报 `agent-cli-plugin-inventory-unavailable`，照常跑。
 - 钩子因此不是纯 advisory：`check_environment()` 返回**空串**表示放行（可以顺便报警告），返回
@@ -919,7 +1032,14 @@ bundle 的全部 **81 个 entry id**（dsh 0.1.1-rc.2 的 `--dump-config`），�
   不是凭据。此前被净化掉，后果是：用户把 dsh 配置放在自定义目录时，我们的调用读的是默认
   `~/.dsh`，而他自己敲 `dsh` 读的是另一处，且上面那条警告里的「你的 `$DSH_HOME` 层」指的并不是
   他的目录。dsh 是唯一声明 `user_configuration: "inherited"` 的 driver，正因为那个文件就是账号
-  所在，所以放行它才与声明自洽。
+  所在，所以放行它才与声明自洽。同类的还有 `CLAUDE_CONFIG_DIR`、`CODEBUDDY_CONFIG_DIR`、
+  `CODEBUDDY_CONFIG_DIR`，以及代理与 CA 证书变量（`HTTP(S)_PROXY`、`NO_PROXY`、`ALL_PROXY`、
+  `SSL_CERT_FILE`、`SSL_CERT_DIR`、`NODE_EXTRA_CA_CERTS`、`CODEX_CA_CERTIFICATE`），2026-10-01 一并放行：
+  都不是凭据，不传只会让在代理后面的用户整条 agent 线连不上。
+- ✱ **`agent-instructions` 插件一律关掉**（`DshDriverConfig.disabled_instruction_plugins`，进
+  execution identity）。它注入 `$DSH_HOME/AGENTS.md` 与从 git 根到 cwd 的每一份 AGENTS.md / CLAUDE.md；
+  capsule 的 cwd 不在仓库里，所以它带进来的就是用户的全局规则。关掉后 `--dump-config` 照常组装
+  （2026-10-01，0.1.5-rc.1）；真实调用没跑过（付费 API）。
 
 **实测**（把真实插件 `@deepseek-ai/dsh-tool-ask-user` 插进 `$DSH_HOME` 的 `cordis.patch.yml`）：
 组成 81→82、归因到用户层、警告正确；开关关掉时模型工具面多出 `ask_user_question`，打开时它消失、
@@ -970,8 +1090,8 @@ AgentTaskRuntime
 
 实施顺序：
 
-**第 0 步（硬门，先于下面全部）**：四道准入门定案——A 全调用 fencing（§4）、B 队列终止语义（§4）、
-C 知识库真快照（§8）、D 隐含历史进入调用身份（§7）。它们决定 task 协议的签名、知识读取的实现
+**第 0 步（硬门，先于下面全部）**：四道准入门定案——A 全调用 fencing（[§4 统一任务协议与状态机](#4-统一任务协议与状态机)）、B 队列终止语义（[§4 统一任务协议与状态机](#4-统一任务协议与状态机)）、
+C 知识库真快照（[§8 知识库：完整读取，协议写入](#8-知识库完整读取协议写入)）、D 隐含历史进入调用身份（[§7 Prompt、重复上下文与 compact](#7-prompt重复上下文与-compact)）。它们决定 task 协议的签名、知识读取的实现
 方式和 checkpoint 身份的组成，全都是第 1 步要落的东西；留到后面补等于把已写好的 runtime 推倒。
 
 **实施状态（2026-08-14）：第 0、1、4 步已完成，第 5 步的多 worker 半边已落地。**
@@ -980,21 +1100,21 @@ state 与 accepted-submit WAL 执行；C 由固定 commit/tree 的 `KnowledgeSna
 identity builder 对 assignment scope 缺少 durable digest / repair-history digest 时 fail closed。
 
 > **准入门 D 的答案已于 2026-08-19 从 B 选项改成 C 选项，并于 2026-08-22 完成 runtime 迁移**
-> （会话复用降格为纯加速、依赖隐含历史的调用不产出可复用 checkpoint，见 §7）。注意别把两套字母
-> 混了：这里的 A/B/C/D 是**四道准入门**，§7 里的 A/B/C 是**准入门 D 的
+> （会话复用降格为纯加速、依赖隐含历史的调用不产出可复用 checkpoint，见 [§7 Prompt、重复上下文与 compact](#7-prompt重复上下文与-compact)）。注意别把两套字母
+> 混了：这里的 A/B/C/D 是**四道准入门**，[§7 Prompt、重复上下文与 compact](#7-prompt重复上下文与-compact) 里的 A/B/C 是**准入门 D 的
 > 三个候选答案**。
 
 1. **统一 task runtime（已完成）**：task/goal/status/submit/repair/checkpoint，现有 validator 与
    input hash 成为唯一提交口径；原子 `control/index.json`。`agent-task-v2` 起一个 assignment 可
    注册 `max_workers` 个 worker，每个 worker 各自的 active task、waiter 与唤醒互不干扰。
-2. **Conversational 主路径（已完成：协议/CLI 与宿主接入，2026-08-22，见 §12.1.4）**：bootstrap
+2. **Conversational 主路径（已完成：协议/CLI 与宿主接入，2026-08-22，见 [§12.1.4 conversational](#1214-conversational已接线2026-08-22)）**：bootstrap
    授权、控制工具、完整知识只读、context ref、compact rehydrate 与 early-stop 恢复。
 3. **Headless 迁移（task/assignment 两档基线、stall watchdog、工具预算已完成；生产调用点已接，
    2026-08-22 起按档位派生、`per-window` 默认即工具会话）**：现有 driver 改用同一 task runtime，
    接自动 continuation、统一 readiness 和服务端工具预算。`client.py` 的 `backend == "local_agent"`
    分支按 `agent_transport_for` 分派：工具会话走 task runtime（[`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md)
-   §1），`api`/`resume`/带媒体走 capsule 窄路；原「跨重连 exactly-once」闸门已按内容幂等收口。
-4. **Retrieval 三态对齐（已完成）**：local 是硬预算、native 是同一本账上的软记录，见 §9。
+   [§1 档位与形态](llm_agent_tool_protocol.md#1-档位与形态)），`api`/`resume`/带媒体走 capsule 窄路；原「跨重连 exactly-once」闸门已按内容幂等收口。
+4. **Retrieval 三态对齐（已完成）**：local 是硬预算、native 是同一本账上的软记录，见 [§9 Retrieval 三态](#9-retrieval-三态)。
 5. **动态 driver 与多 Agent（多 worker 与并发/TTL 已完成，动态 driver 待做）**：runtime 的 worker
    分桶与调度、driver 级 `max_parallel` 与 `conversation_ttl_seconds` 已落地；版本化进程外协议
    与配置脚本 digest 仍未做。
@@ -1014,15 +1134,15 @@ identity builder 对 assignment scope 缺少 durable digest / repair-history dig
 在 `complete()` 内完成），没有 capsule、返回码或 driver 版本的列留空，不另造格式。
 
 **四档，按会话活多久排**（owner 定 2026-08-19；此前这张表只有两档，且把模式直接等同于
-`session_scope`，那是错的——照旧读法接线会让 agy 的修复轮退回盲重掷，见 §12.1.1）：
+`session_scope`，那是错的——照旧读法接线会让 agy 的修复轮退回盲重掷，见 [§12.1.1 档位是唯一配置面](#1211-档位是唯一配置面传输由它派生2026-08-22-起-per-window-默认即工具会话)）：
 
 | 档 | 会话活多久 | 断点在哪 | 重试层数 | transport | 生产（`client.py` 窄路，2026-08-19 起按旋钮选） |
 | --- | --- | --- | --- | --- | --- |
 | **`api`（基线）** | 一次调用 | 无会话可言 | 两档；第一档靠显式修复上下文，agy 退化为盲重掷 | ✅ `HeadlessTaskWorker` | ✅ 设 `api` 即全程逐调用新会话 |
 | `per-window` | 一个窗口 | 用户轮 | 两档 | ✅ 工具会话（有 MCP）/ capsule 窄路 | ✅ **出厂默认**；2026-08-22 起在报 MCP 的 driver 上就是工具会话 |
-| `resume` | 一次 run | **用户轮**：进程退出，下次靠 handle 续 | 两档 | ✅ capsule 窄路（恒） | ✅ 实验开关：显式设 `resume` 才跨窗复用（每 lane 一条会话），供 `llm_local_agent_experiments.md` §3.5 的重测走生产路径 |
-| `pseudo-conversational` | 一次 run | **内部工具轮**：会话不退出，挂在一次取活调用上等下一个 task | 两档 | ✅ 工具会话 + 长驻 CLI（`agent_session_host.py`） | ✅ 2026-08-22 接线：一次 run 里绑到同一 agent model 的全部文本调用骑一条会话（按 lane），无 MCP 的链在路由前硬拒，见 §12.1.3 |
-| conversational（不由该旋钮选择） | 由宿主决定 | 宿主 agent 自己的轮次 | 两档：task 内修复由宿主 agent 做，替换轮进新 task | ✅ 协议/CLI + `ConversationalQueue`（`agent_session_host.py`） | ✅ 2026-08-22 接线：绑 `conversational-agent` 模型组的格子，其文本调用排队等宿主自己的 agent，见 §12.1.4 |
+| `resume` | 一次 run | **用户轮**：进程退出，下次靠 handle 续 | 两档 | ✅ capsule 窄路（恒） | ✅ 实验开关：显式设 `resume` 才跨窗复用（每 lane 一条会话），供 `llm_local_agent_experiments.md` [§3.5 生产尺寸复用 A/B 的协议](llm_local_agent_experiments.md#35-生产尺寸复用-ab-的协议未跑2026-08-19-补写) 的重测走生产路径 |
+| `pseudo-conversational` | 一次 run | **内部工具轮**：会话不退出，挂在一次取活调用上等下一个 task | 两档 | ✅ 工具会话 + 长驻 CLI（`agent_session_host.py`） | ✅ 2026-08-22 接线：一次 run 里绑到同一 agent model 的全部文本调用骑一条会话（按 lane），无 MCP 的链在路由前硬拒，见 [§12.1.3 pseudo-conversational](#1213-pseudo-conversational已接线2026-08-22形态如下) |
+| conversational（不由该旋钮选择） | 由宿主决定 | 宿主 agent 自己的轮次 | 两档：task 内修复由宿主 agent 做，替换轮进新 task | ✅ 协议/CLI + `ConversationalQueue`（`agent_session_host.py`） | ✅ 2026-08-22 接线：绑 `conversational-agent` 模型组的格子，其文本调用排队等宿主自己的 agent，见 [§12.1.4 conversational](#1214-conversational已接线2026-08-22) |
 
 **传输由档位派生，没有配置开关**（owner 定 2026-08-22）：
 `传输 = f(档位, driver 能力, 本次调用带不带媒体)`，实现是 `agent_transports.agent_transport_for`，
@@ -1031,18 +1151,18 @@ dev-only 的 `FINESUB_AGENT_TRANSPORT` 可强制。两条边界写在表外：
 - **带媒体 part 的调用任何档位下恒 capsule**（工具/任务协议是纯文本的，守卫在
   `client._agent_tool_documents`，不靠 catalog 的能力列），并按 `per-window` 语义跑；pseudo 档下
   它是同 model 的一次性调用，**不进 run 会话注册表**；
-- **capsule 不只服务 `api`**：它还是探不到 `supports_mcp_config` 时的能力回退，而且 §13 把
+- **capsule 不只服务 `api`**：它还是探不到 `supports_mcp_config` 时的能力回退，而且 [§13 长期基线与明确暂缓的能力](#13-长期基线与明确暂缓的能力) 把
   `session_scope=task` 全重放钉成必须长期保留的基线，所以这条路不会消失，只是不再默认。
 
 两档重试由 runtime 内修复与 harness 外层替换共同落地
-（[`llm_followups.md`](llm_followups.md)「两档重试」，`attempts.py`），对四档一体适用——
+（[`llm_harness_behavior.md`](llm_harness_behavior.md)「重试与拼接」，`attempts.py`），对四档一体适用——
 `api`/无复用 driver 上第二档退化为盲重掷，正是该设计对无状态端点的读法。
 
 **为什么要分成四档而不是两档**：
 
 - **`api` 是基线，不是"没配好的默认"**。它就是「把 agent 当 API 用」：每次调用一条新会话、
   全重放、**没有"上一轮"这个概念，所以天然只有一层重试**，也**不需要任何权限**（native 联网
-  除外）。§13 早就要求 `session_scope=task` 长期保留为全重放基线与无可靠 lineage 的 fallback，
+  除外）。[§13 长期基线与明确暂缓的能力](#13-长期基线与明确暂缓的能力) 早就要求 `session_scope=task` 长期保留为全重放基线与无可靠 lineage 的 fallback，
   这一档就是把它扶正成一个显式选择，而不是让它当默认值、却又被 `client.py` 的窄路绕过去。
   **例外一处**：agy 的输入是文件路径而不是 stdin（prompt 原文 "Read the exact task from
   &lt;path&gt;"），**不管有没有媒体**都要 `view_file`，所以"零权限"对 Codex/Claude Code 成立、
@@ -1054,10 +1174,10 @@ dev-only 的 `FINESUB_AGENT_TRANSPORT` 可强制。两条边界写在表外：
   一层」，与实施不符）。`attempts.py` 无条件按乘积展开：第一档的定义是**带修复上下文**的重试，
   这在 `api` 档与纯 API 后端上照样成立（追加 assistant/user 两轮）；有会话时它额外享受"续同一条
   会话"的更强形态。**唯一空转成盲重掷的是 agy**——它 decline 掉不属于自己会话的修复上下文，
-  那是一家 driver 的限制，不是这一档的定义。详见 [`llm_followups.md`](llm_followups.md)「两档重试」；
+  那是一家 driver 的限制，不是这一档的定义。详见 [`llm_harness_behavior.md`](llm_harness_behavior.md)「重试与拼接」；
 - **跨窗两种形态的差别在断点**（owner 2026-08-19）：`resume` 的会话停在**用户轮**上，进程退出、
   下次用 handle 续；`pseudo-conversational` 的会话**不退出**，挂在一次「取下一个 task」的工具
-  调用上等着。二者收益接近（都吃跨窗前缀缓存），代价不同——见 §12.1.3。
+  调用上等着。二者收益接近（都吃跨窗前缀缓存），代价不同——见 [§12.1.3 pseudo-conversational](#1213-pseudo-conversational已接线2026-08-22形态如下)。
 
 **一条能力回退，表里放不下但必须记**：`per-window` 及以上都要求 driver 支持会话复用，而
 `session_scope=assignment` 在 `supports_session_reuse=false` 的 driver 上是**发车前硬失败**，
@@ -1078,8 +1198,7 @@ runtime 的 `submit → repairable` 循环语义互斥），`per-window` 与 `ps
 所以它留在 capsule 窄路上直到 tool-session + resume 真机验证。
 两个身份洞已答：`agent_session` 进 `routing_identity_digest`（改档位作废 checkpoint）；实际传输
 **不进**身份、只进 route decision trace 的 `agent_transport`（owner 显式接受：同档位下两种传输消费
-同一 prompt、同一 validator）。当时的接线顺序与逐轮拍板留在本地
-`docs/archive/agent_session_tiers_plan.md`；仍未完成的两条见
+同一 prompt、同一 validator）。当时的接线顺序与逐轮拍板留在维护者的本地归档里；仍未完成的两条见
 [`llm_followups.md`](llm_followups.md)「Agent 会话档位收敛与 pseudo/conversational 接线」。
 
 ### 12.1.0 dsh：第四家 driver，只落在 `per-window` 一格（2026-08-25 接线）
@@ -1096,7 +1215,7 @@ runtime 的 `submit → repairable` 循环语义互斥），`per-window` 与 `ps
 
 | 覆盖谁 | 干什么 |
 | --- | --- |
-| `agent-default-model` | 选路由。dsh 从插件 config 里取模型而不是 flag，所以 catalog 的 `api_model_id` 写成 `<provider>/<model>`（`deepseek-official/deepseek-v4-flash`，或用户在自己 `settings.yaml` 的 `llm-pi-ai.providers` 下声明的 provider）。不写这条，调用会悄悄跑在 profile 缺省模型上、catalog 行等于没用 |
+| `agent-default-model` | 选路由。dsh 从插件 config 里取模型而不是 flag，所以 catalog 的 `api_model_id` 写成 `<provider>/<model>`（`deepseek-official/deepseek-flash`，或用户在自己 `settings.yaml` 的 `llm-pi-ai.providers` 下声明的 provider）。不写这条，调用会悄悄跑在 profile 缺省模型上、catalog 行等于没用 |
 | `insert:` → `@deepseek-ai/dsh-mcp-client` | 挂 harness MCP server（stdio + env）。**必须用 `insert:` 这个专门语法**：裸条目是 id 定向覆盖，而 headless profile 里没有 mcp-client 可覆盖，patch 引擎只会 warn `entry not found` 然后跳过——模型没工具、harness 毫不知情。`failOnStartupError: true` 让连不上时启动即失败 |
 | `spill-policy` | 工具结果上限，出厂 `maxInlineBytes: 50000`（值在 `dsh-base/cordis.patch.yml`；插件自身的默认是「不填即不注册」）。driver 写 **`config: {}`，那才是关闭**——把整个键抹掉；填一个大数仍然是上限，而它触发的 spill 会把文件路径而不是正文交给模型。这一条是**前提不是保险**，见下方实测 |
 | `tool-fs` | 块作为文件交出去时的读上限。出厂 2,000 行 / 2,000 字符一行 / 50 KiB 一次 / 10 MiB 流式阈值（`tool-fs` 在出厂 bundle 里没有 config，所以出厂值就是插件默认值）；driver 放到 200,000 / 1,000,000 / 20,000,000 / 10 MiB（末项不动） |
@@ -1129,7 +1248,7 @@ shell-free 写法，也正是 shim 会去执行的东西；每次 probe 现算�
 
 | 规则 | 为什么 |
 | --- | --- |
-| 打包两行写显式映射 **`high,low,low`**（抽象 high/medium/low 依次；2026-08-25 定 `high,high,low`，2026-09-04 owner 改中间档为 `low`） | `max` 比抽象顶档要求的更进一步，所以顶档仍是 `high`；`off` 不用（它是「不思考」，而抽象的 low 仍然要思考）。**中间档改 `low` 是纠错窗的事**：`[presets.default.thinking]` 没有覆盖 `correction-*/quality`，它落 `DEFAULT_THINKING_LEVEL = "medium"`，所以**纠错窗发出去的是中间那格**——WorkBuddy 侧同族模型在 `high` 下实测思考不收敛、撞 28 分钟硬超时（§12.1.5），压到 `low` 一次跑通。research / knowledge 的 quality 格是抽象 `high`，仍走 `high` |
+| 打包行写显式映射 **`high,low,low`**（抽象 high/medium/low 依次；2026-08-25 定 `high,high,low`，2026-09-04 owner 改中间档为 `low`） | `max` 比抽象顶档要求的更进一步，所以顶档仍是 `high`；`off` 不用（它是「不思考」，而抽象的 low 仍然要思考）。**中间档改 `low` 是纠错窗的事**：`[presets.default.thinking]` 没有覆盖 `correction-*/quality`，它落 `DEFAULT_THINKING_LEVEL = "medium"`，所以**纠错窗发出去的是中间那格**——CodeBuddy 侧同族模型在 `high` 下实测思考不收敛、撞 28 分钟硬超时（[§12.1.5 codebuddy](#1215-codebuddy第五家-driverclaude-code-的分支2026-09-04-接线)），压到 `low` 一次跑通。research / knowledge 的 quality 格是抽象 `high`，仍走 `high` |
 | `DSH_EFFORT_ALIASES`：`medium → high`、`xhigh → max`；翻不出来的词当场按 policy violation 拒 | `[llm].local_agent_reasoning_effort` 绕得过 catalog，取值域却是另外三家共用的 low/medium/high/xhigh。原样发出会在发车前拿到 `UNSUPPORTED_REASONING_EFFORT`——非零退出归 transient，两次就把整个 tier 的额度冻掉。当场拒是永久、可归因、便宜的那种失败 |
 | 翻译、拒绝、发送**都只在 `deepseek-official` 上做**；非打包路由不发这个 patch 条目，isolation 记 `owner_managed` | `llm-pi-ai` 的旋钮在 `providers.<id>` 条目里，而 patch 覆盖是**整键赋值**（`dsh-app-boot` 的 `applyEntryPatches`），写进去会把 baseURL 与 credential ref 一起冲掉。既然不转发，`minimal` 这种它认得的词也轮不到这个 driver 否掉；catalog 行相应写 `thinking = false`，真正生效的级别在它主人自己的 `settings.yaml` 里 |
 
@@ -1167,7 +1286,7 @@ and the workspace-write escalation could not be approved (no approval channel av
 **不会挂住**，所以 `dsh-user-approval` 那条「非 danger-full-access 一律 `ask`」的策略在无人值守
 下是安全的，不需要额外的旁路。
 
-接线过程与被收回的判断在本地归档 `docs/archive/agent_backend_implementation_log.md`。
+接线过程与被收回的判断在维护者的本地归档里。
 
 ### 12.1.1 档位是唯一配置面，传输由它派生（2026-08-22 起 `per-window` 默认即工具会话）
 
@@ -1180,8 +1299,8 @@ and the workspace-write escalation could not be approved (no approval channel av
   decline，这正是该档"一层重试"的语义）；
 - `resume` 是实验开关：跨窗续同一条会话，**每 worker lane 一条**，两条并行 lane 绝不
   争一个 handle；继承了隐含历史的那次调用按准入门 D 的 C 案打上 `resumable=False`，不产出
-  可复用 L1（见 §7）。默认关闭，供
-  [`llm_local_agent_experiments.md`](llm_local_agent_experiments.md) §3.5 的生产尺寸重测走
+  可复用 L1（见 [§7 Prompt、重复上下文与 compact](#7-prompt重复上下文与-compact)）。默认关闭，供
+  [`llm_local_agent_experiments.md`](llm_local_agent_experiments.md) [§3.5](llm_local_agent_experiments.md#35-生产尺寸复用-ab-的协议未跑2026-08-19-补写) 的生产尺寸重测走
   生产代码路径。**这一档的会话边界有三条要说准**：
 
   1. **一条 lane 的会话服务这条 lane 上的所有 harness session**，不分种类。这是本档的定义
@@ -1189,7 +1308,7 @@ and the workspace-write escalation could not be approved (no approval channel av
      派发下窗口由空闲 worker 动态领取，一条 lane 的历史里会有多个窗口的轮次，某窗的纠错也
      可能骑在查询历史属于别的窗的 lane 上——**窗口↔lane 亲和不作保证**（reviewer 2026-08-30
      P2-3 指出的就是这条；serial 单 lane 下「同窗查询+纠错同骑」自然成立）。
-     [`llm_local_agent_experiments.md`](llm_local_agent_experiments.md) §3.5 第二阶段的
+     [`llm_local_agent_experiments.md`](llm_local_agent_experiments.md) [§3.5 生产尺寸复用 A/B 的协议](llm_local_agent_experiments.md#35-生产尺寸复用-ab-的协议未跑2026-08-19-补写) 第二阶段的
      parallel A/B 必须把这份混合历史算进基线；
   2. **绝不跨 task**：handle 缓存挂在 `RoleClient` 实例上，而一次纠错 run 自建一个
      （`stages/correction/run.py`），所以 batch 里连着跑的两个任务不可能串到一起；
@@ -1200,8 +1319,8 @@ and the workspace-write escalation could not be approved (no approval channel av
      领号、阶段结束还给 run，所以查询池与纠错池领到**同一组 1..N**，lane N 在两个阶段是同一条
      会话。此前 thread-local 计数器让两个先后池拿到 `1..N` 与 `N+1..2N`，pseudo 档下阶段一的
      host 无人再查却持槽到 run 结束——是槽位泄漏，不只是身份丢失。注意**哪个窗口落在哪条 lane
-     上仍不确定**（空闲 worker 动态取活），这是 A/B 的噪声源（plan §5），跨阶段延续对质量与
-     token 的影响仍归 [`llm_local_agent_experiments.md`](llm_local_agent_experiments.md) §3.5
+     上仍不确定**（空闲 worker 动态取活），这是 A/B 的噪声源（plan [§5 Bootstrap、授权与 Goal](#5-bootstrap授权与-goal)），跨阶段延续对质量与
+     token 的影响仍归 [`llm_local_agent_experiments.md`](llm_local_agent_experiments.md) [§3.5 生产尺寸复用 A/B 的协议](llm_local_agent_experiments.md#35-生产尺寸复用-ab-的协议未跑2026-08-19-补写)
      第二阶段（parallel A/B）测。
 
   > lane 身份**不是 `threading.get_ident()`**：OS 线程 id 在线程退出后会被回收，回收一次就会把
@@ -1226,7 +1345,7 @@ and the workspace-write escalation could not be approved (no approval channel av
 
 **task runtime 的生产调用点 2026-08-21 接上（当时默认关）；2026-08-22 收敛后它只以工具会话的
 形态存在**——A 步那条「runtime + capsule worker」胶水已删，capsule 传输就是 `client.py` 窄路
-（实现与已知差异见 [`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) §1）。下面三条是
+（实现与已知差异见 [`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) [§1 档位与形态](llm_agent_tool_protocol.md#1-档位与形态)）。下面三条是
 当时定下的判断，第一条的 worker 映射如今只对 `agent_transports` 里保留的 worker 类成立，留作依据：
 
 - **worker 不能只看 `session_scope_for_mode()` 直连**：旋钮选的是会话活多久，worker 与
@@ -1234,19 +1353,18 @@ and the workspace-write escalation could not be approved (no approval channel av
   映射到 `api`（`HeadlessTaskWorker`）就是把会话内修复退回盲重掷的行为倒退——
   `HeadlessTaskWorker` 的修复循环不传 `session_scope`，agy 的 `accepts_repair_context`
   会把修复上下文打成 `declined_by_driver`；
-- **两档重试已经跨层接通**（见 [`llm_followups.md`](llm_followups.md)「两档重试」）：A 步把第一档
+- **两档重试已经跨层接通**（见 [`llm_harness_behavior.md`](llm_harness_behavior.md)「重试与拼接」）：A 步把第一档
   迁入 runtime 的 `submit → repairable` 循环；耗尽后返回 `repair_exhausted`，`attempts.py` 跳到
   下一条 replacement chain。每次外层调用自建 assignment，因此不借用 `_give_up` 前的
   `reset_conversation`；
-- 归档 `docs/archive/agent_tool_protocol_plan.md` §6 的 A 步注记里那条「runtime 的
-  修复循环绕开 `client.complete`」仍然成立——重路由、输入预算重算与逐次采样参数都在那条路
+- 「runtime 的修复循环绕开 `client.complete`」这条仍然成立——重路由、输入预算重算与逐次采样参数都在那条路
   上。A 步实施后，第一档内部修复不再逐轮重路由或重算输入上限；第二档 replacement 仍重新走
-  `client.complete`。这是现行已知差异，见 `llm_agent_tool_protocol.md` §7。
+  `client.complete`。这是现行已知差异，见 `llm_agent_tool_protocol.md` [§7 未做与闸门](llm_agent_tool_protocol.md#7-未做与闸门)。
 
 **`resume` 默认不开的理由**：[`llm_local_agent_experiments.md`](llm_local_agent_experiments.md)
-§3.1 实测 agy 上会话复用是净亏 46%，而且那批测量整体落在缓存不生效的小前缀区间。在
+[§3.1](llm_local_agent_experiments.md#31-agy-上的-ab复用是净亏2026-08-14) 实测 agy 上会话复用是净亏 46%，而且那批测量整体落在缓存不生效的小前缀区间。在
 Codex/Claude 上重测出正收益之前，开着它只是换一种方式亏钱。重测的臂、固定量、逐次记录项与
-判据已写死在同文 §3.5，按它跑，不要另起一套口径。
+判据已写死在同文 [§3.5 生产尺寸复用 A/B 的协议](llm_local_agent_experiments.md#35-生产尺寸复用-ab-的协议未跑2026-08-19-补写)，按它跑，不要另起一套口径。
 
 ### 12.1.2 `resume`：transport 齐了，缺的是「谁来保证租约盖得住」
 
@@ -1279,11 +1397,11 @@ Codex/Claude 上重测出正收益之前，开着它只是换一种方式亏钱�
    （`_first_ready_task`），没有任何亲和性概念。两条待验证的假设，**第一条优先**：
    - **连续窗口尽量给同一个 worker**——相邻窗口讲的是相邻的话，同一条会话里连着做，跨窗一致性
      （专名、人称、语气）可能更好。这是**质量假设**，而按 `llm_local_agent_experiments.md`
-     §3.5 的判据，质量正是接线与否的那一项，所以它优先；
+     [§3.5 生产尺寸复用 A/B 的协议](llm_local_agent_experiments.md#35-生产尺寸复用-ab-的协议未跑2026-08-19-补写) 的判据，质量正是接线与否的那一项，所以它优先；
    - **同类型 session 归同一个 agent**——把 correction 与 query/research 轮分给不同 worker，
      让每个 agent 只面对一种任务形状，可能更 focus，顺带前缀更稳定、更容易吃到缓存。
 
-   两条都要按 [`llm_local_agent_experiments.md`](llm_local_agent_experiments.md) §3.5 的口径测，
+   两条都要按 [`llm_local_agent_experiments.md`](llm_local_agent_experiments.md) [§3.5 生产尺寸复用 A/B 的协议](llm_local_agent_experiments.md#35-生产尺寸复用-ab-的协议未跑2026-08-19-补写) 的口径测，
    不要靠直觉选调度策略——`_first_ready_task` 上加一维亲和性是小改动，**难的是证明它有用**。
 
    **三个并发数的关系也要一并写死**，它们今天各自为政：`parallel_windows`（默认 4，harness 同时
@@ -1293,16 +1411,18 @@ Codex/Claude 上重测出正收益之前，开着它只是换一种方式亏钱�
    是本机进程数，不是窗口数。谁截断谁必须显式，否则会出现「4 个窗口就绪、只有 1 个能跑」而
    没有任何一层报告为什么。
 
-   这与 [`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) §6（agy 按槽位 project）的并行形态**不是同一件事**
+   这与 [`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) [§6 各 driver 接线](llm_agent_tool_protocol.md#6-各-driver-接线)（agy 按槽位 project）的并行形态**不是同一件事**
    （那条讲的是 MCP 配置文件在 agy 上没有 per-invocation 注入点），但两者会同时落在同一个
    `continuity=parallel` 的路径上，实施时要一起看。
 
 ### 12.1.3 `pseudo-conversational`：已接线（2026-08-22），形态如下
 
+**冻结（owner 2026-10-01）**：保留现状、不再投入，理由见 [`llm_followups.md`](llm_followups.md)「明确不做」。
+
 **实现**：`agent/agent_session_host.py`。一次 run 一个**会话注册表**（`agent_session_scope()`，
 `stages/correction/run.py` 的 `execute_correction_windows` 整个包在里面；不在任何 scope 里的
 `RoleClient` 用私有注册表、进程退出时兜底关闭），按 **`(provider tier, model, lane, mode)`** 持
-`AgentSessionHost`——绑到同一 agent model 的所有文本调用（纠错窗、查询轮、research）共用一条
+`AgentSessionHost`——绑到同一 agent model 的所有文本调用（纠错窗的请求回合与交付轮、准备任务）共用一条
 CLI 会话，`continuity=parallel` 下每条 lane 一条。
 
 **一个 key 同时只有一条 CLI**：会话的内置工具在发车时定死，所以检索授权
@@ -1322,7 +1442,7 @@ CLI 会话，`continuity=parallel` 下每条 lane 一条。
 - MCP server 发车即暴露/授权全部六个工具（`FINESUB_MCP_TOOLS`），按当前 task 的
   `retrieval_mode` 做调用时准入；validator 注册全表；块按 driver 的 `mcp_page_chars` 推送/分页，agy 则按 `mcp_block_files` 把块作为**文件**交给
   它自己的 `view_file` 读（内联回复上限 ≈4k 字节、`view_file` ≈46k 字节/次可续读，见
-  [`llm_local_agent_agy.md`](llm_local_agent_agy.md) §5）；`next_task` 没活时**长轮询**：上限 =
+  [`llm_local_agent_agy.md`](llm_local_agent_agy.md) [§5 MCP 工具结果的内联上限](llm_local_agent_agy.md#5-mcp-工具结果的内联上限约-4k-字节超过即外置成文件无预览2026-08-22)）；`next_task` 没活时**长轮询**：上限 =
   min(driver 的 `next_task_wait_seconds`, 会话 TTL − 60s)，`FINESUB_MCP_WAIT_SECONDS` 可覆盖。
   **owner 定 2026-08-22：三家统一 240s**（agy 实测 parked 230s 照常返回、且被 TTL 300 − 60 = 240
   封顶；Claude Code / Codex 未测、可以更高，有需要再调）。每次 `still_waiting` 往返 ≈ 一轮模型
@@ -1342,10 +1462,9 @@ CLI 会话，`continuity=parallel` 下每条 lane 一条。
   写进产物目录的 `agent-session-usage.json`，任务报告把它加进 **Provider Token Totals** 的 token
   列（调用次数仍来自逐窗记录——两列口径本就不同）；另有一份 reporter debug。逐 task 归属要等
   2-task 真机事件流确认有逐 generation 账本才做；
-- **run 作用域**：scope 由 `correction_translation.run_full_correction` 开在
-  `_run_full_correction_impl` 外面（**模块 CLI 是另一条 run 路径**——`main()` 自己跑 research、
-  自己调窗口、自己写报告，所以它也自持一条 scope，body 在 `_main_impl`，关闭后补记 usage 并
-  刷新报告），因此 research、逐窗纠错与任务后知识更新**共用同一条会话**，
+- **run 作用域**：scope 由 `correction_translation.run_correction_task` 开——它是纠错任务的**唯一**
+  run 路径（模块 CLI、管线的 LLM 阶段、reference ingest 都只造一个 `CorrectionRequest` 交给它），
+  因此 research、逐窗纠错与任务后知识更新**共用同一条会话**，
   并且它在写任务报告**之前**关闭（报告才看得到会话总账）。scope **可重入**：
   `execute_correction_windows` 与 `reference_ingest.run_reference_knowledge_update` 各自也带一个，单独被调用时才生效，
   在 run 里则由 run 的那个说了算（`reference_ingest` 的知识更新是**另一条** scope——run 的那条必须
@@ -1364,9 +1483,17 @@ CLI 会话，`continuity=parallel` 下每条 lane 一条。
 把两者绝对化。
 
 **没做的**：`resume` 的 handle 缓存仍挂在 `RoleClient` 上，没有并入这个注册表（owner 决定 4
-要求共用，留作后续）；媒体调用在本档下按 `per-window` 走 capsule 窄路、不进注册表。durable 状态
-每次操作整份重写，一条 run 的 task 行只增不减，因此长会话的簿记开销随 task 数二次增长（实测见
-[`llm_followups.md`](llm_followups.md)）——不影响正确性，未改。
+要求共用，留作后续）；媒体调用在本档下按 `per-window` 走 capsule 窄路、不进注册表。
+
+**簿记开销随 task 数二次增长，接受不改（owner 2026-09-30 结案）。** `AgentTaskRuntime` 每次操作都
+整份重写 durable 状态，而一条 run 的 task 行只增不减（终态行也留着：`_assignment_complete` 与 accept
+重放都要读）。本档让「一条 run 一个 assignment」成了常态，于是累计开销按 task 数的平方涨；其余档位
+每次调用只有一个 task，不受影响，batch 里每个文件也各开各的 assignment、不累积。实测（2026-08-22，
+本机）：终态行约 2.7 KB，600 task 时状态文件 1.5 MB；累计耗时 25 task ≈ 1.1 s、100 ≈ 7.1 s、
+200 ≈ 22.5 s、600 ≈ 164 s。一个 task 是一次 `complete()`，大约一窗一次，现实素材离几百个 task 很远。
+不影响正确性（request 表撑满那条硬失败已修）。真到要改的那天：把终态行移出热状态（落
+`tasks/<id>/record.json`、热状态留小桩）只是把曲线右移；去掉平方项要改成追加日志 + 周期快照，
+那会动到 exactly-once 依赖的「一次整文件原子写 + accept 的 WAL」，得单独设计、复审。
 
 **为什么这一档是这个形状**（owner 2026-08-19 的判断，接线后仍成立）：它与 `resume` 都跨窗复用、
 都吃跨窗前缀缓存，区别只在**会话停在哪**——`resume` 停在**用户轮**上，进程退出，下次靠 handle
@@ -1377,20 +1504,21 @@ CLI 会话，`continuity=parallel` 下每条 lane 一条。
 - **等待必须有期限**。挂在工具调用上的会话对 stall watchdog 是不可见的（它确实"在运行"），
   所以 `next_task` 走长轮询 + 截止时间（上限见上）而不是无限等；
 - **反过来它对缓存最有利**：会话一直热着，不会在窗口之间被 idle TTL 收走——但前缀不到 ~16k 根本
-  不进缓存（[`llm_local_agent_experiments.md`](llm_local_agent_experiments.md) §3.2），小任务上这
-  份收益可能根本不存在，这也是四档对照（§14.2）要量的东西之一；
+  不进缓存（[`llm_local_agent_experiments.md`](llm_local_agent_experiments.md) [§3.2 缓存为什么没接上](llm_local_agent_experiments.md#32-缓存为什么没接上前缀太小不是路不通2026-08-14)），小任务上这
+  份收益可能根本不存在，这也是四档对照（[§14.2 Headless 会话模式开关](#142-headless-会话模式开关2026-08-14-三值2026-08-19-重定义为四档并接线)）要量的东西之一；
 - **它也让静态块台账最划算**：一个 epoch 覆盖很多 task，"拉一次就够"真正兑现
-  （[`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) §3 的作用域正是 context）；
+  （[`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) [§3 必读块台账与 submit 门](llm_agent_tool_protocol.md#3-必读块台账与-submit-门runtime-协议-v4) 的作用域正是 context）；
 - **终止契约多一种情况**：没有下一个 task 时取活调用必须返回「assignment 结束」并让 agent 干净
   退出，否则就是一个永远挂着的进程（与
-  [`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) §4 是同一件事）。
+  [`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) [§4 完成与终止契约](llm_agent_tool_protocol.md#4-完成与终止契约) 是同一件事）。
 
-接线前那份「四个缺口 + 要不要给进程执行权」的清单已随实施完成移进本地
-`docs/archive/agent_backend_implementation_log.md`。留下的结论只有一条：**MCP 通道把「得能执行
+接线前那份「四个缺口 + 要不要给进程执行权」的清单已随实施完成移进维护者的本地归档。留下的结论只有一条：**MCP 通道把「得能执行
 `finesub agent-task`」这个前提消掉了**，所以威胁模型不必论证到「放行一个可执行文件」那一步——
 工具面反而比 completion 更窄，server 只暴露 harness 自己定义的方法。
 
 ### 12.1.4 conversational：已接线（2026-08-22）
+
+**冻结（owner 2026-10-01）**：保留现状、不再投入，按需并发与更多真机覆盖都不做；理由见 [`llm_followups.md`](llm_followups.md)「明确不做」。
 
 **形态**：把某个 cell 的模型组绑到 `conversational-agent`（两个 agent policy 都放行该 backend），
 该 cell 的**文本**调用不再打出去，而是进 run 级的 `ConversationalQueue`（`agent_session_host.py`，
@@ -1503,14 +1631,16 @@ harness 去核对一个自己既没选也管不着的模型没有意义；真跑
 由此三条加载期校验：catalog 里有且只有一行 fact（`local-conversational-agent`，能力值是**保守
 占位**，见上）；它**只能独占一个模型组**；它**不能被任何 policy overlay 前置**。
 
-接线前那份缺口清单（2026-08-15 原文，标题为「路由归属已定，宿主接入未做」）已随实施完成移进本地
-`docs/archive/agent_backend_implementation_log.md`。
+接线前那份缺口清单（2026-08-15 原文，标题为「路由归属已定，宿主接入未做」）已随实施完成移进维护者的本地归档。
 
-### 12.1.5 workbuddy：第五家 driver，Claude Code 的分支（2026-09-04 接线）
+### 12.1.5 codebuddy：第五家 driver，Claude Code 的分支（2026-09-04 接线）
 
-`LOCAL_WORKBUDDY` / `WorkBuddyLocalAgentDriver`，`driver_id = "codebuddy"`（与二进制同名，
-沿用 codex/dsh 的约定；tier 用订阅的名字，因为登录是 WorkBuddy 桌面端那份）。它是
-**CodeBuddy Code CLI 2.137.1**，Claude Code 的分支：`--output-format stream-json` 的事件
+`LOCAL_CODEBUDDY` / `CodeBuddyLocalAgentDriver`，`driver_id = "codebuddy"`，使用独立安装并登录的
+**CodeBuddy Code CLI**。2026-10-10 已迁移到独立 CLI 2.164.0，中国站的 hy3、DeepSeek Flash、GLM Flash
+短调用、新进程登录复用，以及 FineSub 文本调用与 MCP 领取／提交任务通过。
+下文早期实验来自 WorkBuddy 附带 CLI 2.137.1；未重测新版的长字幕窗或国际站。
+CLI 的 `Authentication required` / `Please use /login` 诊断直接归为不可用并提示在独立 CLI 重新登录，不作临时故障重试。
+CLI 与 Claude Code 的分支协议同构：`--output-format stream-json` 的事件
 方言、`mcp__<server>__<tool>` 的命名、`result` 里的 usage 字段名全部同构，所以归一化是
 **同一份实现**（`_normalize_stream_json_events` + 一张 `_StreamJsonDialect`），Claude 那条
 只是它的一个方言。上面那张四档表里它和 Claude Code 站同一格：`api` / `per-window` /
@@ -1520,10 +1650,10 @@ harness 去核对一个自己既没选也管不着的模型没有意义；真跑
 
 | 差异 | 实测 | driver 怎么做 |
 | --- | --- | --- |
-| **没有 `--safe-mode`、`--ignore-rules`、`--disable-slash-commands`** | 在 cwd 放一个 `CODEBUDDY.md`（「回复末尾必须带 ZZTOP-77」），带着 `--setting-sources ""` 跑，答案末尾就是 `ZZTOP-77` | `no_user_config` / `no_user_rules` 一律报 **False**，`completion_requirements` 按 dsh 先例收窄成三条；`_isolation_metadata` 如实写 `inherited`，另加一条 `rule_isolation: "fresh_capsule_cwd"` 说清真正挡住规则文件的是什么——**那是传输的性质，不是 CLI 的保证** |
+| **没有 `--safe-mode`、`--ignore-rules`、`--disable-slash-commands`** | 在 cwd 放一个 `CODEBUDDY.md`（「回复末尾必须带 ZZTOP-77」），带着 `--setting-sources ""` 跑，答案末尾就是 `ZZTOP-77` | `no_user_config` / `no_user_rules` 一律报 **False**，`completion_requirements` 按 dsh 先例收窄成三条；`_isolation_metadata` 如实写 `inherited`，另加一条 `rule_isolation: "fresh_capsule_cwd"` 说清真正挡住**项目**规则文件的是什么——**那是传输的性质，不是 CLI 的保证**；用户级 `~/.codebuddy/CODEBUDDY.md` 照样进来（2026-09-30 实测），只靠开场兜底句 |
 | **`system.init` 的 `tools` 报的是注册表不是本次可用集** | `--tools ""` 与 `--tools Read` 两次调用，`init` 都列 34 个内建；但前者模型**读不到** cwd 里的文件，后者读到了（真 `tool_use` + `tool_result` + 暗号） | `can_restrict_tools = True`（限制是真的，只是在**调用时**生效），但方言把「公告集审计」关掉——否则每一次调用都报一次泄漏，守卫就不再有意义。真正的守卫是逐 `tool_use` 那道，原样保留 |
 | **MCP 工具默认是 deferred 的** | 声明了 harness server、把两个工具名写进 `--tools`，模型仍然一个都看不到（`usageByCategory.mcp = 3` tokens）；`--tools default` 时模型拿到的是 `ToolSearch` / `DeferExecuteTool` | `_spawn_environment` **恒设** `CODEBUDDY_DEFER_TOOL_LOADING=0`。这不是调优：它就是「本次授权的工具 = 模型看到的工具」这句话成立的前提。设上之后 `next_task → submit` 一次跑通 |
-| **`--tools` 是唯一的边界，`--allowedTools` 不需要** | 去掉 `--allowedTools` 重跑，MCP 两个工具照常被调用、无审批；`WebSearch` 同理；只有 `WebFetch` 在非交互下被干净拒绝（写进 `--allowedTools` 也拒） | harness 的 MCP 工具名进 `--tools`；`--allowedTools` **完全不发**——它是 variadic，放在位置参数（prompt）之前会把 prompt 一起吃掉，而它又什么都不多给。`WORKBUDDY_SEARCH_TOOLS` 因此只有 `WebSearch`：entitlement 说的是**做得成什么** |
+| **`--tools` 是唯一的边界，`--allowedTools` 不需要** | 去掉 `--allowedTools` 重跑，MCP 两个工具照常被调用、无审批；`WebSearch` 同理；只有 `WebFetch` 在非交互下被干净拒绝（写进 `--allowedTools` 也拒） | harness 的 MCP 工具名进 `--tools`；`--allowedTools` **完全不发**——它是 variadic，放在位置参数（prompt）之前会把 prompt 一起吃掉，而它又什么都不多给。`CODEBUDDY_SEARCH_TOOLS` 因此只有 `WebSearch`：entitlement 说的是**做得成什么** |
 | **失败原文在 `errors` 里，`result` 是缺的** | 换一个账号够不到的模型名，回来的是 `subtype: error_during_execution` + `errors` / `errors_info`（`status: 400`、`category: "auth"`），`result` 键不存在 | `_stream_json_error_text` 先读 `result`、再退 `errors` / `errors_info[].details`（Claude 没有这两个键，所以这条对它是死代码）。分类上它判 **permanent**：措辞像认证失败，修法却是改 catalog 行——判 unavailable 会把人赶去重新登录，判 transient 会拿一次永远不可能成功的调用去喂额度池的失败计数 |
 
 **`MAX_MCP_OUTPUT_TOKENS` 是前提不是保险**，与 dsh 的 `spill-policy` 完全同形：出厂上限下，
@@ -1538,20 +1668,20 @@ harness 去核对一个自己既没选也管不着的模型没有意义；真跑
 全部直接执行，`permission_denials` 为空。所以 driver 不发 `-y`（它是
 `--dangerously-skip-permissions`，比另外四家用的任何开关都大），也不发 `--permission-mode`。
 
-**Windows 上没有原生可执行文件，而且解析不能写死**：CLI 住在桌面端里
-（`…\Programs\WorkBuddy\resources\app.asar.unpacked\cli\bin\codebuddy`，`#!/usr/bin/env node`），
-PATH 上只有 `~/.workbuddy/bin/codebuddy` 与 `cbc` 两个**无扩展名的 bash 脚本**——`shutil.which`
-找得到、驱动却既不能执行也不该执行。`_resolve_shell_free_command` 因此**读**那个 shim 取出入口
-脚本（比写死安装目录抗得住桌面端升级），解释器**另外解析**：先 `~/.workbuddy/binaries/node/versions/current`
-指的那份，再退 PATH 上的 `node.exe`。分成两半是必须的——本机的 shim 写死的是 `22.22.2`，而装着的
-是 `22.22.2-2`，**shim 本身当时就是坏的**。
+**Windows 直接解析独立 CLI，不经过 shell**：原生安装用 PATH 上的 `codebuddy.exe`；npm 安装用
+PATH 目录中的 `node_modules/@tencent-ai/codebuddy-code/bin/codebuddy` 加系统 `node.exe`。
+即使旧 WorkBuddy shim 在 PATH 前面，也跳过它；不回退到桌面端入口或桌面端 Node。
+配置目录 `CODEBUDDY_CONFIG_DIR` 与站点 `CODEBUDDY_INTERNET_ENVIRONMENT`（CLI 也认拼错的 `CODEBUDDY_INTERNET_ENVIROMENT`，一并放行）随子进程传递；没有站点覆盖时
+由 CLI 已保存的登录态选择服务。driver 不解密、复制或注入登录 token。两站都使用同一 driver，
+模型清单和额度池由所选账号的 catalog 行决定；打包行属于中国站，国际站需要自己的模型行和额度池。
 
 **模型清单属于账号而不是发行版**，这是它和 Codex / Claude Code / agy 的第三点不同，也是为什么
 `AUTO_TARGET_LOCAL_AGENT_PROFILES` 里除 dsh 之外多了它：`codebuddy --help` 印的那张表本机一个都
 用不了（`custom-local:x-preview-f-free` 甚至被服务端回 401 "not supported"），而写错 `--model`
-时服务端会把**这个登录真正够得到的**清单回给你。打包的五行是照着那张清单挑的甜点位
-（`hy3` / `hy4-preview` / `glm-5.3-flash` / `deepseek-v4-flash` / `deepseek-v4-pro`；owner 2026-09-04
-明确**不收 `glm-5.3`**——不在甜点位上），别的套餐由用户按 `docs/manual/model-routing.md` 自己加行、
+时服务端会把**这个登录真正够得到的**清单回给你。打包的四行是照着那张清单挑的甜点位
+（`hy3` / `glm-5.3-flash` / `deepseek-v4.1-flash` / `deepseek-v4-pro`；owner 2026-09-04
+明确**不收 `glm-5.3`**——不在甜点位上；2026-09-11 Flash 换成 V4.1、拿掉 hy4 免费线；Pro
+目前全面不如 Flash，仍留在 catalog 里免得以后升级再加回来），别的套餐由用户按 `docs/manual/model-routing.md` 自己加行、
 自动拿到 target。
 
 ⚠ **窗口数字不能全信 CLI 自报**：`result.modelUsage.contextWindow` 对这个 tier 上除 `hy3`
@@ -1560,19 +1690,37 @@ PATH 上只有 `~/.workbuddy/bin/codebuddy` 与 `cbc` 两个**无扩展名的 ba
 `hy3` 的 192,000 也正是 `WINDOW_WARN_INPUT` 从 194,000 下调到 192,000 的原因——那个阈值
 从来不是厂商数字，而 hy3 是这层上最便宜的健康行，让它永久告警是没有意义的。
 
-接线之外的实验记录（checkpoint 提示的四变体、思考档与 1680s 死线、纠错窗输出倍率）
-在本地 `docs/report/2026-09-04-workbuddy-driver.md`，**不随仓库发布**；那份也记着
-出厂配置与被测配置的差异。
+接线之外的实验记录——思考档与 1680s 死线、checkpoint 提示的四组对照——在下文
+「`--effort` 不需要翻译表」之后那几段；纠错窗输出倍率的读数与复算方法在 `llm_design_notes.md` 的「输出预算公式的推导」。
 
-**额度按模型线分家**，五行各写一个 `quota_pool`。一开始按「一个登录 = 一个池」写成留空，
-是错的：实测 2026-09-04，`hy4-preview` 的当日免费额度用光（HTTP 429、`code 6004`、
-`category: "quota"`，正文带重置时刻）的同一分钟里，`hy3` 照常回答；服务端自己的措辞就是
-「您也可以切换其他模型继续使用」。共用一个池会在第一条免费线用光时把另外五行一起冻两小时，
-而 §11.1 明确说解冻晚了才是贵的那个错误方向。
+**额度分两份：一条免费线一份，付费的共用积分**（2026-09-05 修正为三份，2026-09-11
+`hy4-preview` 不再是免费线、出厂行删掉，剩下 hy3 + 积分）。
+两条免费线曾经独立是**实测**的：2026-09-04，`hy4-preview` 的当日免费额度用光（HTTP 429、
+`code 6004`、`category: "quota"`，正文带重置时刻）的同一分钟里，`hy3` 照常回答；服务端自己的
+措辞就是「您也可以切换其他模型继续使用」。共用一个池会在第一条免费线用光时把另外几行一起冻
+两小时，而 [§11.1 订阅额度耗尽：按额度池冻结（已实施）](#111-订阅额度耗尽按额度池冻结已实施) 明确说解冻晚了才是贵的那个错误方向。
+
+⚠ **但那次实测只说了 hy3 与 hy4**。此前写成「五行各写一个池」是从那一次观测**外推**的，
+没有独立证据，而真实结构是 `glm-5.3-flash` / DeepSeek 行
+连同付费孪生 `hy3-x` **共用同一份积分余额**（owner 2026-09-05；产品配置
+里免费线的 `credits` 系数是 x0.00，付费行 >0，凡 >0 者都从积分扣）。
+外推的代价是有界的浪费——积分用光时多条已死的线各自攒满证据才冻——但它是错的。
+
+所以剩下的免费行写哨兵 `per-model`（**自己一份额度**，池名派生成
+`LOCAL_CODEBUDDY:hy3`），付费行写 `CODEBUDDY_CREDITS`。以后**新增免费线写
+`per-model`、新增付费线写 `CODEBUDDY_CREDITS`，不用起名字也不用改代码**——免费线会终止、
+也会新增，所以设计里不出现固定数量。
+
+**付费孪生没有 catalog 行，也不该有**（给它加行会让 `AUTO_TARGET_LOCAL_AGENT_PROFILES`
+自动造出一个花钱的可路由 target），所以「这次是谁答的」由 driver 写进 attempt 的
+`reported_model`，记账按它走：等于被问的模型 → 本行的池；**精确等于本行 `fallback_model`**
+→ `CODEBUDDY_CREDITS`；其余任何值 → 仍记本行的池并告警一次（别名未必调得动，拿它去探会
+制造出一个与额度无关的失败）。⚠ **探测一律不带 `--fallback-model`**（`probing_driver`）：
+一次能从另一份额度拿到成功的探测，回答不了「这一份还活着吗」，而且会为答错扣积分。
 
 **耗尽由 driver 当场判定，不走那台探测状态机**：`_classify_stream_failure` 读的是
 `errors_info[]` 的**结构化字段**，命中就抛 `LocalAgentQuotaError`，`agent_quota` 的
-「厂商已经明说了，没什么可探的」那一支直接冻结该池。这不违反 §11.1 的「不要看供应商的
+「厂商已经明说了，没什么可探的」那一支直接冻结该池。这不违反 [§11.1 订阅额度耗尽：按额度池冻结（已实施）](#111-订阅额度耗尽按额度池冻结已实施) 的「不要看供应商的
 措辞」——那条针对的是从自由文本里猜，而这里读的是 CLI 发出的类型字段；厂商换了措辞不影响，
 厂商不再发这些字段就退回 `transient`（也就是原来的行为），不会猜错。
 判定顺序上**认证仍然优先**，而且「账号够不到这个模型」也报 `category: "auth"`，所以那一条
@@ -1612,24 +1760,21 @@ PATH 上只有 `~/.workbuddy/bin/codebuddy` 与 `cbc` 两个**无扩展名的 ba
 按 token/请求切，正好横穿真正的每日线；而且它只走遥测，`errors_info` 里根本没有
 `subcategory` 字段。初版照它写，于是 TPS/TPM 限流被当成耗尽、RPD 用尽被当成限流。
 
-**免费线用光后切付费，只对声明了付费孪生行的两行**（owner 决定 2026-09-04）。机制是 CLI
+**免费线用光后切付费，只对声明了付费孪生的行**（owner 决定 2026-09-04）。机制是 CLI
 自己的 `FallbackModelErrorInterceptor`：给了 `--fallback-model` 才激活（且必须有
 `--print`，我们一直发），每个 session **最多触发一次**，并且在切换前会先用原模型重试一次
 ——除非失败本身就是额度耗尽，那一档直接切。切完它往对话里塞一条 `<system-reminder>` 告诉
 模型换人了，然后继续跑完。
 
-driver 只在 catalog 行写了 `fallback_model` 时发这个 flag。出厂只有两行写了，因为只有
-这两行有免费/付费的孪生关系（厂商 product config，2026-09-04 实测的 `credits` 倍率）：
+driver 只在 catalog 行写了 `fallback_model` 时发这个 flag。出厂只有一行写了，因为只有
+这一行还剩免费/付费的孪生关系（厂商 product config，2026-09-04 实测的 `credits` 倍率；
+`hy4-preview` 那对 2026-09-11 已从出厂 catalog 拿掉）：
 
 | 免费行 | 倍率 | 付费孪生 | 倍率 |
 | --- | --- | --- | --- |
 | `hy3` | x0.00 | `hy3-x` | x0.05 |
-| `hy4-preview` | x0.00 | `hy4-preview-x` | x0.29 |
 
-⚠ **是 `hy4-preview-x`，不是 `hy4-x`**（本文档 2026-09-04 之前写错过）。id 写错不会报错，
-只会让 interceptor 静默跳过。
-
-其余三行（`glm-5.3-flash` x0.06、`deepseek-v4-flash` x0.17、`deepseek-v4-pro` x0.51）
+其余三行（`glm-5.3-flash` x0.06、`deepseek-v4.1-flash` x0.03、`deepseek-v4-pro` x0.51）
 **本来就在扣积分**，没有免费孪生可切，所以那一列留空、行为不变：耗尽就按上面的码表判、
 冻结该池。
 
@@ -1647,7 +1792,9 @@ warning 而不是 debug：这一趟跑成功了，但账单不是绑定时以为
 identity 映射直接成立，也就没有 dsh 那种「第二层映射要进执行身份」的问题。
 
 ⚠ **但 `high` 不是对每个模型都安全**（2026-09-04 单窗实测，79 条真实纠错窗，`--media text
---retrieval none`）。抽象 quality 格取 thinking 列第一位，对这一批就是 `high`：
+--retrieval none`）。当时抽象 quality 格落在 thinking 列第一位，对这一批就是 `high`；修法是把这几行的
+thinking 映射改成 `high,low,low`（catalog 里 glm-5.3-flash 与四个 DeepSeek 行——dsh 两行、CodeBuddy 两行——都是），抽象的 medium、low
+因此都落到 `low`：
 
 | 模型 | `high` | `low` |
 | --- | --- | --- |
@@ -1662,15 +1809,38 @@ glm-5.3-flash 17s/1008 tok，三家速率相当（~70–85 tok/s），dsh 那条
 
 ⚠ **也不是 prompt 能救的**（2026-09-04，四组对照）。在 argv bootstrap 上加一句「你每轮的输出
 上限是 N，快到时先调一次 `pull_status` 再继续，工具调用会开启新的输出预算」：**glm-5.3-flash 靠
-它得救**（`next_task → read_context ×2 → pull_status → submit`，707s 一次跑完），但**只在 N 等于
-真实上限时**——写 64000 而真实是 32000 时照样超时。**v4f 则四种写法全部超时**：不写、写 64000
+它得救**（`next_task → read_context ×2 → pull_status → submit`，707s 一次跑完），但**只在 N 写
+32000 时**——写 64000 照样超时。⚠ glm-5.3-flash 的真实输出上限两个来源对不上（32000 对 64000），没有复测，
+所以这一格分不清「提示必须等于真实上限」还是「提示得偏小才有用」；catalog 现按 32000 记。出厂的「`low` +
+提示 32000」这个组合本身也没测过。**v4f 则四种写法全部超时**：不写、写 64000
 （偏高）、写 50000（正确，它确实在 t+16s 调了一次 `pull_status`）、写 25000（腰斩，一次都没调），
 思考块始终是 134k–139k 字符，**与提示里的数字无关**。所以那个块长是这个模型对这项任务的固有
 推理量，不受它相信的上限牵引。**结论：档位是可靠的杠杆，提示不是**——提示至多是「可能有帮助
 且不伤」（hy3 加了它照常一次跑完），要用就必须从 catalog 注入真实上限，否则连帮忙的那一半也没有。
 
 代价值得单独记：超时归 `timeout`、在 `STANDARD_FALLBACK` 里，所以组内链条会往下走——但**每撞
-一次先花掉 28 分钟**。`workbuddy-capable` 的成员顺序因此不是纯粹的质量排序问题。
+一次先花掉 28 分钟**。`codebuddy-capable` 的成员顺序因此不是纯粹的质量排序问题。
+
+**撞单次输出上限时 CLI 自己续写，但思考续不上**（2026-09-30/10-01 实测，单窗 180 条纠错窗、强制 `--effort high`，
+capsule 路；可见输出用逐行写数字的长清单）：
+
+- 一次请求的输出到约 **48000 token**（含思考）就被截断；CLI 不报错、流里也没有停止原因字段，而是在同一次调用里自己再请求。
+  可见输出被截断时，它插一条 `isMeta` 消息「Your previous response was truncated due to output length limits…」，被截断的正文
+  原样发回，模型从断处接着写，接缝只重写断开的半行。所以可见输出的截断不用 harness 管。
+- **思考被截断时，续写那一轮从头重想**：deepseek-v4.1-flash 每约 2 分钟产出一段 6.5 万–7.2 万字符的思考就被截断，CLI 接着请求，
+  每一段都重新从「180 条，逐条过一遍」开始，28 分钟里连续 13 段，一次答案也没交（会话文件里这些 `reasoning` 记录首尾相接，中间没有
+  回复）。被截断的那一轮思考对模型等于丢了，所以 harness 侧「检测截断后 resume 接着想」在 CodeBuddy 上没有用。09-04 那「三段各约
+  139,000 字符的 thinking、反复重启分析」形态相同（段长约一倍，那次走工具会话），别拿段长反推上限。
+- **思考期间网关可能只发占位块**：glm-5.3-flash 在同样的窗口上思考约 15 分钟后，CLI 报
+  `Empty stream: upstream gateway sent only placeholder chunks without any model output`（`isStreamTimeout`），插一句
+  「continue where you left off」重试，那段思考从未到过客户端；第二次照样在约 15 分钟处失败，调用以 `error_during_execution`
+  结束，harness 归 `LocalAgentTransientError`（2/2，其中一次账号空闲）。
+- 处理方式（owner 2026-10-01）：等 driver 上游改进；在那之前出了问题就按现有逻辑重试与报错（撞 `local_agent_timeout_seconds`
+  归 `timeout`、流超时归 transient，各自走组内回退与整窗替换）。缓解靠让单次思考既不超过约 48000 token、也不超过约 15 分钟：
+  降思考强度（catalog 把这几行映射压到 `high,low,low`，quality 格默认落到 `low`）、调小窗口字幕上限
+  （`[chunking] max_window_subtitle_tokens`，窗口小了每次要想的就少），或换模型。实验里只有强制 `high` 才撞上。
+- 48000 可能是 CLI 自己请求的上限而不是模型的（glm 与 deepseek 落在同一个数上，catalog 里两者分别记 32000 与 128000），没查清前
+  catalog 的 `max_output_tokens` 不改。
 
 **usage 是累计值不是单轮值**：两次成功调用都报 ~90k 输入（hy3 92,031 / v4f 89,925），而 prompt
 本身约 47 KB。工具会话里 payload 经 MCP 送达、每轮重发增长中的对话，CLI 把各轮加总放进
@@ -1678,13 +1848,13 @@ glm-5.3-flash 17s/1008 tok，三家速率相当（~70–85 tok/s），dsh 那条
 
 ## 13. 长期基线与明确暂缓的能力
 
-第一项是必须长期保留的基线/兼容路径；后两项暂缓，均不阻塞 §12 的目标架构：
+第一项是必须长期保留的基线/兼容路径；后两项暂缓，均不阻塞 [§12 模块边界与分阶段实施](#12-模块边界与分阶段实施) 的目标架构：
 
 | 未来项 | 当前决定 | 预留点 |
 | --- | --- | --- |
 | **单任务 Agent 模式** | 不做独立产品入口，但 `session_scope=task` 必须长期保留为全重放基线、兼容路径和无可靠 lineage driver 的 fallback | `AgentTransport.start → execute one → close` 与 assignment scope 共用协议/validator；A/B 报告必须能显式选择它 |
-| **Provider cache TTL ping/keepalive** | 暂缓。TTL 参数/过期后重建 conversation 本身纳入正式 driver profile；暂缓的是主动发 ping 保活。先测同类型连续 task、compact/重连与不同间隔下 cached input/墙钟；heartbeat 只续 task lease | `AgentTransport.refresh_conversation(handle)` 可选能力；不进入正确性和 execution identity，未实现时直接开新 conversation |
-| **第二种知识写入：Agent 直接编辑** | 暂缓。当前只有 proposal/update 协议 | `KnowledgeWriteStrategy` 预留 `staged-edit`；未来只能编辑隔离 worktree，由 harness 校验 diff、测试、合并并提交，不能直写 live knowledge |
+| **Provider cache TTL ping/keepalive** | 搁置（owner 2026-10-01）。TTL 参数/过期后重建 conversation 本身纳入正式 driver profile；搁置的是主动发 ping 保活：现有数据里没有需要它的情形。触发条件：同一会话两次调用之间出现超过 TTL 的空档，或量到 compact/重连之后缓存明显丢失（见 [`llm_followups.md`](llm_followups.md)「Agent cache ping」）；heartbeat 只续 task lease | `AgentTransport.refresh_conversation(handle)` 可选能力；不进入正确性和 execution identity，未实现时直接开新 conversation |
+| **第二种知识写入：Agent 直接编辑** | 低优先级，有空再做（owner 2026-10-01）。当前只有 proposal/update 协议；做的话收取标准与人直接编辑一致，验收对比成功率与 token 效率（[`llm_followups.md`](llm_followups.md)「Agent 直接编辑知识库」） | `KnowledgeWriteStrategy` 预留 `staged-edit`；未来只能编辑隔离 worktree，由 harness 校验 diff、测试、合并并提交，不能直写 live knowledge |
 
 ## 14. 当前实现与迁移注意事项
 
@@ -1704,12 +1874,34 @@ harness messages
 staging 是 harness 从事件流落盘。现有 `agent-text-preferred` / `agent-only`、failure classification、
 capsule evidence、execution identity 和 smoke 数据在迁移期间继续有效。
 
-当前 headless 基线是 Codex CLI 0.147.0。Windows 原生可执行文件解析同时兼容旧 npm 布局
-`vendor/<triple>/codex/codex.exe` 与当前布局 `vendor/<triple>/bin/codex.exe`；0.118.0 无法解析
-当前模型目录新增的 `max` reasoning 值，不应再用于 Luna/Sol。0.147.0 提供
-`--ignore-user-config` / `--ignore-rules`，driver 在隔离模式下启用二者。CLI 以非零状态退出时，
+当前 headless 基线是 Codex CLI 0.160.0（GPT-6 在 0.147.0 上被服务端拒绝，6.1 Sol 在 0.157.1 的模型目录里还没有）。Windows 原生可执行文件解析同时兼容旧 npm 布局
+`vendor/<triple>/codex/codex.exe` 与当前布局 `vendor/<triple>/bin/codex.exe`（0.157.1 仍是后者）；0.118.0 无法解析
+当前模型目录新增的 `max` reasoning 值，不应再用于 Luna/Sol。0.147.0 起提供
+`--ignore-user-config` / `--ignore-rules`，driver 在隔离模式下启用二者。两者各管什么、不管什么
+（2026-09-30 实测）：
+
+- `--ignore-user-config` 整份不读 `$CODEX_HOME/config.toml`，连带丢掉**连到哪、用哪个号**：用户把 Codex
+  经本机代理路由（`model_provider` 加它的 provider 表）时，FineSub 的调用曾全部悄悄回落到内置 `openai`、
+  花的是直连登录号的额度。所以 driver 把连接与认证键读出来、以 `-c` 传回（`codex_connection.py`：
+  `model_provider` 与它的表、`openai_base_url`、`chatgpt_base_url`、`cli_auth_credentials_store`、
+  `forced_login_method`、`forced_chatgpt_workspace_id`，只读顶层；旧式 `profile = "…"` 不跟随——0.157.1 自己已不
+  支持它，profile 改成每次调用用 `--profile` 选，FineSub 不传），其余照旧忽略。provider 表里的
+  `experimental_bearer_token` 改走子进程环境变量，不上命令行。provider 点名的环境变量缺失、或本机 provider
+  的端口不答（代理没开），发车前就判 unavailable、不起 CLI——否则它会被当成普通失败攒到额度探测、
+  冻结 2 小时并提示额度用尽。
+- `--ignore-rules` 管的是执行策略 `.rules`（命令审批），**不管任何 AGENTS.md**。全局
+  `$CODEX_HOME/AGENTS.md` 没有开关，照样注入；唯一的办法是换 `CODEX_HOME`，暂缓（见
+  [`llm_followups.md`](llm_followups.md) [Agent：会话、长驻 worker、工具协议](llm_followups.md#agent会话长驻-worker工具协议)）。隔离元数据如实写 `global_instructions: injected`。
+- 各家的开场说明都以一句模板（`prompt_templates/fragment_agent_user_rules_v1.md`）开头，请模型把注入的
+  用户级规则文件放在一边、语言格式行为只按任务来。软约束：Luna 上的对照里，不加时英文任务 2 次有 1 次
+  按全局规则答成中文，加了 2 次都是英文——每组只有 2 次，只说明干扰确实存在、方向对，不说明有效率。dsh 不加这句，它的规则注入插件直接关掉（见 [dsh 插件白名单](#dsh-插件白名单)）。
+
+CLI 以非零状态退出时，
 异常只给出 capsule id 与 `events/stderr.log` 位置，不回显 stderr；稳定的 config 解析错误归为
-permanent，模型目录/缓存解码不兼容归为 unavailable，其他非零退出归为 transient。一个
+permanent，模型目录/缓存解码不兼容归为 unavailable，其他非零退出归为 transient。⚠ 目录判据
+**只对没进入 turn 的 CLI 成立**（事件流里没有 `turn.started`）：0.147 在缓存过期、随即重新拉取时
+也会往 stderr 写 `failed to load models cache`，然后照常跑 turn。2026-09-16 一次 turn 因额度用尽
+失败的调用，就因为这句告警被报成「目录解码失败、请升级 CLI」。一个
 `turn.completed` 内的 item-level `error` 是可恢复诊断（例如可选 service tier 不支持），会保留
 在规范化事件中但不单独否决成功 agent message；top-level error、`turn.failed` 和缺少最终消息仍失败。
 
@@ -1766,8 +1958,8 @@ smoke 中暴露并修掉的两处：native 搜索的 URL 不在 `tool_use` 里�
 `json.dumps(...)` 上跑正则，序列化形态里换行是 `\n` 两个字符，会把下一行黏进地址
 （实测记出 `https://docs.anthropic.com/\n-`）——改成遍历解码后的结构，两个 driver 同时受益。
 
-**仍未做**：Claude Code 后端跑完整字幕纠错窗（Luna 那一档的对照），以及 conversational 模式的
-真机实测——接线已于 2026-08-22 完成（§12.1.4），实测仍欠。
+**仍未做**：Claude Code 后端跑完整字幕纠错窗（Luna 那一档的对照）。conversational 模式 2026-08-24 跑过一次单 task
+真机实测，之后随该档冻结不再扩（[§12.1.4 conversational](#1214-conversational已接线2026-08-22)）。
 
 2026-08-13 真机验收：Luna completion 在 read-only/ephemeral、忽略用户 config/rules 的条件下
 完成文本纠错；Luna native-search 产生真实 `web_search` 事件并成功返回，二者均未回退到 Sol。
@@ -1779,12 +1971,12 @@ per-session completion 与生产 checkpoint 行为，不代表新 task-runtime /
 生产尺寸验收。Conversational 模式尚未实测，按用户协作要求留到有人在场时进行。
 
 已知当前缺口：stall watchdog 已有实现但**没有阈值依据**，默认关闭并先收集
-`max_event_gap_seconds`（见 §10）。通用 capability preflight、native 要求透传、probe 并发锁和
+`max_event_gap_seconds`（见 [§10 多 Agent、lease、TTL 与调度](#10-多-agentleasettl-与调度)）。通用 capability preflight、native 要求透传、probe 并发锁和
 具名隔离记录已随 G-A 收口；driver 级 `max_parallel` 与 `conversation_ttl_seconds` 也已落地。
 
 ### 14.0 测试时用哪个模型（owner 2026-08-21）
 
-跑 agent 相关的实测一律用便宜档：**Codex → `gpt-5.6-luna`，Claude Code → Haiku**。三家工具协议
+跑 agent 相关的实测一律用便宜档：**Codex → `gpt-6-luna`，Claude Code → Haiku**。三家工具协议
 整链均已真机通过；Claude Haiku 生产尺寸单窗也已通过，但首会话 premature stop、靠一次 fresh CLI
 重试成功，且逐 driver 的跨重连 exactly-once 闸门未过，所以两个工具化开关仍默认关闭。
 
@@ -1795,42 +1987,44 @@ per-session completion 与生产 checkpoint 行为，不代表新 task-runtime /
 一家摸到现在这个程度。一般用户不可能判断哪种配置更好。因此：
 
 - **agent 的接入细节（模型组、策略、会话模式、TTL）由 owner 定，随预设发布**；
-- **不鼓励用户自己调 agent**。要用非预设的 agent，走 **conversational 模式**——那条路上权限与
-  边界由用户自己 bootstrap，本来就该他自己负责，而不是去改路由表。
+- **不鼓励用户自己调 agent**，非预设的 agent 不支持。原先给它留的出口是 conversational 模式（权限与边界由
+  用户自己 bootstrap），该档已于 2026-10-01 冻结（[§12.1.4 conversational](#1214-conversational已接线2026-08-22)）。
 
 **各家 provider 会话的闲置 TTL（owner 实测，2026-08-14）**——`conversation_ttl_seconds`
-（§10）的默认值就取自它们：
+（[§10 多 Agent、lease、TTL 与调度](#10-多-agentleasettl-与调度)）的默认值就取自它们：
 
 | Driver | 闲置 TTL | 备注 |
 | --- | --- | --- |
 | Codex | **30 min** | |
-| Claude Code | **60 min** | 与本仓 400s 探针仍命中一致（`llm_local_agent_experiments.md` §3.4） |
-| agy | **约 5 min** | 与供应商分析里的 180–300s 服务端释放一致（§3.2） |
+| Claude Code | **60 min** | 与本仓 400s 探针仍命中一致（`llm_local_agent_experiments.md` [§3.4 Claude Code 的 resume 确…](llm_local_agent_experiments.md#34-claude-code-的-resume-确实吃到缓存n1-信号2026-08-14)） |
+| agy | **约 5 min** | 与供应商分析里的 180–300s 服务端释放一致（[§3.2 缓存为什么没接上](llm_local_agent_experiments.md#32-缓存为什么没接上前缀太小不是路不通2026-08-14)） |
 
 ### 14.2 Headless 会话模式开关（2026-08-14 三值；2026-08-19 重定义为四档并接线）
 
-四档的语义、断点与接线现状是 §12.1 那张表，这里只留开关本身的形状：
+四档的语义、断点与接线现状是 [§12.1 会话形态](#121-会话形态四档已决定什么还差什么接在哪) 那张表，这里只留开关本身的形状：
 
 | 值 | 含义 | 状态 |
 | --- | --- | --- |
 | `api` | 把 agent 当 API 用：逐调用新会话、全重放 | 已接线（窄路） |
 | `per-window`（默认） | 一个窗口的修复链续同一条会话 | 已接线（= 生产现状） |
 | `resume` | 一条 provider conversation 跨窗复用（每 lane 一条） | 已接线（实验开关，默认不启用） |
-| `pseudo-conversational` | 多个 harness 会话塞进一次 agent 调用 | 已接线（2026-08-22，长驻 CLI 工具会话，§12.1.3）；链上探不到 per-invocation MCP 能力时取用即显式报错 |
+| `pseudo-conversational` | 多个 harness 会话塞进一次 agent 调用 | 已接线、已冻结（2026-08-22 接线，2026-10-01 冻结；长驻 CLI 工具会话，[§12.1.3 pseudo-conversational](#1213-pseudo-conversational已接线2026-08-22形态如下)）；链上探不到 per-invocation MCP 能力时取用即显式报错 |
 
 **作用域与继承与 thinking 完全一致**：写在 `[presets.<id>.agent_session]` 里的
 `"<任务组>/<difficulty>"`；该 difficulty 没写就沿用更高一档；预设里都没写就落到 `default`
 预设；全都没写则用默认值 `per-window`（显式常量，不是元组首位——首位是 `api` 基线，拿它当
 默认就是行为倒退）。解析在 `model_routes.py`（`resolve_agent_session`），落到
-`RoleModelConfig.agent_session_mode`，读取点是 `client.py` 的 `_run_local_agent`（§12.1.1）；
+`RoleModelConfig.agent_session_mode`，读取点是 `client.py` 的 `_run_local_agent`（[§12.1.1 档位是唯一配置面](#1211-档位是唯一配置面传输由它派生2026-08-22-起-per-window-默认即工具会话)）；
 `agent_transports.session_scope_for_mode()` 是模式 → `session_scope` 的唯一映射。
 
 `pseudo-conversational` **故意不静默降级**：探不到 per-invocation MCP 能力就报错，而不是按 `api`
 跑——设它的人就是想要另一种会话形状，悄悄降级比拒绝更糟。
 
-**尚缺的观察**：各档在行为/性能/质量上的对照还没有做——已知只有 agy 上"小任务复用净亏、
-生产窗能命中缓存"（`llm_local_agent_experiments.md` §3.1/§3.3）与 Claude Code 的 n=1 正向信号（同文档 §3.4）。默认值维持
-`per-window` 直到有数据（重测协议：同文档 §3.5）。
+**观察**：`resume` 对 `per-window` 的对照已做（`llm_local_agent_experiments.md` [3.8 会话档位与传输试跑](llm_local_agent_experiments.md#38-会话档位与传输试跑q1q32026-09-30每臂-n1)、
+[3.9 `resume` 对 `per-window`](llm_local_agent_experiments.md#39-resume-对-per-window跨窗信息传递与单窗质量2026-10-02agy-每臂-n5codex-luna-每臂-n3)）：`resume` 把前窗信息带到后面、专名更统一，单窗质量只有方向相反的弱信号，缓存读取多 4–20 倍；
+owner 2026-10-02 定两家都不接入、默认值不动，理由是还没探索完（进生产前的两项前提见 [`llm_followups.md`](llm_followups.md)）。
+更早的零散读数：agy 上"小任务复用净亏、
+生产窗能命中缓存"（`llm_local_agent_experiments.md` [§3.1 agy 上的 A/B](llm_local_agent_experiments.md#31-agy-上的-ab复用是净亏2026-08-14)/[§3.3 生产尺寸纠错窗实测](llm_local_agent_experiments.md#33-生产尺寸纠错窗实测门槛确实被越过2026-08-14)）与 Claude Code 的 n=1 正向信号（同文档 [§3.4 Claude Code 的 resume 确…](llm_local_agent_experiments.md#34-claude-code-的-resume-确实吃到缓存n1-信号2026-08-14)）。重测协议在同文档 [§3.5 生产尺寸复用 A/B 的协议](llm_local_agent_experiments.md#35-生产尺寸复用-ab-的协议未跑2026-08-19-补写)。
 
 ### 14.3 会话记录：三处，各自活多久（2026-08-15）
 
@@ -1847,7 +2041,7 @@ per-session completion 与生产 checkpoint 行为，不代表新 task-runtime /
 
 - **在失败路径之前**读 session id。此前每条失败路径都在读到 id 之前就 raise 了，而失败恰恰是
   最需要去翻对方记录的时候；
-- 额度探测（§11.1）产生的会话同样记进去——它也是一次真实会话；
+- 额度探测（[§11.1 订阅额度耗尽：按额度池冻结（已实施）](#111-订阅额度耗尽按额度池冻结已实施)）产生的会话同样记进去——它也是一次真实会话；
 - 只记 id，**不记解析后的绝对路径**：路径规律写在这里就够了，不必把 home 目录固化进每份产物。
 
 
@@ -1857,15 +2051,15 @@ per-session completion 与生产 checkpoint 行为，不代表新 task-runtime /
 
 | 文档 | 装什么 | 什么时候读 |
 | --- | --- | --- |
-| **本文**（§1–§14、§15） | 定位与边界、任务协议与状态机、prompt/知识/retrieval、安全与 execution identity、模块边界、当前实现 | 要知道 agent 后端**是什么、已接线到哪**——尤其 §12.1 |
-| [`llm_local_agent_experiments.md`](llm_local_agent_experiments.md)（§1–§3） | 约束放松准则、会话复用 A/B、缓存门槛的成因与实测 | 要动会话复用默认值，或想知道某个数字是怎么量出来的 |
-| [`llm_local_agent_runtime.md`](llm_local_agent_runtime.md)（§1–§2） | episode 落在哪、capsule 是一次性的、滚动上限与清理 | 排查现场残留、动清理命令或搬盘 |
+| **本文**（[§1](#1-定位与所有权边界)–[§14 当前实现与迁移注意事项](#14-当前实现与迁移注意事项)、[§15 相关文件](#15-相关文件)） | 定位与边界、任务协议与状态机、prompt/知识/retrieval、安全与 execution identity、模块边界、当前实现 | 要知道 agent 后端**是什么、已接线到哪**——尤其 [§12.1 会话形态](#121-会话形态四档已决定什么还差什么接在哪) |
+| [`llm_local_agent_experiments.md`](llm_local_agent_experiments.md)（[§1](llm_local_agent_experiments.md#1-约束放松准则owner-定2026-08-13)–[§3 单 agent session 连续处理多个…](llm_local_agent_experiments.md#3-单-agent-session-连续处理多个-harness-sessiong-b会话复用已实施ab-未做)） | 约束放松准则、会话复用 A/B、缓存门槛的成因与实测 | 要动会话复用默认值，或想知道某个数字是怎么量出来的 |
+| [`llm_local_agent_runtime.md`](llm_local_agent_runtime.md)（[§1 执行环境卫生](llm_local_agent_runtime.md#1-执行环境卫生episode-落在哪g-c已实施)–[§2 capsule 是一次性 episode](llm_local_agent_runtime.md#2-capsule-是一次性-episode不是持久-storeg-d已实施)） | episode 落在哪、capsule 是一次性的、滚动上限与清理 | 排查现场残留、动清理命令或搬盘 |
 | [`llm_local_agent_agy.md`](llm_local_agent_agy.md) | agy 的 catalog 行、音频容器化、视频分辨率、`view_file` 准入硬门、原生搜索 | 只跟 agy 打交道时 |
 
 **每份文档的章节号从 1 起、各自独立**，这样才能在中间插入新节。跨文档引用一律写成 `` `文件名` §N ``，由 `test_doc_links.py` 守着——指不到的章节号会红。
-外部引用（`data-index.md`、`llm_followups.md`、`CLAUDE.md`）按这张表改文件名即可，编号不动。
+外部引用（`data-index.md`、`llm_followups.md`、`AGENTS.md`）按这张表改文件名即可，编号不动。
 `§15.1`/`§15.2` 本来就不存在——那批实施编年在更早的一次整理里迁进了
-`docs/archive/agent_backend_implementation_log.md`，编号留了个洞，不是排版错误。
+维护者的本地归档，编号留了个洞，不是排版错误。
 
 ## 15. 相关文件
 
@@ -1873,14 +2067,14 @@ per-session completion 与生产 checkpoint 行为，不代表新 task-runtime /
 | --- | --- |
 | `src/finesub/llm/agent/local_agent.py` | 共享 `LocalAgentDriver` transport + Codex / Claude Code / Agy driver；未来成为一种 `HeadlessDriverTransport` |
 | `src/finesub/llm/agent/agent_task_runtime.py` | durable assignment/task/index/lease/WAL 状态机；多 worker 分桶、会话谱系与 retrieval 预算 ledger |
-| `src/finesub/llm/agent/agent_task_control.py` | `finesub agent-task` conversational JSON 控制入口、28 分钟 watcher 与 `web-search`/`web-fetch`（无 `heartbeat` 子命令，见 §4.1） |
+| `src/finesub/llm/agent/agent_task_control.py` | `finesub agent-task` conversational JSON 控制入口、28 分钟 watcher 与 `web-search`/`web-fetch`（无 `heartbeat` 子命令，见 [§4.1 存活判定：靠工作，不靠心跳](#41-存活判定靠工作不靠心跳)） |
 | `src/finesub/llm/agent/agent_transports.py` | conversational bootstrap + `session_scope=task` 全重放基线 + `session_scope=assignment` 会话复用 worker（可接 harness 原始 messages，A 步） |
-| `src/finesub/llm/agent/agent_mcp_server.py` | harness 自己的 MCP server（B 步）：`next_task` / `read_context` / `pull_status` / `submit`，由 CLI 按 `env` 拉起、以该 worker 身份开同一个 runtime root；见 [`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) §2/§6 |
+| `src/finesub/llm/agent/agent_mcp_server.py` | harness 自己的 MCP server（B 步）：`next_task` / `read_context` / `pull_status` / `submit`，由 CLI 按 `env` 拉起、以该 worker 身份开同一个 runtime root；见 [`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) [§2 生产工具表（唯一真相）](llm_agent_tool_protocol.md#2-生产工具表唯一真相)/[§6 各 driver 接线](llm_agent_tool_protocol.md#6-各-driver-接线) |
 | `src/finesub/llm/agent/agent_validators.py` | 按 id 跨进程解析的 validator 表（`correction-window` 等）与窗口序列化；`complete(validator_spec=)` 的另一半 |
-| `src/finesub/llm/agent/agent_retrieval.py` | `retrieval=local` 的 harness 自有 search/fetch，全部经 ledger 计费（§9） |
-| `src/finesub/llm/agent/agent_quota.py` | 订阅耗尽的 tier 级账本与判据（§11.1）；`.state` 持久化**冻结与连续失败计数两者**（后者 2026-09-03 补，否则一个文件一个进程的跑法永不冻结），成功即解冻 |
+| `src/finesub/llm/agent/agent_retrieval.py` | `retrieval=local` 的 harness 自有 search/fetch，全部经 ledger 计费（[§9 Retrieval 三态](#9-retrieval-三态)） |
+| `src/finesub/llm/agent/agent_quota.py` | 订阅耗尽的 tier 级账本与判据（[§11.1 订阅额度耗尽：按额度池冻结（已实施）](#111-订阅额度耗尽按额度池冻结已实施)）；`.state` 持久化**冻结与连续失败计数两者**（后者 2026-09-03 补，否则一个文件一个进程的跑法永不冻结），成功即解冻 |
 | `src/finesub/llm/agent/agent_ping.py` | `finesub agent-ping`：同一个探测的独立入口，贴出 CLI 原话 |
-| `src/finesub/llm/agent/agent_paths.py` | episode 落点两档解析、evidence locator、`agent-sessions.jsonl` 位置（§14.3） |
+| `src/finesub/llm/agent/agent_paths.py` | episode 落点两档解析、evidence locator、`agent-sessions.jsonl` 位置（[§14.3 会话记录](#143-会话记录三处各自活多久2026-08-15)） |
 | `src/finesub/llm/agent/agent_cleanup.py` | `finesub agent-clean`：留存现场的显式清理，跑在薄 CLI 的解释器上 |
 | `src/finesub/llm/knowledge/snapshot.py` | 固定 embedded-git commit/tree 的完整只读知识访问 |
 | `src/finesub/llm/routing/execution_policy.py` | execution settings/identity；继续承接 driver/tool/sandbox identity |

@@ -83,7 +83,7 @@ def test_target_aware_prompt_estimate_skips_small_context_candidate(
     gemma = ModelEndpoint(GEMINI_FREE_TIER, "gemini/gemma-4-31b-it")
     flash = ModelEndpoint(GEMINI_FREE_TIER, "gemini/gemini-3.6-flash")
     config = RoleModelConfig(
-        role=LLMRole.LIGHTWEIGHT,
+        role=LLMRole.GENERAL_CAPABLE,
         endpoint_chain=(gemma, flash),
         test_endpoint=flash,
     )
@@ -102,13 +102,13 @@ def test_target_aware_prompt_estimate_skips_small_context_candidate(
 
     monkeypatch.setattr("finesub.llm.llm_runtime.chat_complete", fake_chat_complete)
     client = RoleClient(
-        role_configs={LLMRole.LIGHTWEIGHT: config},
+        role_configs={LLMRole.GENERAL_CAPABLE: config},
         max_retries=0,
         rate_limiter=ModelRateLimiter(enabled=False),
     )
 
     result = client.complete(
-        LLMRole.LIGHTWEIGHT,
+        LLMRole.GENERAL_CAPABLE,
         factory,
         max_tokens=32_768,
     )
@@ -263,8 +263,8 @@ def test_native_search_errors_when_the_bound_group_has_no_native_target(
 ) -> None:
     """Plan v2 D4: native search is a per-call filter over the bound group,
     with no fallback chain. A group whose members carry no search tool (the
-    lightweight lites) errors instead of silently downgrading -- even though
-    the paid lite's *fact* says it could ground, its target has no tool
+    correction-basic lites) errors instead of silently downgrading -- even
+    though the paid lite's *fact* says it could ground, its target has no tool
     wired."""
 
     monkeypatch.setattr(
@@ -275,9 +275,11 @@ def test_native_search_errors_when_the_bound_group_has_no_native_target(
 
     with pytest.raises(RuntimeError, match="No eligible target") as raised:
         client.complete(
-            LLMRole.LIGHTWEIGHT,
+            LLMRole.AUDIO_MULTIMODAL,
             [{"role": "user", "content": "hi"}],
             retrieval="native",
+            task_group="correction-mm",
+            difficulty="intermediate",
         )
     trace = raised.value._harness_route_decision
     assert trace["native_search"] is True
@@ -426,7 +428,7 @@ def test_a_plan_is_the_bound_group_gated_by_the_policy() -> None:
         routes.model_groups["agy-basic"].target_ids
     )
     agent_only = [
-        "local-agy-opus-4_6",
+        "local-agy-sonnet-5_5",
         "local-agy-media-gemini-3_7-flash",
         "local-agy-native-gemini-3_7-flash",
     ]
@@ -526,7 +528,7 @@ class _FakeAgentDriver:
         # client to grow a second copy of the same filter unnoticed.
         return SimpleNamespace(
             content="agent-ok",
-            reported_model=self.config.model or "gpt-5.6-luna",
+            reported_model=self.config.model or "gpt-6-luna",
             execution_attempt={
                 "backend": "local_agent",
                 "capsule_id": "cap-1",
@@ -589,7 +591,7 @@ def test_an_agent_receives_repair_context_as_arguments_not_as_extra_turns(
         "finesub.llm.llm_runtime.chat_complete",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("API must not run")),
     )
-    routes = _routes_with_research_group("local-codex-completion-gpt-5_6-luna")
+    routes = _routes_with_research_group("local-codex-completion-gpt-6-luna")
     driver = _FakeAgentDriver()
     settings = ExecutionSettings(policy_id="agent-text-preferred")
     client = RoleClient(
@@ -618,7 +620,7 @@ def test_an_agent_receives_repair_context_as_arguments_not_as_extra_turns(
 
 
 def _agent_client(driver):
-    routes = _routes_with_research_group("local-codex-completion-gpt-5_6-luna")
+    routes = _routes_with_research_group("local-codex-completion-gpt-6-luna")
     settings = ExecutionSettings(policy_id="agent-text-preferred")
     return RoleClient(
         router=ModelRouter(routes, policy_id=settings.policy_id),
@@ -806,7 +808,7 @@ def test_a_repair_that_re_routes_does_not_inherit_another_drivers_session(
     stored = list(client._agent_repair_conversations)
 
     assert stored == [
-        (normalized_tier("LOCAL_CODEX"), "gpt-5.6-luna", "correction-0001")
+        (normalized_tier("LOCAL_CODEX"), "gpt-6-luna", "correction-0001")
     ]
 
 
@@ -1110,7 +1112,7 @@ def test_a_switch_inside_one_session_still_counts_as_a_fallback(
 ) -> None:
     """The candidate index is not the only way to leave first choice.
 
-    WorkBuddy's paid fallback swaps the model *inside* one CLI session, so the
+    CodeBuddy's paid fallback swaps the model *inside* one CLI session, so the
     harness never walks its candidate chain and `idx` stays 0. Left at that,
     `fallback_used` was False and the task report printed "No fallback was
     recorded in retained artifacts" for a call that had just been billed to a
@@ -1124,7 +1126,7 @@ def test_a_switch_inside_one_session_still_counts_as_a_fallback(
         "finesub.llm.llm_runtime.chat_complete",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("API must not run")),
     )
-    routes = _routes_with_research_group("local-codex-completion-gpt-5_6-luna")
+    routes = _routes_with_research_group("local-codex-completion-gpt-6-luna")
     settings = ExecutionSettings(policy_id="agent-text-preferred")
 
     def build(driver):
@@ -1140,7 +1142,7 @@ def test_a_switch_inside_one_session_still_counts_as_a_fallback(
             rate_limiter=ModelRateLimiter(enabled=False),
         )
 
-    switched = build(_FakeAgentDriver(configured_model="gpt-5.6-luna"))
+    switched = build(_FakeAgentDriver(configured_model="gpt-6-luna"))
     result = switched.complete(
         LLMRole.GENERAL_CAPABLE, [{"role": "user", "content": "hi"}]
     )
@@ -1183,7 +1185,7 @@ def test_a_candidate_over_only_the_shared_pool_also_drops_the_repair_context(
         return 250_000 if has_repair else 100_000
 
     monkeypatch.setattr("finesub.llm.client.estimate_call_input_tokens", estimate)
-    routes = _routes_with_research_group("local-codex-completion-gpt-5_6-luna")
+    routes = _routes_with_research_group("local-codex-completion-gpt-6-luna")
     driver = _FakeAgentDriver()
     settings = ExecutionSettings(policy_id="agent-text-preferred")
     client = RoleClient(
@@ -1239,7 +1241,7 @@ def test_an_agent_over_its_input_limit_loses_the_repair_context_not_the_call(
         return 2_000_000 if has_repair else 10
 
     monkeypatch.setattr("finesub.llm.client.estimate_call_input_tokens", estimate)
-    routes = _routes_with_research_group("local-codex-completion-gpt-5_6-luna")
+    routes = _routes_with_research_group("local-codex-completion-gpt-6-luna")
     driver = _FakeAgentDriver()
     settings = ExecutionSettings(policy_id="agent-text-preferred")
     client = RoleClient(
@@ -1278,7 +1280,7 @@ def test_an_agent_member_dispatches_through_its_driver(monkeypatch) -> None:
         "finesub.llm.llm_runtime.chat_complete",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("API must not run")),
     )
-    routes = _routes_with_research_group("local-codex-completion-gpt-5_6-luna")
+    routes = _routes_with_research_group("local-codex-completion-gpt-6-luna")
     driver = _FakeAgentDriver()
     settings = ExecutionSettings(policy_id="agent-text-preferred")
     client = RoleClient(
@@ -1329,17 +1331,28 @@ def test_a_model_that_takes_no_thinking_parameter_is_never_forced_one(
     """`thinking = false` means the model rejects the parameter, not "default".
 
     The global `local_agent_reasoning_effort` override used to win over that
-    fact. agy refuses `--effort` for its Claude models before the call even
-    starts, and a hard refusal classifies as transient -- two of them and the
-    quota probe freezes the whole allowance for five hours over a flag.
+    fact. agy 1.1.x refused `--effort` for its Claude model before the call
+    even started, and a hard refusal classifies as transient -- two of them and
+    the quota probe freezes the whole allowance for five hours over a flag. No
+    shipped agent row is `thinking = false` any more, so the row is made here.
     """
 
     monkeypatch.setattr(
         "finesub.llm.llm_runtime.chat_complete",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("API must not run")),
     )
-    routes = _routes_with_research_group("local-agy-opus-4_6")
-    assert routes.target_fact("local-agy-opus-4_6").thinking_levels is None
+    from dataclasses import replace
+
+    from finesub.llm.routing.model_catalog import default_model_catalog
+
+    routes = load_model_routes(
+        user_config={"model_groups": {"research-default": {"targets": ["local-agy-sonnet-5_5"]}}},
+        catalog=[
+            replace(entry, thinking_levels=None) if entry.fact_id == "local-agy-sonnet-5_5" else entry
+            for entry in default_model_catalog()
+        ],
+    )
+    assert routes.target_fact("local-agy-sonnet-5_5").thinking_levels is None
 
     driver = _FakeAgentDriver()
     settings = ExecutionSettings(
@@ -1361,7 +1374,7 @@ def test_a_model_that_takes_no_thinking_parameter_is_never_forced_one(
         LLMRole.GENERAL_CAPABLE, [{"role": "user", "content": "hi"}]
     )
 
-    assert result.target_id == "local-agy-opus-4_6"
+    assert result.target_id == "local-agy-sonnet-5_5"
     assert driver.calls[0][1]["reasoning_effort"] == ""
 
 
@@ -1373,8 +1386,8 @@ def test_local_agent_fallback_applies_the_selected_models_thinking_map(
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("API must not run")),
     )
     routes = _routes_with_research_group(
-        "local-codex-completion-gpt-5_6-luna",
-        "local-codex-completion-gpt-5_6-sol",
+        "local-codex-completion-gpt-6-luna",
+        "local-codex-completion-gpt-6_1-sol",
     )
     drivers = {}
 
@@ -1383,7 +1396,7 @@ def test_local_agent_fallback_applies_the_selected_models_thinking_map(
             model=model,
             failure=(
                 LocalAgentUnavailableError("luna unavailable")
-                if model == "gpt-5.6-luna"
+                if model == "gpt-6-luna"
                 else None
             ),
         )
@@ -1407,9 +1420,9 @@ def test_local_agent_fallback_applies_the_selected_models_thinking_map(
         LLMRole.GENERAL_CAPABLE, [{"role": "user", "content": "hi"}]
     )
 
-    assert result.target_id == "local-codex-completion-gpt-5_6-sol"
-    assert drivers["gpt-5.6-luna"].calls[0][1]["reasoning_effort"] == "xhigh"
-    assert drivers["gpt-5.6-sol"].calls[0][1]["reasoning_effort"] == "high"
+    assert result.target_id == "local-codex-completion-gpt-6_1-sol"
+    assert drivers["gpt-6-luna"].calls[0][1]["reasoning_effort"] == "xhigh"
+    assert drivers["gpt-6.1-sol"].calls[0][1]["reasoning_effort"] == "high"
     assert result.thinking_level == "high"
 
 
@@ -1422,7 +1435,7 @@ def test_agent_unavailable_falls_back_to_the_next_member(monkeypatch) -> None:
 
     monkeypatch.setattr("finesub.llm.llm_runtime.chat_complete", fake_chat_complete)
     routes = _routes_with_research_group(
-        "local-codex-completion-gpt-5_6-luna", "gemini-free-3_6-flash"
+        "local-codex-completion-gpt-6-luna", "gemini-free-3_6-flash"
     )
     settings = ExecutionSettings(policy_id="agent-text-preferred")
     client = RoleClient(
@@ -1454,7 +1467,7 @@ def test_agent_native_search_uses_driver_tool_mode(monkeypatch) -> None:
         "finesub.llm.llm_runtime.chat_complete",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("API must not run")),
     )
-    routes = _routes_with_research_group("local-codex-native-gpt-5_6-luna")
+    routes = _routes_with_research_group("local-codex-native-gpt-6-luna")
     driver = _FakeAgentDriver()
     settings = ExecutionSettings(policy_id="agent-only")
     client = RoleClient(
@@ -1475,7 +1488,7 @@ def test_agent_native_search_uses_driver_tool_mode(monkeypatch) -> None:
         retrieval="native",
     )
 
-    assert result.target_id == "local-codex-native-gpt-5_6-luna"
+    assert result.target_id == "local-codex-native-gpt-6-luna"
     assert driver.calls[0][1]["native_search"] is True
     assert result.execution_attempts[0]["search_events"][0]["query"] == "q"
 
@@ -1678,22 +1691,22 @@ def test_a_missing_cli_warns_once_per_process_across_clients(monkeypatch) -> Non
     driver = _ProbeDriver(usable=False, failure_kind="missing")
     first, second = _agent_client(driver), _agent_client(driver)
 
-    assert first._local_agent_ready("gpt-5.6-luna", "LOCAL_CODEX") is False
-    assert second._local_agent_ready("gpt-5.6-luna", "LOCAL_CODEX") is False
-    assert first._local_agent_ready("gpt-5.6-luna", "LOCAL_CODEX") is False
+    assert first._local_agent_ready("gpt-6-luna", "LOCAL_CODEX") is False
+    assert second._local_agent_ready("gpt-6-luna", "LOCAL_CODEX") is False
+    assert first._local_agent_ready("gpt-6-luna", "LOCAL_CODEX") is False
 
     # Every client refused, one warning for the process: a run builds several
     # clients, and the probe cache alone would have repeated it per client.
     assert [code for code, _ in warnings] == ["agent-cli-missing"]
     assert "not found" in warnings[0][1]
-    assert first._agent_readiness_detail[("LOCAL_CODEX", "gpt-5.6-luna")].startswith("missing:")
+    assert first._agent_readiness_detail[("LOCAL_CODEX", "gpt-6-luna")].startswith("missing:")
 
 
 def test_a_probe_that_raises_is_graded_broken_not_swallowed(monkeypatch) -> None:
     warnings = _capture_readiness_warnings(monkeypatch)
     client = _agent_client(_ProbeDriver(raises=True))
 
-    assert client._local_agent_ready("gpt-5.6-luna", "LOCAL_CODEX") is False
+    assert client._local_agent_ready("gpt-6-luna", "LOCAL_CODEX") is False
     assert [code for code, _ in warnings] == ["agent-cli-broken"]
     assert "probe exploded" in warnings[0][1]
 
@@ -1704,12 +1717,12 @@ def test_an_installed_cli_lacking_a_capability_is_graded_unusable(monkeypatch) -
     driver.meets_requirements = lambda probe=None, *, native_search=False: False
     client = _agent_client(driver)
 
-    assert client._local_agent_ready("gpt-5.6-luna", "LOCAL_CODEX") is False
+    assert client._local_agent_ready("gpt-6-luna", "LOCAL_CODEX") is False
     assert [code for code, _ in warnings] == ["agent-cli-unusable"]
     # A different grade is a different warning, not a repeat.
     del driver.meets_requirements
     driver.usable = False
-    assert client._local_agent_ready("gpt-5.6-luna", "LOCAL_CODEX") is False
+    assert client._local_agent_ready("gpt-6-luna", "LOCAL_CODEX") is False
     assert [code for code, _ in warnings] == ["agent-cli-unusable", "agent-cli-broken"]
 
 

@@ -1,4 +1,4 @@
-"""The scan behind `MAX_DISCARD_RATIO`'s calibration (`bench-baselines.md` 二十五).
+"""The scan behind the kept floor `KEPT_FLOOR` (`bench-baselines.md` 二十五).
 
 Named `test_llm_*` because that prefix is what puts a file in the `llm` marker
 (`test_packaging.test_the_domain_markers_cover_every_test_file`).

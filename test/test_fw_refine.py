@@ -397,6 +397,56 @@ def test_one_pass_trace_is_not_collected_for_text_only_decode() -> None:
 
 
 
+def _constructed_model(monkeypatch, **kwargs):
+    """Run RefinedWhisperModel.__init__ over a stub faster-whisper load; returns
+    (model, the keywords faster-whisper received)."""
+
+    from faster_whisper.transcribe import WhisperModel
+
+    received: dict = {}
+
+    def generate():
+        """return_refine_paths return_refine_weights"""
+
+    def fake_init(self, *args, **load_kwargs):
+        received.update(load_kwargs)
+        self.model = SimpleNamespace(generate=generate)
+        self.time_precision = 0.02
+
+    monkeypatch.setattr(WhisperModel, "__init__", fake_init)
+    monkeypatch.setattr(fw_refine_backend, "ensure_cublas_available", lambda: "")
+    model = RefinedWhisperModel("tiny", **kwargs)
+    return model, received
+
+
+def test_the_flash_attention_choice_is_made_by_the_device_layer(monkeypatch) -> None:
+    """Both construction sites get it without passing it: the decision (and its
+    default) lives in `device.ct2_flash_attention`."""
+
+    from finesub.speech.runtime import device
+
+    asked: list[tuple[str, str]] = []
+
+    def decide(device_name: str, compute_type: str) -> bool:
+        asked.append((device_name, compute_type))
+        return True
+
+    monkeypatch.setattr(device, "ct2_flash_attention", decide)
+    model, received = _constructed_model(monkeypatch, device="cuda", compute_type="float16")
+
+    assert asked == [("cuda", "float16")]
+    assert received["flash_attention"] is True
+    assert model.flash_attention is True
+
+    # An explicit choice is the caller's and is not second-guessed.
+    model, received = _constructed_model(
+        monkeypatch, device="cuda", compute_type="float16", flash_attention=False
+    )
+    assert asked == [("cuda", "float16")]
+    assert received["flash_attention"] is False
+    assert model.flash_attention is False
+
+
 def _replaying_model(playback):
     """A RefinedWhisperModel with only the replay state populated.
 
@@ -515,6 +565,22 @@ def test_missing_gemm_backend_names_the_device_and_the_remedy() -> None:
     # `--asr-backend wt`, an option removed with the single-file WT path.
     assert "ct2-wheel.md" in str(raised)
     assert "--asr-backend" not in str(raised)
+
+
+def test_a_model_the_flash_kernels_cannot_run_names_the_off_switch() -> None:
+    """The resolver cannot see the model's head dimension; a custom conversion
+    that is not 64 fails its first encode, and the message has to say how to
+    run it anyway."""
+
+    original = ValueError("FlashAttention is built for head dimension 64 only, got 80")
+    raised = fw_refine_backend._flash_build_limit(original)
+
+    assert raised is not original
+    assert "head dimension 64" in str(raised)
+    assert "FINESUB_CT2_FLASH_ATTENTION=off" in str(raised)
+
+    unrelated = ValueError("Invalid input features shape")
+    assert fw_refine_backend._flash_build_limit(unrelated) is unrelated
 
 
 def test_unrelated_runtime_errors_pass_through_untouched() -> None:

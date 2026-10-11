@@ -1,0 +1,50 @@
+#!/bin/sh
+# Refuse to push anything that shares history with `dev` to the public remote.
+#
+# The public repository carries only the orphan `main` line (plus the throwaway
+# `ci-gate` branch and tags on main), none of which has a common ancestor with
+# `dev`. A push whose commits do share one would publish dev's whole history --
+# private notes, plans, the release task -- and a push cannot be taken back.
+#
+# Install once per clone (worktrees share it):
+#   cp scripts/pre-push "$(git rev-parse --git-common-dir)/hooks/pre-push"
+#
+# The public remote is recognised by name (`public`) or by URL, so a remote
+# added under another name is still covered. `origin` is the private remote,
+# which carries the unstripped `dev` and is not checked here. When the check
+# cannot run it refuses rather than lets the push through.
+
+remote="$1"
+url="$2"
+
+public=0
+[ "$remote" = "public" ] && public=1
+case "$url" in
+    *github.com[:/]caca2331/finesub | *github.com[:/]caca2331/finesub.git | *github.com[:/]caca2331/finesub/) public=1 ;;
+esac
+[ "$public" = 1 ] || exit 0
+
+dev=$(git rev-parse --verify -q refs/heads/dev) || {
+    echo "pre-push: no local dev branch to compare against; refusing the push to $remote." >&2
+    exit 1
+}
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    # A branch or tag being deleted arrives as an all-zero sha
+    # (publish-main.ps1 deletes ci-gate this way): nothing is uploaded.
+    case "$local_sha" in
+        *[!0]*) ;;
+        *) continue ;;
+    esac
+    base=$(git merge-base "$local_sha" "$dev" 2>/dev/null)
+    status=$?
+    if [ "$status" = 0 ]; then
+        echo "pre-push: $local_ref shares history with dev (common ancestor $base)." >&2
+        echo "pre-push: $remote only takes the orphan main line; publish with scripts/publish-main.ps1." >&2
+        exit 1
+    elif [ "$status" != 1 ]; then
+        echo "pre-push: could not compare $local_ref with dev (git merge-base exit $status); refusing." >&2
+        exit 1
+    fi
+done
+exit 0

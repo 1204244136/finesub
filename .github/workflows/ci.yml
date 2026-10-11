@@ -29,6 +29,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      # The share Worker's JS tests (test/test_llm_knowledge_share_worker.py)
+      # need `node:sqlite`, which the runner's preinstalled Node may lack; the
+      # test skips without it, so this lane is where it is guaranteed to run.
+      - name: Set up Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
       # No apt step. This job installs `.[harness,dev]`, and neither package it
       # used to pull is reachable from inside it: `soundfile` (which needs
       # libsndfile) lives in `[asr]` and is never installed here, and the tests
@@ -52,6 +60,37 @@ jobs:
           # tzdata is declared by [harness] now.
           pip install numpy soundfile
           pip install "torch~=2.9.0" "torchaudio~=2.9.0" --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Compile check
+        run: python -m compileall -q src test
+
+      - name: Run tests
+        run: python -m pytest -q
+
+  # macOS on Apple Silicon (3 cores / 7 GB / 14 GB disk, no Metal): the same
+  # suite as the ubuntu job, on the platform the non-Windows skeleton added --
+  # the Library data root, the obfuscated `.env` written 0600, device answers
+  # on a machine with no CUDA. A CPU end-to-end run joins this lane once the
+  # patched macOS CTranslate2 wheel is published: it is built by build-ct2.yml,
+  # which only a later snapshot can reference (docs/ct2-distribution.md).
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -U pip setuptools
+          pip install -e ".[harness,dev]"
+          pip install numpy soundfile
+          pip install "torch~=2.9.0" "torchaudio~=2.9.0"
 
       - name: Compile check
         run: python -m compileall -q src test
@@ -89,7 +128,7 @@ jobs:
       # `-rs` prints every skip. The point of this job is that these files run
       # here rather than skip, so a skip in this log is a finding, not noise.
       - name: Run the root-suite tests only Windows executes
-        run: python -m pytest -q -n 0 -rs test/test_secrets.py test/bootstrap/test_fsops_links.py
+        run: python -m pytest -q -n 0 -rs test/test_secrets.py test/bootstrap/test_fsops_links.py "test/test_native_paths.py::test_the_crt_locale_switches_to_utf8"
 
       - name: Build CLI wheel
         shell: powershell

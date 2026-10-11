@@ -1,6 +1,7 @@
 # /etc/systemd/system/finesub-share.service
-# 共享知识库服务（deploy/share-server/README.md）。token 别写进这里的仓库副本——
-# 用 `systemctl edit finesub-share` 的 override 注入 FINESUB_SHARE_MAINTAINER_TOKEN。
+# 共享知识库服务（deploy/share-server/README.md）。口令文件放在 /etc/finesub-share/，
+# 只让 root 可读（chmod 600）；systemd 用 LoadCredential 交给服务，口令不进命令行、
+# 也不进这个文件——命令行（/proc/<pid>/cmdline）对同机所有用户可读。
 [Unit]
 Description=FineSub knowledge share server
 After=network.target
@@ -10,10 +11,13 @@ Type=simple
 User=finesub
 Group=finesub
 Environment=PYTHONUNBUFFERED=1
-# override 提供: Environment=FINESUB_SHARE_MAINTAINER_TOKEN=...
+LoadCredential=maintainer-token:/etc/finesub-share/maintainer-token
+# 签快照（可选，见 docs/manual/share-server.md「签名密钥」）：取消下面一行和 ExecStart 里对应参数的注释
+# LoadCredential=signing-key:/etc/finesub-share/signing.key
 ExecStart=/usr/bin/python3 -m finesub.llm.knowledge.share.server \
     --root /var/lib/finesub-share --port 8787 \
-    --maintainer-token ${FINESUB_SHARE_MAINTAINER_TOKEN}
+    --maintainer-token-file %d/maintainer-token
+#   --signing-key-file %d/signing-key
 Restart=on-failure
 RestartSec=3
 

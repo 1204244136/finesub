@@ -1,14 +1,14 @@
 """How much of a correction window does a *correct* reply discard?
 
-`output_protocol.MAX_DISCARD_RATIO` rejects a reply that discards most of its
+`output_protocol.KEPT_FLOOR` rejects a reply that keeps almost none of its
 window -- the shape a model takes when it never saw the window text at all.
-Picking that threshold, and deciding which windows it may be applied to, both
-rest on one measurement: the discard ratio of replies that were *right*.
+It replaced a 50% discard ratio (2026-09-30); both rest on one measurement:
+the discard ratio of replies that were *right*.
 
     python -m tools.discard_ratio_scan out            # or any dirs
 
 This scans archived `correction-windows.jsonl` for it, and -- because the
-production gate deliberately does not apply to split leaves -- also replays
+gate now applies to split leaves too, and the old ratio could not -- also replays
 what each window would look like split, by calling the production
 `chunking.split_window_in_half`. That matters: the split point is the
 *reasonable boundary* nearest the middle, not the middle, and the second half

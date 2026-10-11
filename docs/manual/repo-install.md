@@ -6,7 +6,7 @@
 
 需要自行安装 ffmpeg 并加入 PATH，且须包含 `libx264` 编码器（LLM 纠错阶段的每份剪辑均使用该编码器；
 执行 `ffmpeg -encoders | findstr libx264` 有输出即表示已包含，常见发行版中仅标记 lgpl 的构建缺少
-该编码器）；另需一张可用的 NVIDIA 显卡——**没有显卡也能运行**，但会自动回退到 CPU,
+该编码器）；另需一张可用的 NVIDIA 显卡（AMD 卡见下面「其他平台」）——**没有显卡也能运行**，但会自动回退到 CPU,
 速度明显变慢（见 README「环境要求」）。默认使用 uv；坚持使用 pip 请跳到
 [第二节](#用-pip-安装)，该路径的坑更多。
 
@@ -54,6 +54,65 @@ pip install --force-reinstall --no-deps "https://github.com/caca2331/finesub/rel
 为何将第 2、3 步分开：`torch==2.11.0` 这一约束同时被 PyPI 的 CPU 构建与 `+cu128` 构建满足，在单条
 命令中使用 `--extra-index-url` 时，pip 无法保证会选择哪一个；先将 CUDA 版装入环境后，后续解析只会
 沿用该版本。
+
+## 其他平台：Linux、AMD、macOS
+
+非 Windows 平台只支持源码装法，各平台的支持等级见 [`resources.md`](resources.md)「平台与支持等级」。
+步骤与上面相同，区别只有两处：**torch 从哪个索引装**，以及**装哪个 patched CTranslate2**。
+以下用 pip 写。Linux 用 uv 时把 `--index-url` 换成对应的 `--torch-backend`；macOS 不需要这个参数；
+Windows + AMD 只能按下面的 URL 装，没有 uv 捷径。虚拟环境在非 Windows 上用 `source .venv/bin/activate` 启用。
+
+| 平台 + 硬件 | 第 2 步：torch 三件套 | 第 4 步：patched CTranslate2 |
+| --- | --- | --- |
+| Linux（含 WSL2）+ NVIDIA | `--index-url https://download.pytorch.org/whl/cu128` | Release 里文件名带 `cu128` 与 `manylinux` 的 wheel |
+| Linux + AMD | `--index-url https://download.pytorch.org/whl/rocm7.1` | Release 里文件名带 `rocm` 与 `manylinux` 的 wheel；**系统需装 ROCm 7.2**（wheel 按 7.2 编，torch 自带的是 7.1 运行库） |
+| Windows + AMD | 先装 ROCm SDK 四件，再装 `2.9.1+rocm7.2.1` 三件套；第 3 步改用 `[asr-win-rocm]`（见下面「Windows 上的 A 卡」） | 照常装上面 Windows 那个 `cu128` wheel |
+| macOS（Apple Silicon） | 直接 `pip install torch==2.11.0 torchaudio==2.11.0 torchvision==0.26.0`（PyPI 的 macOS 构建） | Release 里文件名带 `cpu` 与 `macosx` 的 wheel |
+
+Release 地址与覆盖命令同 [`ct2-wheel.md`](ct2-wheel.md)。⚠ **Linux 与 macOS 的 wheel 由 CI 构建，发布到
+Release 之后才能下载**；在那之前，那几个平台上只能装到原版 CTranslate2，识别阶段会在加载模型时报错
+（其余阶段不受影响）。Windows + AMD 不在此列——它装的是已经发布的那个 `cu128` wheel，识别在 CPU 上照常跑。
+
+- **Linux + NVIDIA**：CTranslate2 按名字加载 cuBLAS，程序会在建模型前从 `nvidia-cublas-cu12`（CUDA 版 torch
+  的依赖）预载它，不需要设置 `LD_LIBRARY_PATH`。
+- **AMD**：PyTorch 的 ROCm 版自带一套 ROCm 库，CTranslate2 的 ROCm 版使用系统安装的 ROCm，同一进程里会有
+  两套运行库——这是未经验收的主要风险之一。遇到异常先加 `--device cpu` 确认，再反馈。
+- **Windows 上的 A 卡**：AMD 只在 `repo.radeon.com/rocm/windows/` 发 Windows 的 ROCm 版 PyTorch，最新一版
+  （`rocm-rel-7.2.1`，2026-09-17 核）停在 **2.9.1**，而 `[asr]` 钉 2.11.0——用 `[asr]` 装，pip 会把 ROCm 版
+  换成 PyPI 的 2.11.0（不带 ROCm），显卡就用不上了，而且**不会报错**。所以这个组合用另一个 extra
+  `[asr-win-rocm]`，它就是 `[asr]` 换成 AMD 那条 torch 线。命令：
+
+  前提（AMD 的要求）：**Python 3.12**、显卡驱动 **26.2.2**，卡是 RX 7000 / 9000 系或 Strix APU，
+  系统 Windows 11——这条线是 AMD 的预览版。按 AMD 的顺序，先 ROCm SDK 四件，再 torch 三件套：
+
+  ```powershell
+  # 1. ROCm SDK（torch 的 wheel 依赖它们，缺了解析就会失败）
+  pip install --no-cache-dir `
+      https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl `
+      https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl `
+      https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl `
+      https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm-7.2.1.tar.gz
+  # 2. torch 三件套
+  pip install --no-cache-dir `
+      https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torch-2.9.1+rocm7.2.1-cp312-cp312-win_amd64.whl `
+      https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchaudio-2.9.1+rocm7.2.1-cp312-cp312-win_amd64.whl `
+      https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchvision-0.24.1+rocm7.2.1-cp312-cp312-win_amd64.whl
+  # 3. 本项目
+  pip install -e ".[asr-win-rocm,harness]"
+  ```
+
+  ⚠ **接着补上「用 pip 安装」的第 4 步**：覆盖安装上面 Windows 那个 `cu128` 补丁 wheel。它与「识别跑在哪」无关——原版
+  CTranslate2 缺 WT refine 扩展，加载模型时就会报错。那个 wheel 的 CUDA 运行时是静态链接的、cuBLAS 到用时
+  才加载，所以在没有 N 卡驱动的机器上照样 import、照样在 CPU 上解码（CI 的冒烟就是在无卡 runner 上跑的）。
+
+  ⚠ **识别（ASR）仍在 CPU 上**：Windows 的 ROCm 版 CTranslate2 还没发布，所以每趟会多一条
+  `an AMD card needs the ROCm/HIP build` 的回退告警（[`ct2-wheel.md`](ct2-wheel.md)）。
+  上卡的是**人声分离、silero 辅助与第二模型校验**——分离本来就是整条管线最重的一段（CPU 路径上约占八成耗时），
+  所以这一步的收益是实打实的。Linux + AMD 不受此限，用 `[asr]` 即可：那条线有 `2.11.0+rocm7.1`。
+- **macOS**：目前只走 CPU。人声分离在 CPU 上最慢，长音频可能耗时很久。
+- **自检**：`torch.__version__` 应分别带 `+cu128` / `+rocm7.1` / `+rocm7.2.1`（macOS 不带后缀）；
+  `ctranslate2.__version__` 应以 `+finesub…` 结尾，末段是 `cu128` / `rocm7.2` / `cpu`——Windows + AMD
+  用的也是 `cu128` 那一份（识别在 CPU 上）。
 
 ## 自检
 

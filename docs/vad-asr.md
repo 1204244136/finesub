@@ -33,7 +33,7 @@ python -m finesub.speech.recognition.cli.vad_asr out/input/input-vocal.ogg \
 | `--asr-context` | `off` | 告诉 Qwen 裁判多少知识库内容（P9）：`off` 不注入 / `terms` **只给名字**——带 label 的条目与术语行的前三列（源语言·中文定名·别名），**丢掉一句话描述** / `full` 与纠错层看到的同投影。选词复用纠错层已有的检索（条目级 key+alias 匹配 + 小词条匹配），输入是 **`extra-info` 整块**——里面已经含自动抓取的视频标题，外加用户自己写的备注（用户点名的 subject 至少和标题一样有用）。⚠ **默认 off**：它改变第二个模型听到的东西。测量已经做了（`bench-baselines.md` 13.5–13.7，生产口径 n=59：`off` 3.4% → `terms` 30.5%，误插 0/59；`full` 28.8% 与 `terms` 分不出高下、只是贵 3.6 倍），但那些数**量的是与纠错器一致、不是准确率**，而且它改动了 49/59 条输出（更近 29 / 更远 8），翻默认还差**逐段听审**（`crispasr-followups.md` P9）。⚠ **层次**：`speech` 不得 import `llm`，所以选词发生在 `pipeline.py`，跨边界的是一个**字符串**——识别侧永远不知道名字从哪来。命中明细进 run metadata 的 `asr_context` |
 | `--lang-redecode` | `auto` | 解码循环内的语言票翻转重解（auto=装了 transformers 5.x 就跑 / on=必须 / off=跳过；仅 auto 语言 run 生效）：group 语言票与近期众数不符时用 Qwen referee 按 VAD interval 逐一重认取证，以众数语言强制重跑 `align_group`，证据同意才替换。首版不覆盖「语言票仍正确、但文本崩成外语」的形态；阈值的真外语负例标定仍未完成。行为、取舍、实测与待标定见 [asr-align.md](asr-align.md)「语言票翻转重解」。开关进 checkpoint key；事件写入 aligned metadata `asr_align.lang_redecode`；`python -m finesub.pipeline` 同名 flag 透传。**`on` 比 `auto` 多买一件事**：全局语言审计（抽 8 段交 referee 重认、比时长加权众数，不一致只报警），因为一轮约 16.9 s 所以不进默认；`on` 在 `--language X` 下也不再空转，转为 `audit-only`（专抓「用户强制错了语言」，且**不进 checkpoint key**——它只读不改解码）。四格模式的唯一真相是 `lang_audit.resolve_mode()`，见 [asr-align.md](asr-align.md)「全局语言审计」 |
 | `--vad-prefix` | `<output 去掉 -aligned.json>-vad.json` | VAD 阶段产物的路径（见下「VAD 阶段产物」）。匹配就复用、不匹配就重算并覆写 |
-| `--vad-silero-assist` | **开**（`--no-vad-silero-assist` 关闭；`config.toml` 的 `[vad] silero_assist` 可覆盖） | 两信号后置组合（energy AND silero）：(1) voicing 门控 cap——floor 压至滚动最小锚+10dB,仅在 silero voicing（右向膨胀 0.3s,不向前）处生效,解禁被 creep 压掉的响句,silero 失灵=回落原行为,只增不减;(2) ghost-drop——silero peak<0.3 且峰值≤0dB 且 ≤12s 的区间整段丢弃;(3) 无声 span carve——区间内无证据（无 voicing、<0dB）的前缀/尾部/桥接修剪切分;(4) 接缝恢复——被合并吞掉的基础检测 gap 按原边界还原,除非缝内有 ≥-5dB 的捞回内容。概率搭车在 energy 的流式 block 上算（见下「资源与失败行为」）,60min 素材约 +3s(CPU)/+1s(CUDA)。**默认开**：管线一律先过分离器，这个后置组合正是为那种残留噪声的人声存在的;**干净的、未经分离的源音频建议 `--no-vad-silero-assist`**（打包扰动白付）。解析链在 `vad_asr_stage.resolve_vad_silero_assist`：flag > `[vad] silero_assist` > 代码默认。标定与验收：FINDINGS 附录 V2/W/Z 及后续。统计写入 aligned metadata `vad.silero_assist`;`python -m finesub.pipeline` 同名 flag 透传 |
+| `--vad-silero-assist` | **开**（`--no-vad-silero-assist` 关闭；`config.toml` 的 `[vad] silero_assist` 可覆盖） | 两信号后置组合（energy AND silero）：(1) voicing 门控 cap——floor 压至滚动最小锚+10dB,仅在 silero voicing（右向膨胀 0.3s,不向前）处生效,解禁被 creep 压掉的响句,silero 失灵=回落原行为,只增不减;(2) ghost-drop——silero peak<0.3 且峰值≤0dB 且 ≤12s 的区间整段丢弃;(3) 无声 span carve——区间内无证据（无 voicing、<0dB）的前缀/尾部/桥接修剪切分;(4) 接缝恢复——被合并吞掉的基础检测 gap 按原边界还原,除非缝内有 ≥-5dB 的捞回内容。概率搭车在 energy 的流式 block 上算（见下「资源与失败行为」）,60min 素材约 +3s(CPU)/+1s(CUDA)。**默认开**：管线一律先过分离器，这个后置组合正是为那种残留噪声的人声存在的;**干净的、未经分离的源音频建议 `--no-vad-silero-assist`**（打包扰动白付）。解析链在 `finesub.settings.VAD_SILERO_ASSIST`：flag > `[vad] silero_assist` > 代码默认。标定与验收：FINDINGS 附录 V2/W/Z 及后续。统计写入 aligned metadata `vad.silero_assist`;`python -m finesub.pipeline` 同名 flag 透传 |
 
 生产中通常由 `python -m finesub.pipeline --stage aligned`（或更下游 stage）调用 `run_vad_asr()`，随后由
 [`python -m finesub.speech.postprocessing.stabilization`](asr-stabilize.md) 从 aligned 生成 stable；stage 间直接调用函数，不使用 subprocess。
@@ -106,7 +106,7 @@ normalized vocal audio
 `transformers` 5.x 就跑）：Whisper 池释放后用 Qwen3-ASR-0.6B（bf16 eager 峰值 ~1.8GB，
 批内 padded 音频封顶 120 s 时 ~2.3GB，所有 GPU 档位可容纳；inline 已在同设备加载时复用，
 设备不同时重新加载）。**2026-09-01 起裁判的三项效率改动**（实测与验收见
-`bench-baselines.md` 二十一）：① 片段按长度排序后**成批解码**（≤16 条/批、批内
+`bench-baselines.md` [二十一 Qwen 裁判的每分钟成本、与 Whispe…](bench-baselines.md#二十一qwen-裁判的每分钟成本与-whisper-的对照三项效率改动的落地)）：① 片段按长度排序后**成批解码**（≤16 条/批、批内
 `条数×最长` ≤120 s，`plan_batches`），每步解码成本与 batch 无关，16 条生产片段 12.7 s→1.5 s；
 ② `standard` 及以上档位在 Whisper 解码期间用后台线程**预热**裁判（`referee_warm_device`，
 放置判据与 inline 裁判同源；entry 档仍等池释放），一跑省 ~3 s 加载，产物里记
@@ -126,11 +126,16 @@ CJK 主导 run 里的 Latin 段、stabilize 噪声腿将标记丢弃的段。三
 逐一读取，不改 `qwen_verify` 的嫌疑面或字段契约。尾部证据写进
 段级 `qwen_verify: {text, language}`；≥3s 的未覆盖 VAD 区间同批重认，听到语音的记入
 `metadata.asr_align.qwen_verify.qwen_gap_recoveries`（仅证据，不插入字幕流）。
+⚠ **切块的实现是共享的**（`recognition/segments.uncovered_speech_pieces`），
+与 stable 的 `speech_gaps` 同一套；两者只差保留什么——这里只留够长、值得再听一遍的块，
+那边一块不漏，因为它回答的是「观众是不是丢了这段」。扩探测面的代价实测见
+`docs/bench-baselines.md` [二十六 collect_gaps 扩探测面的代价](bench-baselines.md#二十六collect_gaps-扩探测面的代价--计划里假设的那个口径抓不到目标案例)（⚠ 那里量出计划假设的「区间内累计」口径**抓不到目标案例**）。
 `qwen_verify` 的 run 级字段是 `model` / `device` / `suspects` / `gaps_probed`——**`device`
 记的是裁判实际跑在哪**（2026-09-02 补）。它不是用户给的：`lang_redecode.referee_device`
 拿档位的空闲显存减去 Whisper 常驻算出来，所以少了这个字段，一次「悄悄退到 CPU」的运行
-与一次拿到显卡的运行在产物上分不出来。逐阶段设备记录的全貌见
-[stage-device-plan.md](plans/stage-device-plan.md) §2.6。
+与一次拿到显卡的运行在产物上分不出来。其余阶段各自记着实际设备：分离器 metadata 的
+`device`、energy VAD 恒为 `cpu`、silero assist 的 `device`、ASR 的 `asr_align.device`
+（`resolve_device` 解析之后的值）、inline 语言重解的 `lang_redecode.device`。
 决策全部留给下游（stabilize 消费，见 docs/asr-stabilize.md）。67 clip 标定与
 已知弱点（喊叫盲区）见 docs/wt-refine-handoff.md P1。
 **失败不再带走整趟运行**（2026-09-04）：裁判只产证据、从不做决策，所以 `auto` 下它抛出的
@@ -171,6 +176,57 @@ Warning，产物内可审计。验证记录见 docs/wt-refine-validation.md「�
 `0.01` 秒——下游消费者（`finesub.subtitles.rendering`、LLM 层入口）都会静默过滤 `end <= start`
 的条目，不延长其文本会在所有路径中丢失。延长允许挤占后一段：被挤占段的
 起点（及受影响词的起点）后延，连锁情形按时间顺序依次解决。
+
+**出口契约（2026-09-06；2026-09-07 加第三条）：离开本阶段的每一段都跨住自己的全部词、
+时长为正，且终点不晚于音频末尾。**
+`enforce_word_containment` + 钳到音频末尾 + 再跑一次零时长延长，排在 `split_segments`
+**之后**、能量标注**之前**（所以修好的段能拿到自己的能量——零跨度段取不到 `vad_weighted_energy_db`，而
+stabilize 的每一条丢弃腿都要 `duration` 或 `energy`，零跨度段因此是幻觉阶梯的盲区）。
+⚠ 这不是一道新工序，是**产物契约**：「段边界 = 它的词的跨度」这条不变量在管线里被独立
+重新推导了六次、一次都没被断言，其中两处各只维持一半（`clamp_word_starts` 只抬起点、
+`extend_zero_length_segments` 只抬终点）。真正的成因已在 2026-09-06 逐个修到源头
+（见 `docs/asr-align.md` 词首修正、`docs/segmentation-split.md` 钳位退化），这一步是兜底。
+
+⚠ **它只记录、不报警**（owner 2026-09-06）：明细逐条写入
+`metadata.asr_align.segment_time_repairs`（`index` / `kind` / `start` / `end` / `text`，
+`kind == "contain"` 时另带 `new_start` / `new_end`），**不输出 Warning**。依据是全床实测——
+61 份产物 / 23648 段里这类失配从未改变过观众看到的东西，逐次告警的注意力成本高于缺陷本身；
+但记录必须留在产物里，审计不必重跑就能找到。源头修好之后这个列表在实测产物上是**空的**。
+
+⚠ **第三条（2026-09-07）：段不得越过音频末尾。** 实测一份交付产物的末段止于 272.680 s、
+音频只有 270.814 s，超出 1.866 s。越界的段与词被钳回，明细的 `kind` 是 `overrun`
+（带 `new_start` / `new_end` / `audio_end`）。⚠ **钳位排在零时长延长之前，
+且延长的上界也是音频末尾**——否则两趟互相抵消：钳位把末段压到音频末尾，延长再把它推出去
+0.01 s，结果比不修还糟。整段都在音频末尾之后时，从末段向前为每段预留 0.01 s；
+必要时收短前一段终点，若前一段也被挤满则继续向前预留。这样连续越界的尾段也保有正时长，
+不会因压成零跨度而在渲染时丢字，也不新造重叠。音频比全部预留时长还短时按段数缩小预留。
+受影响的前邻段也记 `overrun` 修复；这只是保留文本的格式修复，不代表找回了真实发声时间。
+⚠ **时长本身写在 `metadata.asr_align.audio_duration`**，是它自己的键，不借用旁边
+`audio_coverage.audio_sec`——那是统计，这是契约的界，统计的形状可以变。
+⚠ **渲染侧还会再加一次结尾延长**（`[postprocess] end_extend_seconds`，默认 0.3 s），所以只钳
+这里不够，见 `docs/manual/outputs.md` 与 `subtitles/postprocess.py` 的 `TimelineParams`。
+
+⚠ **同一个契约在 stable 写出路径上再跑一次**（`docs/asr-stabilize.md`「时间轴格式契约」）：
+stable 可以从一份早于这次修复的 aligned 重建，那条路绕不过下游的静默丢弃。
+⚠ **扩段的上界卡在后一段起点**，所以它**不会新造重叠**；产物里本来就有的重叠**原样保留、
+只记录**，归渲染时的 `resolve_overlaps` 管——理由同上节。
+
+⚠ **动这一族之前的五条**（证据与复审过程在维护者的本地计划里、不随公开快照发布，结论在这里）：
+
+- **发生率是万分之一量级**：当前 schema 46 份 / 12384 段上，零跨度段 1、词越出段界 12、
+  相邻段重叠 1。别为它上大方案。
+- **零时长 word 是预期行为**，产出它的 DTW 词对齐也不动。整句塌成一个零时长词的那种形态
+  产自解码而非后处理链，但它**段跨度还在**，所以 stabilize 的幻觉阶梯判得到它（实测两例都判成
+  `套话幽灵` 删掉）；改它要动 DTW 词对齐那半，代价与收益不成比例。
+- **修好之后那些文本大多仍会被删**——从「渲染器静默丢弃」变成「stabilize 带 tag 丢弃」。
+  所以验收看的是**段消失 + tag 出现**，不是文本救回；SRT 侧很可能一条都不新增。
+- **不引入重解**（2026-09-06，5070 Ti 实测三条全否）：按坏段自身边界重解会**制造幻觉**；换窗口
+  重解会**换掉文本本身**而不只是时间；零时长词重解之后**依旧零时长**。重解救的是转写异常，
+  这里的病是时间，文本已经在手上。
+- 早稿的「边界一律由词派生、入口校验取代出口钳位」与「组装层合并退化 piece」**都撤回了**：
+  钳位退化已在原地修好（`docs/segmentation-split.md`），全床没有任何新重叠需要它们去接。更早的
+  「禁切 ASR 接缝」同样不做——分句器把接缝当作带折扣的普通候选边界，它既能切开也能合并，禁切
+  等于推翻这个设计。
 
 若 ASR/rescue 产出“segment 有文本但 `words` 为空”，分句入口会用整段文本和
 segment 的 start/end 合成一条 word，并标记 `synthetic_from_segment: true`。它只用于

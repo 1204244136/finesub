@@ -21,6 +21,10 @@ Environment:
   FINESUB_HOME   Where the managed runtime and downloads live (default:
                  %LOCALAPPDATA%\\FineSub). Settings, API keys and the knowledge
                  base always live in %LOCALAPPDATA%\\FineSub\\user-data.
+  FINESUB_EXTRA_PYTHONPATH
+                 Extra import roots for the managed runtime only, for packages
+                 the runtime does not ship. Anything installed into the runtime
+                 itself is removed when it is rebuilt.
 """
 
 
@@ -108,6 +112,7 @@ def _shell():
             app_source=_VENDOR,
             uv_executable=_uv_executable,
         ),
+        version=installed_version(),
     )
 
 

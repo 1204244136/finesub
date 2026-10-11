@@ -1,0 +1,41 @@
+---
+license: cc-by-4.0
+base_model:
+  - pyannote/wespeaker-voxceleb-resnet34-LM
+  - pyannote/speaker-diarization-community-1
+tags:
+  - speaker-embedding
+  - speaker-diarization
+  - torchscript
+---
+
+# WeSpeaker ResNet34 as TorchScript, with its PLDA
+
+A format conversion made for [FineSub](https://github.com/caca2331/finesub)'s speaker diarization, so
+it can run without `pyannote.audio`. It is **not** a new model and was **not** retrained.
+
+| File | What it is | From | Licence |
+| --- | --- | --- | --- |
+| `wespeaker-cuda.ts` | WeSpeaker ResNet34 speaker-embedding network (the part after fbank), traced on CUDA | [pyannote/wespeaker-voxceleb-resnet34-LM](https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM) @ `837717dd` | CC BY 4.0 |
+| `wespeaker-cpu.ts` | The same network, traced on CPU | same | CC BY 4.0 |
+| `plda/plda.npz`, `plda/xvec_transform.npz` | PLDA and x-vector transform, byte-identical copies | [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) @ `3533c8cf` | CC BY 4.0 |
+
+## Two builds
+
+TorchScript records the device it was traced on, so each file runs only on its own device. Both are
+here because together they are about 54 MB.
+
+## What changed from the originals
+
+- Traced with `torch.jit.trace` (torch {TORCH}); not frozen, not quantised, weights unchanged.
+- The traced modules were checked against the eager original bit for bit, repeated calls at batch
+  sizes 1–3, before writing.
+- The PLDA files are copied unchanged.
+
+Export script: `tools/diarizen_export/export_diarizen.py` in the FineSub repository.
+
+## Credit
+
+WeSpeaker: Wang et al., "WeSpeaker: A research and production oriented speaker embedding learning
+toolkit", ICASSP 2023; the checkpoint as packaged by pyannote. The PLDA is pyannote's, from
+`speaker-diarization-community-1` (Bredin, pyannote.audio). Please credit them, not this repository.

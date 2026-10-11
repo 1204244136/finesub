@@ -21,7 +21,7 @@ description: >-
 | --- | --- | --- |
 | 对象 | 生产/reference 一次完整 run 的落盘产物；知识库健康 | 冻结 fixture 的固定窗，只换 prompt 重放 |
 | 目的 | 解释「这次跑出了什么/坏在哪/归谁」 | 迭代 prompt/harness 文本并按协议验收 |
-| 入口 | 本 `SKILL.md` + `extract_digest.py` | [`docs/prompt-iterate.md`](../../../docs/prompt-iterate.md) |
+| 入口 | 本 `SKILL.md` + `extract_digest.py` | [`docs/prompt-iterate.md`](../../docs/prompt-iterate.md) |
 | 工具 | 离线读 `out/...`；**禁止** `--execute` | `tools/session_replay`（默认会调 API） |
 | 质量判定 | 精修三方抽查找**成类**问题；压缩率/validation-ok **不能**当质量分 | §2：元信息 + 逐行抽查 +（固定窗）merge/drop gold；失败样本最低抽样量 |
 
@@ -29,7 +29,7 @@ description: >-
 并**指向** prompt-iterate 做下一轮（含 `--variant`、分档 `-n`/`--max-attempts`、失败抽样
 规则）。不要在审计回合里直接开 replay 烧配额，除非用户明确要求。
 
-工具契约：[`docs/session_replay.md`](../../../docs/session_replay.md)
+工具契约：[`docs/session_replay.md`](../../docs/session_replay.md)
 
 ## 先分流：用户问的是哪一类
 

@@ -13,12 +13,51 @@ git checkout 0d8bcd3
 git am /path/to/tools/wt_refine_port/ct2-patches/*.patch
 ```
 
+下面「构建」一节是 Windows + CUDA 的手工构建。其余平台（macOS CPU、Linux CUDA、AMD ROCm/HIP）
+以及 Windows 的 CI 版由 `.github/workflows/build-ct2.yml` 编，逐平台脚本在
+[`../ct2-build/`](../ct2-build/)，标志与本节一致（静态 oneDNN、不开 MKL 与 Ruy）；流程与发布规矩见
+`docs/ct2-distribution.md`「CI 构建」。改本节的构建标志时，同步那些脚本。
+
 | 补丁 | 内容 |
 | --- | --- |
 | 0001–0004 | WT 风格的 alignment 控制、attention 后处理、padding 与真实音频边界分离 |
 | 0005–0008 | decoded alignment 前缀、compact one-pass trace 与 refine path、unfinished span |
 | 0009–0010 | beam winner lineage（compaction-safe）、disfluency 所需的 refine weights |
 | 0011 | 逐样本 `real_audio_frames`——multi-audio batch 的前置 |
+| 0012 | `flash_attention` 只作用于 encoder 的 self-attention（上游 4.8.1 在 Whisper 上把它接到了 decoder），外加 `ctranslate2.flash_attention_available()` |
+| 0013 | 构建：flash-attention 只编 Whisper encoder 用得到的 kernel（head dim 64、fp16、不要 split-KV / ALiBi / 滑窗 / 非整 head dim） |
+
+**0012、0013 与 flash attention**（2026-10，A6）：上游 4.8.1 的 `flash_attention=True` 在 Whisper 上换掉的是
+**decoder** 的 self-attention（`WhisperDecoder` 继承 `TransformerDecoder`，后者读 `model.use_flash_attention()`，
+KV 缓存布局也随之改变），encoder 构造层时根本不传这个开关。收益在 encoder（1500 帧的 self-attention），
+而 refine 轨迹全在 decoder 里，所以 0012 让 encoder 透传、decoder 明确关掉：开关开着时 decoder 用的 attention
+实现和 KV 缓存布局与不开时相同；它经 cross-attention 读的 encoder 输出变了，所以 refine 轨迹的数值会跟着变（两份夹具上文本不变、
+个别边界移动，见 `README_DEV.md`「开发专用的 ASR 开关」）。0012 还修了上游的一处：`FlashMultiHeadAttention` 不管自己在哪一层，都用 `FlashAttention` 默认的
+`is_causal=true` 建 op，放在 encoder 里就成了因果掩码（每帧只看它之前的帧）——上游 encoder 开 flash 一直是错的，
+只是没人在 encoder 上真用过；现在只有 decoder 是因果的。⚠ 这种错只看「能 encode、不报错」查不出来，验收要拿同一段
+特征比较开 / 关时 encoder 的输出（应只差 fp16 噪声）。没编 `WITH_FLASH_ATTN` 的 wheel 照样接受这个参数、要到第一次 encode 才抛错，所以 0012 同时暴露
+`flash_attention_available()`，调用方加载前查（`device.ct2_flash_attention`）。上游的硬条件：只有 CUDA（`WITH_HIP`
+与 `WITH_FLASH_ATTN` 同开时 CMake 直接 FATAL）、compute capability ≥ 8.0、compute type 只能 fp16 / bf16、不能上
+CPU，违反任何一条都在加载时抛错。kernel 源码用 `__CUDA_ARCH__ >= 800` 守住，架构表里留着 7.0 / 7.5 照样编得过。
+0013 是体积与编译时间：上游开 flash 要多编 32 个 cutlass kernel 文件（head dim 32–256 × fp16 / bf16 × split），
+每个在每档架构上都要几分钟、几 GB 内存，而且每个文件里又按 causal、even_MN、even_K、local、return_softmax、alibi
+（split 版再乘 split、append_KV）层层展开出几十个 kernel。只保留 head dim 64 时实测 DLL 仍从 79.3 MB 涨到
+192.4 MB（2026-10-10，本机），其中 split 版两个文件各 41 MB。0013 于是只编 Whisper encoder 真正走到的那一份：
+- **head dim 正好 64**（Whisper 各尺寸都是），其他抛可读的错；
+- **只有 fp16**（生产的 compute type 是 float16），bf16 抛错，调用方也只在 float16 / int8_float16 下开；
+- **不编 split-KV**：它只服务 KV cache（decoder，已关 flash）和 SM 吃不满的小输入。encoder 那条路固定 1 个 split——
+  上游的启发式在 batch × heads × ⌈seqlen_q/64⌉ 不到 SM 数 80% 时才分，large 的 encoder 是 20 × 24 = 480 每段，
+  远在门槛之上；走到需要 split 的路径就抛错；
+- **定义上游现成的 `FLASHATTENTION_DISABLE_ALIBI` / `_LOCAL` / `_UNEVEN_K`**：CT2 的 flash 路径里 alibi 本来就写死为空；
+  滑窗与非整 head dim 被关掉后会被**静默当成没有**，所以 `FlashAttention` 遇到 `sliding_window > 0` 显式抛错，
+  head dim 只接受正好 64。
+
+这样每档架构只剩 6 个 kernel（原来是 28 + 约 70 个）。encoder 实际调用的那个 kernel 实例与瘦身前完全相同，本机实测
+开 flash 时 encoder 输出与瘦身前逐位相同（2026-10-10，RTX 5070 Ti）。瘦身后 Windows 版 DLL 81.9 MB（不带 flash 79.3 MB，
++2.6 MB），wheel 18.2 MB（+0.94 MB），本机编译多约 3 分钟（1314 s 对 1154 s）。
+⚠ `WITH_FLASH_ATTN=ON` 还给**所有** CUDA 编译单元加 `--expt-relaxed-constexpr --expt-extended-lambda`，不能假定
+其余 kernel 的代码生成与不开时相同；要分清差异来自哪一步，用 `CT2_WITH_FLASH_ATTN=OFF` 编一份对照
+（`../ct2-build/common.sh`）。
 
 **本目录是长期方案，不是权宜之计。** 已决定不 fork CTranslate2，而是钉住上游某个版本
 （当前 `v4.8.1` / `0d8bcd3`）、以本 patch series 打补丁、并预编译分发——避免长期维护一份上游分叉。
@@ -72,6 +111,7 @@ cmake -S . -B build-cu -G "Visual Studio 17 2022" \
       -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
       -DOPENMP_RUNTIME=INTEL -DINTEL_ROOT=<IOMP> \
       -DWITH_CUDA=ON -DCUDA_DYNAMIC_LOADING=ON \
+      -DWITH_FLASH_ATTN=ON \
       -DWITH_MKL=OFF -DWITH_RUY=OFF \
       -DWITH_DNNL=ON \
       -DDNNL_INCLUDE_DIR=<oneDNN>/install-trim/include \

@@ -1,0 +1,14 @@
+{
+  "streamer": {
+    "digest": "52d2203cdffb1e4ab62aeb8f6d3d85926a1405f3a9c61a178f2a06610b24ccf8",
+    "migration": "none — 2026-10-02 加了 soft_entry_tokens = 5000 与 splittable（false）：只决定可写的面何时提示压缩、提示里能否出现拆分，存量条目不用迁移"
+  },
+  "common": {
+    "digest": "ed73e9eeca7fa2408767246e6039522e0b42d81680a6889555a339696bb0fad7",
+    "migration": "none — 2026-10-02 加了 soft_entry_tokens = 5000 与 splittable（true）：只决定可写的面何时提示压缩、提示里能否出现拆分，存量条目不用迁移"
+  },
+  "style": {
+    "digest": "1622647d71dfb6d5628da555af141a47ddbfab77fac3522129d34f8338dd2be8",
+    "migration": "none — 2026-10-02 加了 soft_entry_tokens = 5000 与 splittable（false）：只决定可写的面何时提示压缩、提示里能否出现拆分，存量条目不用迁移"
+  }
+}

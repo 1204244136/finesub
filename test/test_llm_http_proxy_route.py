@@ -86,9 +86,11 @@ def servers():
 
 @pytest.fixture(autouse=True)
 def _forget_config():
-    llm_http.reset_proxy_cache()
+    from finesub import config as config_module
+
+    config_module.clear_config_cache()
     yield
-    llm_http.reset_proxy_cache()
+    config_module.clear_config_cache()
 
 
 def _configure(tmp_path: Path, monkeypatch, proxy_value: str | None) -> None:
@@ -99,7 +101,6 @@ def _configure(tmp_path: Path, monkeypatch, proxy_value: str | None) -> None:
     path.write_text(body, encoding="utf-8")
     monkeypatch.setenv("FINESUB_CONFIG_FILE", str(path))
     config_module.clear_config_cache()
-    llm_http.reset_proxy_cache()
 
 
 def _post(url: str) -> dict:

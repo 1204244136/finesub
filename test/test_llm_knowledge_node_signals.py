@@ -72,7 +72,7 @@ def test_schema_v1_store_is_migrated_in_place(tmp_path) -> None:
     conn.commit()
     conn.close()
     with KnowledgeStore(path) as store:
-        assert store.meta("schema_version") == "5"
+        assert store.meta("schema_version") == "6"
         assert record_evidence(
             store, node_id="N", field_path="payload.zh", value_hash="h",
             verdict="confirmed", evidence_kind="manual", task_id="t",
@@ -202,7 +202,6 @@ def test_refined_evidence_runs_inside_the_update_when_applied(tmp_path, monkeypa
 
     repo = KnowledgeRepo.open(tmp_path)
     _seed(repo.store)
-    monkeypatch.setattr(update_module, "is_linked_worktree", lambda: False)
     monkeypatch.setattr(
         update_module,
         "build_knowledge_materials",

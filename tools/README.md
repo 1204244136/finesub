@@ -1,10 +1,10 @@
 # `tools/` —— 这里面有什么，哪些还在用
 
-13 个子目录、4 个散落文件，**不是一个「工具箱」而是三类东西混住**：还在用的工具、
-做完就留在原地的一次性实验、以及两处已经跑不起来的。这份索引存在的唯一目的是让你
+**不是一个「工具箱」而是三类东西混住**：还在用的工具、做完就留在原地的一次性实验、
+以及跑不起来的。这份索引存在的唯一目的是让你
 **30 秒内判断该进哪个目录**，而不是挨个打开 README。
 
-⚠ **`tools/` 是按需维护的**（`CLAUDE.md`）：不要作为其它改动的副作用去更新它们。
+⚠ **`tools/` 是按需维护的**（`AGENTS.md`）：不要作为其它改动的副作用去更新它们。
 唯一例外是改名/移动类改动——那必须同步 `tools/session_replay`。
 
 ## 找什么去哪
@@ -14,27 +14,39 @@
 | 测性能、跑探针、复算某个基准数字 | [`bench/`](bench/README.md)（先读 `docs/bench-discipline.md`） |
 | 重放一次 LLM 会话、迭代 prompt | [`session_replay/`](session_replay/README.md) |
 | 看/改分割金标准的人工标注 | [`segmentation_gold/`](segmentation_gold/README.md) |
-| 动 patched CTranslate2 的补丁或重编 wheel | [`wt_refine_port/`](wt_refine_port/README.md) |
+| 动 patched CTranslate2 的补丁或重编 wheel | [`wt_refine_port/`](wt_refine_port/README.md)（补丁在 `ct2-patches/`，CI 构建脚本在 `ct2-build/`） |
+| 在 A 卡 / Mac 等硬件上做社区验收、交回记录 | [`hw_acceptance/`](hw_acceptance/README.md) |
+| 重新导出 **DiariZen** 后端的产物（分割 + 声纹 + PLDA） | [`diarizen_export/`](diarizen_export/README.md)（⚠ **不要 freeze**：折 BN 会让答案移动 4.5e-4~7.3e-4） |
+| 把 `-diar.json` 里记下的每轨试听片段切出来 | `diarizen_export/cut_samples.py`（十秒一段、每轨一份；**听一遍比任何 prompt 都快**。目录是 `<stem>-speaker-samples/`，⚠ 不是 `--speaker-tracks` 的 `<stem>-speakers/`。仅 diarizen 的时间线有） |
+| 重新导出说话人模型的三个 TorchScript 件 | [`sortformer_export/`](sortformer_export/README.md)（**唯一需要 nemo 的地方**；导完必须跑计划 §5a 的 G1–G4） |
 | 本地 token 计数器（**生产组件**，不是工具） | [`tokcount/`](tokcount/README.md) |
-| 复算纠错窗口的丢弃比例（`MAX_DISCARD_RATIO` 的标定） | `discard_ratio_scan.py`（读归档 `correction-windows.jsonl`；记录在 `docs/bench-baselines.md` 二十五） |
+| 跑 / 打分任务式流程的验收臂 | `bench/run_flow_ab.py`（交错跑四臂，每次 run 独立目录 + `run.json`）、`bench/score_flow_ab.py`（对精修字幕的相似度/对上率 + 调用与 token） |
+| 复算纠错窗口的丢弃比例（保留数下限 `KEPT_FLOOR` 的依据） | `discard_ratio_scan.py`（读归档 `correction-windows.jsonl`；记录在 `docs/bench-baselines.md` 二十五） |
 | **调 VAD 参数** | ⚠ 生产实现是 `src/finesub/speech/preprocessing/energy.py`，规范是 `docs/vad-energy.md`。`vad_tuning/` 是**已结束的探索**，读它的 `FINDINGS.md` 是为取舍依据，不要照它改代码 |
 
 ## 三类目录
 
 ### 活跃（还在用，改动它们要负责）
 
+文件数是 2026-09-24 手数的读数，只说规模，不随改动维护。
+
 | 目录 | 文件 | 谁在引用 |
 | --- | ---: | --- |
-| `bench/` | 42 | `docs/bench-baselines.md` 20+ 处 |
-| `session_replay/` | 20 | `CLAUDE.md`、`agent-tasks/run-audit/`、`docs/session_replay.md` |
+| `bench/` | 44 | `docs/bench-baselines.md` 20+ 处 |
+| `session_replay/` | 15 | `AGENTS.md`、`agent-tasks/run-audit/`、`docs/session_replay.md` |
 | `segmentation_gold/` | 31 | `docs/segmentation-gold.md`（**人工标注不可再生**） |
-| `wt_refine_port/` | 24 | `CLAUDE.md`、`docs/ct2-distribution.md`（CT2 补丁基线） |
+| `wt_refine_port/` | 31 | `AGENTS.md`、`docs/architecture.md`、`docs/ct2-distribution.md`（CT2 补丁基线与 CI 构建脚本）、`.github/workflows/build-ct2.yml` |
+| `hw_acceptance/` | 4 | `docs/manual/resources.md`、`docs/asr-backends.md`（社区验收套件） |
+| `diarizen_export/` | 33 | [`diarizen_export/README.md`](diarizen_export/README.md)、`docs/diarization-findings.md`：DiariZen 后端的 TorchScript 产出方式与分层校验器（`check_s1`–`s4`、`check_port`、`noise_arm`，⚠ **只报不判**：换产物形态是 A 类，要刻画抖动而不是消除它）；测量床（单人证据、角色命名 `roles_bed`+`roles_run`、人数上限、跨集声纹、轨身份、原生边界、行内换人 `turn_shape_bed` / `turn_signal_bed` / `turn_llm_bed` / `turn_cut_bed` / 判官 `turn_output_judge`），各自的结论在 findings 对应节；`cut_samples` 按需把生产选好的试听段切成音频；⭐ `verify_guards` 把每个守卫声称能防的 bug 注回去，确认它真的红 |
+| `sortformer_export/` | 2 | `docs/architecture.md`（`speech/diarization/` 一行）：说话人模型三个 TorchScript 件的产出方式。⚠ 里面有两份 NeMo 方法的逐字拷贝（TorchScript 拒绝原样编译），**只住在这里、管线看不到**；拷贝烤进去的假设都在导出前断言 |
+| `diarization_explore/` | 183 | `docs/diarization-findings.md`（结论）、归档的过程记录（findings 第 13 节）：说话人实验与打分台。⭐ **先读 `eval_contract.py`**——它一处声明「这批素材的真值标的是人还是角色 / 是不是逐行 / 哪些行被计价 / 弃权算不算钱 / crossfit 留出多少」，`require_people_truth()` 会拦住在角色真值上问身份问题。findings 的每个数字都由这里的脚本产出，逐文件结果在 `results/`。三份 `test_*.py` 要显式跑，`testpaths` 不含 `tools/` |
+| `ts_diar_explore/` | 24 | 维护者的本地笔记（结论不随公开快照发布）：自带时间戳 + 说话人的外部模型（MAI-Transcribe-2 / Gemini 3.5 Transcribe / MOSS-Transcribe-Diarize 开源与 Pro）评估台。`arms.py` 是所有臂的注册表（名字、产物位置、带什么、怎么跑），`episode.py` 按它运行并拼接（`--span` 只跑一段），`report.py` 出全部读数（配对均值），`merge_windows.py` 合窗，`followups.py` 是两个后续实验，`moss_serve.py` 是 MOSS 开源版经 vLLM / SGLang-Omni（WSL）推理的客户端；`degen.py` 按生产 Whisper 对照找开源 MOSS 的退化段、只在干净处打分；指标在 `score.py` / `overlap.py` / `timing.py`。⚠ mai2 / 35t / Pro 有配额，调用都记在主 checkout 的 `tmp/ts-diar-quota/ledger.jsonl`，适配器到限自停；35t 与 Pro 的额度日由 owner 告知 |
 
 ⚠ **判「还在不在用」看「谁在引用」，不要看改动日期。** 这里原本有一列 `git log -1 -- <dir>`
 的日期，2026-09-03 删掉了：它把「补一份 README」和「跑了一轮实验」记成同一件事，
 建索引当天就有两行失真——一个需要脚注才能读对的数字，不如没有。
 
-**错位一个**：`tokcount/`（5 文件）是 Go 写的本地 token 计数器，被
+**错位一个**：`tokcount/` 是 Go 写的本地 token 计数器，被
 `llm/token_budget.py` **在生产路径上依赖**，不是工具。它住在 `tools/` 是历史原因；
 搬它要同时改 `runtime-manifest.json` 与打包清单，所以先记在这里，不顺手动。
 
@@ -47,27 +59,26 @@
 | `vad_tuning/` | 59 | `FINDINGS.md`（附录号被 `silero_ghost.py` 的 docstring 引用，**不能重编号**）；生产形态见 `docs/vad-energy.md` |
 | `qwen3_explore/` | 39 | `FINDINGS.md`；被 `docs/segmentation-gold.md` 引为机械指标精确率的原始裁决 |
 | `separator_rate/` | 19 | `docs/separator-optimization.md`（E12：降采样率的代价） |
-| `escape_density/` | 2 | `docs/plans/nonoka-downstream-findings-plan.md` 第十二节的两条阈值——⚠ 转义那条最后**没有留下任何阈值**，这两个脚本记的是为什么；`finesub.text.looks_escaped` 的注释引它。⚠ `corpus_baseline.py` 读的是**跑过任务的那个 checkout** 的 `out/`，worktree 里要把路径当参数传 |
+| `escape_density/` | 4 | `docs/llm_agent_tool_protocol.md`（转义判据的标定）与 `finesub.text.looks_escaped` 的注释——⚠ 转义那条最后**没有留下任何阈值**，这两个脚本记的是为什么。⚠ `corpus_baseline.py` 读的是**跑过任务的那个 checkout** 的 `out/`，worktree 里要把路径当参数传 |
 | `onset_gap_energy/` | 17 | 无外部引用——探索留档 |
 | `separator_accel_bench/` | 14 | `docs/separator-optimization.md` |
 | `wt_refine_validation/` | 13 | `docs/wt-refine-validation.md` |
-| `asr-confidence-explorer/` | 3 | 无外部引用（目录名用连字符，其余全用下划线） |
+| `cf_share_poc/` | 5 | `deploy/share-worker/README.md`（引它的坑记）。实测结论：共享服务端的 `KnowledgeStore` **不改一行**就能跑在 Durable Object 的 SQLite 上（2026-09-09 实测，17 张表 + 一次提交 + 一次回滚）。⚠ 它复制那三个 store 文件而不入库副本——跑的必须是没改过的那份；⚠ 本地 miniflare 在**长路径**下 SQLite 起不来，症状是毫无细节的 `internal error`（README 记着这个坑和另外两个） |
 
 ### 跑不起来的
 
-- `split_explorer/`（8 文件）：它自己的 README 第 11 行写着「当前暂不可运行」——
-  生产切分器改过，这个薄封装的 import 没跟。结论在 `docs/segmentation-split.md`，
-  下次真要用它得先迁 import。
-- 散落在一级目录的四个文件：`compare_vad_srt.py` + `test_compare_vad_srt.py`
-  （互相引用之外**零引用**）、`separator_benchmark.py`（零引用，结论已进
-  `docs/separator-optimization.md`）。两个例外是活的：`separator_aoti.py`
-  （`README_DEV.md` 与 `docs/separator-optimization.md` 引着）与
-  `discard_ratio_scan.py`（`output_protocol.py` 的门槛注释、
-  `docs/llm_harness_behavior.md` 与 `docs/bench-baselines.md` 二十五都引着）。
+- `split_explorer/`：它自己的 README 写着「当前暂不可运行」——生产切分器改过，这个薄封装的
+  import 没跟。它仍被引用：`docs/segmentation-split.md` 把它写成调参入口，`segmentation.py` 的注释
+  也指向它。下次真要用它得先迁 import。
+- 一级目录的散落文件都有人引用：`separator_benchmark.py`（`docs/separator-optimization.md` 的复现命令、
+  `separator_rate/` 与 `separator_accel_bench/` 的 `run/*.sh` 都调它）、`separator_aoti.py`
+  （`README_DEV.md` 与 `docs/separator-optimization.md` 引着）、`discard_ratio_scan.py`（`output_protocol.py`
+  的门槛注释、`docs/llm_harness_behavior.md` 与 `docs/bench-baselines.md` 二十五都引着）。
+  `compare_vad_srt.py` 与它的测试零引用，2026-09-24 删了，要回溯看 git 历史。
 
 ## ⚠ 两件容易踩的事
 
-1. **这里的 16 个 `test_*.py` 默认永远不跑。** `pyproject.toml` 的 `testpaths` 只含
+1. **这里的 `test_*.py` 默认永远不跑。** `pyproject.toml` 的 `testpaths` 只含
    `test/`。要跑就显式给路径：`python -m pytest tools/bench -q`。
    同时 `test/test_import_boundaries.py` 又把 `tools/` 当源码树扫描——**对测试套件而言
    `tools/` 既是「要检查的源码」又是「不运行的测试」**，这是有意的取舍，不是漏配。

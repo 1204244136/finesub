@@ -1,9 +1,9 @@
 # Session Replay：冻结上游产物，重打下游 session
 
 > **前向提示（2026-08-19）**：本文描述的是**今天**的形态。知识库若按
-> [`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) §7（设计见归档 `archive/agent_tool_protocol_plan.md` §2.3.1） 改成「索引必读 + 词条自主
-> query」，六个 replay session 里**有四个**（query / research-r1 / research-r2 / fast-round1）的
-> validation 契约含 `<keep_entries>`，届时要一并改；§2.3 还预告了更大的一件——拉取式下 fixture
+> [`llm_agent_tool_protocol.md`](llm_agent_tool_protocol.md) [§7 未做与闸门](llm_agent_tool_protocol.md#7-未做与闸门)（设计在维护者的本地归档里）改成「索引必读 + 词条自主
+> query」，`prepare-task` 与 `correction-request` 两个 replay session 的
+> validation 契约含 `<keep_entries>`，届时要一并改；那一节还写了更大的一件——拉取式下 fixture
 > 冻的不能再只是「发出去的 messages」，而要记录并回放 **pull 序列**。**不要据此实施新功能**，
 > 先确认那个改动落地没有。
 
@@ -12,18 +12,18 @@
 > 位于 `tools/session_replay/`，**按需维护**：harness 接口或 fixture schema 变化时不要求
 > 同步本工具，其测试不进默认套件（`python -m pytest tools/session_replay -n 0` 按需运行）。
 
-当前已注册 6 个 session：`correction`（纠错窗口 R2，默认）、`query`、`research-r1`、`research-r2`、`search-judge`、`fast-round1`（见 [多轮 session](#多轮-session)）。`--list-sessions` 列出全部。合并软门槛与模型边界见 [`merge-calibration.md`](merge-calibration.md)；变体与验收协议见 [`prompt-iterate.md`](prompt-iterate.md)。
+当前已注册 3 个 session：`correction`（纠错窗口的交付轮，默认）、`prepare-task`（准备任务的首条消息）与 `correction-request`（纠错窗口带请求通道的首条消息），后两个见 [任务式 session](#任务式-session)。旧的 `query` / `research-r1` / `research-r2` / `search-judge` / `fast-round1` 随阶段 D 一起删了（2026-09-09）。`--list-sessions` 列出全部。合并软门槛与模型边界见 [`merge-calibration.md`](merge-calibration.md)；变体与验收协议见 [`prompt-iterate.md`](prompt-iterate.md)。
 
 固定纠错窗 `BV1ojjc6MEAs-0001` 的 replay 还可用
 [`tools/session_replay/benchmark.py`](../tools/session_replay/benchmark.py) 离线评估 merge/drop；完整 gold、
-中性项及非对称代价标注在 `docs/report/`（在 `dev` 上被跟踪，但不随仓库发布）。
+中性项及非对称代价标注在 `docs/reports/`（在 `dev` 上被跟踪，但不随仓库发布）。
 评分不调用模型或网络，结构无效的回复直接标 invalid，不用 validation-ok 或压缩率冒充质量分。
 
-> **变体（`--variant`/`--force-tier`）仅 `correction` 支持。** 命名变体系统（`finesub.llm.prompt_variants`：`basicA`/`basicB`/`capableB`/`capableC`）绑定纠错专属的合并 fragment、decision reasoning 与 start 列要求，其余轮各只有一套固定 prompt。对非 correction 轮传变体会**直接报错**（`NotImplementedError`），不静默回退到 baseline——避免 A/B 跑看似变了实则没变。要给某轮加变体，需为该轮注册 per-round 变体集并接进它的 builder。
+> **变体（`--variant`/`--force-tier`）只有 `correction` 与 `correction-request` 支持**（后者叠在同一份纠错 prompt 上）。命名变体系统（`finesub.llm.prompt_variants`：`basicA`/`basicB`/`capableB`/`capableC`）绑定纠错专属的合并 fragment、decision reasoning 与 start 列要求；`prepare-task` 只有一套固定 prompt，对它传变体会**直接报错**（`NotImplementedError`），不静默回退到 baseline——避免 A/B 跑看似变了实则没变。要给它加变体，需注册 per-session 变体集并接进它的 builder。
 
 生产与 `--force-tier` 的默认映射为 `capable → capableC`、`basic → basicB`；`--variant` 可显式选择其余已注册对照组。
 
-## 纠错 R2（默认）
+## 纠错交付轮（默认）
 
 复用同一窗的：
 
@@ -43,7 +43,7 @@
 run 的 A/B 要靠实验时自己钉住库的状态。）
 
 每轮变更的是现行 `prompt_templates` + `build_correction_csv_messages`；媒体按 profile 的
-`correction_media` 重切上传，`planning_media` 只属于 query replay，不会误开 correction clip。
+`correction_media` 重切上传。
 
 旧 run 若仍把 `window_contexts` 存成 `chunk_id -> text`，生产 resume 会继续严格拒绝（窗口几何变化后
 无法证明区间归属）。replay 抽取单个已冻结窗口时已经同时知道目标 chunk 与 source ids，因此只把
@@ -57,7 +57,7 @@ run 的 A/B 要靠实验时自己钉住库的状态。）
 | Chunk | `0001` |
 | Fixture 落盘 | `<产物目录>/session-fixtures/correction-0001.json` |
 
-抽取顺序：已有 fixture → 否则从 R2 exchange 的 **user** 段解析 → 写出 fixture。`task-artifacts` 里的 `correction_search_results` 没有渲染正文，不能单独当源。
+抽取顺序：已有 fixture → 否则从交付轮 exchange 解析 → 写出 fixture：任务式交付轮的 exchange 是整条对话（system / 首条 user / assistant 请求回复 / 回填 user），窗口输入与建议从**首条** user 段取，搜索结果与词条全文从回填段取（直接交付没有回填，检索面冻成空；首条消息里的占位符不会被当成结果）。`task-artifacts` 里的 `correction_search_results` 没有渲染正文，不能单独当源。
 
 ### 命令
 
@@ -83,7 +83,7 @@ python -m tools.session_replay --list-sessions
 | `--test-profile` | 走 flash-lite 测试链 |
 | `--thinking-level` | 显式覆盖本次调用的 `thinkingLevel`（`minimal`/`low`/`medium`/`high`）；留空时使用当前 task-group × difficulty 格子的映射，不再读取旧 fixture/profile 的 `thinking_override` |
 | `--profile` | 覆盖 fixture 的开关向量（如 `media=audio,retrieval=local,difficulty=quality`；退役的 preset 旧名 `mm-med` 等仍接受并换算；`media=text` 时不上传媒体） |
-| `--model` | 把端点链钉在**单一** FREE 模型上（推荐精确短 ID，如 `3.8-flash`、`3.7-flash`、`3.6-flash`、`3.5-flash`、`3.5-flash-lite`）；短 ID 精确匹配优先，模糊值命中多个模型时报错。成功计数按模型统计，配额耗尽时先落 summary 再报错，不静默回退。与 `--test-profile` 互斥 |
+| `--model` | 把端点链钉在**单一**模型上：FREE 模型用精确短 ID（如 `3.8-flash`、`3.7-flash`、`3.6-flash`、`3.5-flash`、`3.5-flash-lite`），本地 agent 用它的 fact id（如 Capable 组默认的 `local-agy-gemini-3_7-flash`，这时显式给 `-n` 与 `--max-attempts`，默认采样计划不认它）；短 ID 精确匹配优先，模糊值命中多个模型时报错。成功计数按模型统计，配额耗尽时先落 summary 再报错，不静默回退。与 `--test-profile` 互斥 |
 | `--temperature` | 采样温度（默认 1.00），**每次调用都用同一个值**；重试靠逐次递增的 `seed` 换采样，所以 n 条成功回复是同一分布的抽样，可直接当对照样本 |
 | `--force-extract` | 忽略已有 fixture，从 exchange 重抽 |
 
@@ -101,7 +101,7 @@ out/prompt-iterate/<stem>-<chunk>/<label>/
   clips/              # 本轮重切的媒体
 ```
 
-`reply-*.md` / `failed-*.md` 顶部 JSON 保留关键 call meta：`model`、`api_key_label`、`thinking_level` / `thinking_budget`、`temperature`、`finish_reason`、`fallback_used`，以及规范化后的 `usage`（含 `thinking_tokens` / `output_tokens` / input 拆分）。usage 从 `LLMCallResult.raw_response` 提取，不再读不存在的 `.usage`。
+`reply-*.md` / `failed-*.md` 顶部 JSON 保留关键 call meta：`model`、`api_key_label`、`thinking_level` / `thinking_budget`、`temperature`、`finish_reason`、`fallback_used`，以及规范化后的 `usage`（含 `thinking_tokens` / `output_tokens` / input 拆分）。usage 从 `LLMCallResult.raw_response` 提取，不再读不存在的 `.usage`。⚠ agent 路径的 `thinking_budget` 恒为 0，是占位值；实际思考档看 `thinking_level`（即传给 CLI 的 `--effort`）。
 
 `summary.md`：元数据 → Token 汇总（非 dry-run）→ 本轮改动重点 → 成功回复（含 per-reply tokens + 全文 translated）→ 失败简表。
 
@@ -115,21 +115,21 @@ correction replay 按 variant 检查当前契约：capableB/C 是带 header 的�
 按时间顺序编号为 `1-M..0`；validator 只接受目标正序号，并在通过后映射回 fixture 中的稳定源序号。
 未强制 variant 时，replay 与生产一样使用 fixture profile 对应的 task-group × difficulty 格子
 variant；模型端点只负责回答，不再用端点 tier 反推 prompt。`--model` 只把该格的 endpoint chain
-收窄到指定 FREE 模型，保留格子的 variant 与 thinking；跨变体对照仍须显式传 `--variant`。
+收窄到指定模型，保留格子的 variant 与 thinking；跨变体对照仍须显式传 `--variant`。
 离线 benchmark 对 BasicA/B 使用 `--start-column`；
-start 偏差只作能力观测，不计入 validation 或 merge/drop 代价。replay 与生产统一使用 15 分钟单请求
-timeout 和 3 次 transport sticky retry budget；连续两次 timeout 时提前抛出原始 timeout failure，
+start 偏差只作能力观测，不计入 validation 或 merge/drop 代价。replay 与生产统一使用同一套单请求
+timeout（随允许的输出量推算的软/硬两段，见 `llm_harness_behavior.md`）和 3 次 transport sticky retry budget；连续两次 timeout 时提前抛出原始 timeout failure，
 与耗尽 retry 后的 failure 类型和文本相同。
 
 ### Prompt iterate 采样协议
 
-- Capable prompt/session：默认在 `3.7-flash` 运行 `-n 2 --max-attempts 5`；额度耗尽时依次改用
-  `3.6-flash`、`3.5-flash`（同样为 2/5）。另在
+- Capable prompt/session：默认在 `local-agy-gemini-3_7-flash`（agy 的 Gemini 3.7 Flash，owner 2026-10-06）运行
+  `-n 2 --max-attempts 5`；agy 不可用时依次改用 `3.7-flash`、`3.6-flash`、`3.5-flash`（同样为 2/5），报告写明用的是哪条
+  （agy 外面多一层 agent 外壳，读数与 API 的不完全可比）。另在
   `3.5-flash-lite` 运行 `-n 3 --max-attempts 10`。
   correction 的跨档 lite 对照须传与真机相同的 `--variant capableX`。
 - Basic prompt/session：在 `3.5-flash-lite` 运行 `-n 3 --max-attempts 10`。
-- `research-r1`、`research-r2`、`fast-round1` 属于 Capable；`query`、`search-judge`
-  属于 Basic（search loop judge 因而只跑后一套）。非 correction session 不传变体参数。
+- `prepare-task` 属于 Capable，不传变体参数；`correction-request` 与 correction 同档、同变体。
 - 同一模型的所有 replay 串行；不同模型可并行。运行期间约每 10 分钟查看一次进度。
 - 审计失败回复时至少抽查 5 个失败 sample（不足 5 个则全部）；每个入样失败至少核查 10 条
   validator/parser error 或对应错误行（不足 10 条则全部）。必须基于这一级抽样确认真实错误
@@ -137,37 +137,29 @@ timeout 和 3 次 transport sticky retry budget；连续两次 timeout 时提前
 
 完整方法论与命令示例见 [`prompt-iterate.md`](prompt-iterate.md)。
 
-## 多轮 session
+## 任务式 session
 
-除 correction 外，另有 5 个 session 各重放 harness 的一轮（冻结该轮输入、只重打这一轮，不重跑循环）。它们共享 `sessions/base.py` 的 `run_text_replay`（纯文本、不上传媒体）与 `validate_session_contract`——直接查 `finesub.llm.session_contract.SESSION_CONTRACTS`（生产与 replay 的**同一份**输出契约），按 `nonempty`（顶层存在且非空）/`present`（顶层存在、可为空块）逐块校验；顶层提取用 `find_top_level_tag_blocks`（stack 解析，块内名字提及不算兄弟块）。correction 因有 CSV 硬校验（含 `<translated>` 内 `<void>` 等二级标签处理）与媒体上传，走自己的骨架、不进本契约。
+除 correction 外，另有 2 个 session 各重放任务式流程的**首条消息**（冻结该消息的输入、只重打这一条；不重跑回填——回填要 harness 真的执行请求批）。它们共享 `sessions/base.py` 的 `run_text_replay`（纯文本、不上传媒体）与 `validate_session_contract`——直接查 `finesub.llm.session_contract.SESSION_CONTRACTS`（生产与 replay 的**同一份**输出契约），按 `nonempty`（顶层存在且非空）/`present`（顶层存在、可为空块）逐块校验；顶层提取用 `find_top_level_tag_blocks`（stack 解析，块内名字提及不算兄弟块）。一条回复先按「有没有 `<context_pack>` / `<translated>`」判定是交付还是请求批，再套对应契约。correction 因有 CSV 硬校验（含 `<translated>` 内 `<void>` 等二级标签处理）与媒体上传，走自己的骨架、不进本契约。
 
 | session | 冻结输入（fixture 源） | 重放的 builder | 契约（nonempty / present 可空） | 调用角色 |
 | --- | --- | --- | --- | --- |
-| `query` | 复用 correction fixture 的窗口 + context | `build_correction_query_messages` | `reasoning` / `window_notes`,`keep_entries`,`search_queries` | LIGHTWEIGHT_MULTIMODAL |
-| `research-r1` | `research-round1-input.json`（旧 run 回退到 artifact 或 run 根目录的 `*-research-context.json`） | `build_research_round1_messages` | `reasoning`,`analysis_notes` / `requested_entries`,`keep_entries`,`search_queries` | GENERAL_CAPABLE |
-| `research-r2` | `research-round2-input.json`（旧 run 同上回退） | `build_research_round2_messages` | `reasoning`,`context_pack` / `keep_entries` | GENERAL_CAPABLE |
-| `search-judge` | `search-loop-round-<N>.json` | `build_search_loop_messages`（`--loop-version v2` 时用 `build_search_loop_v2_messages`） | `reasoning`,`evidence_pack` / —（检索块可选，缺失即终止信号） | LIGHTWEIGHT |
-| `fast-round1` | `fast-round-input.json` | `build_fast_round1_messages` | `reasoning`,`analysis_notes` / `requested_entries`,`keep_entries`,`search_queries` | GENERAL_CAPABLE |
+| `prepare-task` | `research-prepare-input.json`（harness 在首条消息前 dump 的完整 builder 入参；超长素材分块 run 另有 `research-prepare-<块>-input.json`，adapter 只读主文件） | `build_prepare_task_messages`（`--agentic` 覆盖 dump 里记录的策略，重打工具会话形态） | 二选一：交付 `reasoning`,`context_pack`；请求批 `reasoning`,`analysis_notes` / `requested_entries`,`keep_entries`,`search_queries` | GENERAL_CAPABLE |
+| `correction-request` | 复用 correction fixture（知识索引从该窗的 `*-correction-<chunk>-request-*.md` exchange 取，交付轮的 exchange 里没有） | `build_window_task_messages`（`retrieval=local` 或 fixture 带知识索引时有请求通道——none/native 下只请求词条；两者都没有时就是纯纠错首条消息；`--agentic` 换成工具会话形态：无请求通道、一次交付；`--variant`/`--force-tier` 同 correction） | 二选一：交付按 correction 的 CSV 硬校验；请求批 `reasoning` / `window_notes` + local 的 `search_queries` 或 none/native 的 `requested_entries` | 纠错 cell 的角色 |
 
-`search-judge` 用 `--round-index` 选轮（缺省取目录里最新一轮）；`--loop-version {v1,v2}` 选 prompt 版本（v2 = 全量 pack 每轮、无 progress_update、query 驱动终止）。validation 失败在同窗重试，与 correction 的格式重试同机制：温度不变，换 seed。
-
-research 两轮现在会把各自 builder 的完整语义入参落到 `research-round{1,2}-input.json`。旧 run 仍可回退读取 artifact / run 根目录的 `*-research-context.json`；该降级源通常不含完整 R1/R2 中间态，重放保真度低于专用 input dump。
+validation 失败在同窗重试，与 correction 的格式重试同机制：温度不变，换 seed。
 
 ### 补中间态落盘（前置依赖）
 
-这些 session 的输入不是某条 exchange 的正文，而是循环内的完整入参状态，因此 fixture 依赖生产运行时落下的中间态：
-
-- `research.py`：R1/R2 分别落 `research-round1-input.json` / `research-round2-input.json`。
-- `search_loop.py`：每轮 judge 把 `build_search_loop_messages` 的全部入参序列化到 `search-loop-round-<N>.json`（仅当传了 `task_artifact_dir`）。
-- `fast_session.py`：fast round-1 把合一轮入参落到 `fast-round-input.json`。
-
-即：这两轮需要**先跑一次真实生产**把中间态 dump 下来，replay 才有源可读；缺文件时 adapter 报 `FileNotFoundError` 并提示跑一次生产。
+`prepare-task` 的输入不是某条 exchange 的正文，而是 builder 的完整入参，因此依赖生产运行时落下的
+`research-prepare-input.json`（`stages/prepare_task.py` 在首条消息前 dump，仅当传了 `task_artifact_dir`）。
+即：要**先跑一次真实生产**把它 dump 下来，replay 才有源可读；缺文件时 adapter 报 `FileNotFoundError` 并提示跑一次生产。
 
 命令与 correction 同形，把 `correction` 换成对应 session 名即可：
 
 ```powershell
-python -m tools.session_replay query --dry-run --label q1 --note "查询轮 prompt 调整"
-python -m tools.session_replay search-judge --round-index 2 --label j2 -n 2
+python -m tools.session_replay prepare-task --dry-run --label p1 --note "准备任务 prompt 调整"
+python -m tools.session_replay correction-request --label r1 -n 2
+python -m tools.session_replay correction-request --agentic --dry-run --label r1-agentic
 ```
 
 ## 与生产 resume 的区别

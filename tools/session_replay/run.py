@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -63,8 +65,8 @@ def run_session_replay(
     model: str | None = None,
     force_tier: str | None = None,
     variant: str | None = None,
-    loop_version: str = "v1",
     fixture_override: Path | None = None,
+    agentic: bool = False,
 ) -> Any:
     n, max_attempts = resolve_sampling_plan(
         model, n=n, max_attempts=max_attempts
@@ -100,8 +102,8 @@ def run_session_replay(
         model=model,
         force_tier=force_tier,
         variant=variant,
-        loop_version=loop_version,
         fixture_override=fixture_override,
+        **({"agentic": True} if agentic else {}),
     )
 
 
@@ -244,15 +246,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--loop-version",
-        default="v1",
-        choices=["v1", "v2"],
-        help=(
-            "Search loop prompt version: v1 (binary continue/pack) or "
-            "v2 (always pack, optional queries). Search-judge only."
-        ),
-    )
-    parser.add_argument(
         "--fixture-override",
         type=Path,
         default=None,
@@ -263,11 +256,51 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--agentic",
+        action="store_true",
+        help=(
+            "prepare-task / correction-request: replay the agentic shape (the "
+            "tool session fetches for itself; no request channel)."
+        ),
+    )
+    parser.add_argument(
         "--list-sessions",
         action="store_true",
         help="List registered session kinds and exit.",
     )
+    parser.add_argument(
+        "--llm-preset",
+        default=None,
+        help=(
+            "LLM preset to replay under. Default: the source run's own, from its "
+            "resolved-switches.json (else config.toml's [llm] preset)."
+        ),
+    )
     return parser
+
+
+def _source_run_preset(run: Path) -> str | None:
+    """The preset the source run resolved to, when it recorded one and it
+    still exists; otherwise None (config.toml's preset) with a warning -- the
+    user typed no --llm-preset, so a vanished one must not fail as if they had."""
+
+    from finesub.llm.routing.model_routes import default_model_routes
+    from finesub_bootstrap.artifacts import RESOLVED_SWITCHES_FILENAME
+    from tools.session_replay.fixture import resolve_run_layout
+
+    try:
+        record = resolve_run_layout(run)["artifact_dir"] / RESOLVED_SWITCHES_FILENAME
+        preset = json.loads(record.read_text(encoding="utf-8")).get("active_preset")
+    except Exception:  # no record, unreadable run layout: nothing to follow
+        return None
+    if preset and preset not in default_model_routes().presets:
+        print(
+            f"Warning: the source run used LLM preset {preset!r}, which no longer exists; "
+            "replaying under config.toml's preset",
+            file=sys.stderr,
+        )
+        return None
+    return preset or None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -277,6 +310,9 @@ def main(argv: list[str] | None = None) -> int:
         for name, desc in list_sessions().items():
             print(f"{name}\t{desc}")
         return 0
+    from finesub.llm.routing.model_routes import install_runtime_preset
+
+    install_runtime_preset(args.llm_preset or _source_run_preset(args.run))
     result = run_session_replay(
         args.session,
         run=args.run,
@@ -295,8 +331,8 @@ def main(argv: list[str] | None = None) -> int:
         model=args.model,
         force_tier=args.force_tier,
         variant=args.variant,
-        loop_version=args.loop_version,
         fixture_override=args.fixture_override,
+        agentic=args.agentic,
     )
     print(f"summary: {result.summary_path}")
     print(f"out_dir: {result.out_dir}")

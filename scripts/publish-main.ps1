@@ -9,13 +9,21 @@ lands on `main` once every workflow it triggered is green. Pushing straight to
 repaired by rewriting a branch the public already fetched.
 
 Nothing is merged, and the commit that lands on `main` is the exact commit CI
-approved. `main` holds releases and checkpoints only (owner 2026-09-04): when
-its tip is a plain checkpoint -- the default message, and no tag pointing at
-it -- the new snapshot takes that checkpoint's *parent* as its own and replaces
-it with `--force-with-lease` on exactly that commit, so at most one untagged
-commit ever sits above the last tag. A tip that is tagged, or that carries any
-other message (a release waiting for its tag), is never rewritten: the snapshot
-stacks on it. -KeepPrevious forces stacking. The tag check is best-effort
+approved. `main` holds releases, checkpoints and merged external PRs only
+(owner 2026-09-04; PRs 2026-09-11): when its tip is a plain checkpoint -- the
+default message, and no tag pointing at it -- the new snapshot takes that
+checkpoint's *parent* as its own and replaces it with `--force-with-lease` on
+exactly that commit, so at most one untagged checkpoint ever sits above the last
+tag. A tip that is tagged, or that carries any other message (a release waiting
+for its tag, a squash-merged PR), is never rewritten: the snapshot stacks on it.
+A merged PR must already be cherry-picked into $Source (`git cherry-pick -x`),
+or the snapshot -- which is $Source's tree -- reverts it on `main`. So every
+commit on main's first-parent line above the last snapshot this script made
+(snapshots carry a `Published-From:` line) must be named by a
+`cherry picked from commit` line in $Source, or nothing is published.
+-KeepPrevious forces stacking. -DryRun builds and checks the snapshot tree and
+stops before creating or pushing anything (it skips only the `gh` check, which
+is needed for the CI gate alone). The tag check is best-effort
 (remote tags read at the start and again just before the push): a tag created
 in the instant between that last read and the push is not caught. This is a
 one-maintainer repository; if that ever changes, the guarantee needs a branch
@@ -31,11 +39,17 @@ param(
     [string]$Message = "chore: snapshot dev into main",
     [string]$Source = "dev",
     [string]$GateBranch = "ci-gate",
+    # The public GitHub remote. `origin` is the private one, which carries the
+    # unstripped `dev`; nothing here ever touches it.
+    [string]$PublicRemote = "public",
     [int]$TimeoutMinutes = 45,
     # Leave the gate branch in place after a successful publish (debugging).
     [switch]$KeepGate,
     # Stack on an untagged checkpoint instead of replacing it.
     [switch]$KeepPrevious,
+    # Build the snapshot tree and run every refusal check, then stop: nothing
+    # is committed, pushed or moved.
+    [switch]$DryRun,
     # Every workflow that must have produced a run before main may move.
     # Names are the `name:` of each file in .github/workflows.
     [string[]]$RequiredWorkflows = @("CI"),
@@ -45,16 +59,30 @@ param(
     # Deny by default -- `.claude` is where local configuration accretes, and
     # naming its members one by one would leak whatever is added next.
     [string[]]$PrivatePaths = @(
-        ".claude", "docs/archive", "docs/report",
+        ".claude", "docs/archive", "docs/reports",
+        # Plan drafts are the maintainer's own ledger -- read from a worktree or
+        # a dev clone, never published -- owner 2026-09-11. What a plan still
+        # owes the public side was distilled into the owning docs first; see
+        # the private-notes section of docs/README.md. test_doc_links' LOCAL_ONLY
+        # must carry the same prefix or the gate branch turns red on links dev
+        # resolves fine; test_publish_filter checks that lockstep.
+        "docs/plans",
         # The maintainer-only task document. Verified 2026-09-01 against
         # `main`'s whole history: it has never been published, and moving it
         # out of `.claude/` must not be what publishes it.
         "agent-tasks/release",
-        # The audit task itself ships (CLAUDE.md cites it), but its evals
+        # The prompt cold-read task: its ledger holds rendered prompts and
+        # review findings about unreleased prompt work, and its renderer reads
+        # private fixtures -- maintainer tooling with no public use.
+        "agent-tasks/prompt-coldread",
+        # The audit task itself ships (AGENTS.md cites it), but its evals
         # name real material: BV ids, a streamer, and a local path under
         # `data/`. They also cannot run in a public tree, which ships
         # neither `data/` nor `out/` -- exposure without a use.
-        "agent-tasks/run-audit/evals"
+        "agent-tasks/run-audit/evals",
+        # The maintainer's private supplement to AGENTS.md (test authorisation,
+        # this publishing procedure, the plan index).
+        "CLAUDE.local.md"
     ),
     # Nothing is carved back out today: the agent task documents moved to
     # `agent-tasks/` (2026-09-01), which is a public path in its own right
@@ -85,7 +113,7 @@ function Invoke-GitLine {
     return (@(Invoke-Git -Arguments $Arguments)[0]).Trim()
 }
 
-if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+if (-not $DryRun -and -not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw "The GitHub CLI (gh) is required to read the gate's CI result."
 }
 
@@ -111,14 +139,89 @@ if (Invoke-Git @("status", "--porcelain")) {
     throw "The working tree is dirty; commit or stash before publishing."
 }
 
-Invoke-Git @("fetch", "origin") | Out-Null
+# The pre-push hook is what stops a stray `git push public dev`, and a clone on
+# another machine starts without it: hooks are not cloned. This script is the
+# one place that runs on every publishing clone, so it refuses until the hook
+# is in place -- under -DryRun too, which is how a new machine finds out.
+$PublicRepo = "caca2331/finesub"
+$publicUrl = (Invoke-Git @("remote", "-v")) | Where-Object { $_ -match "^$([regex]::Escape($PublicRemote))\s+(\S+)\s+\(push\)$" } | ForEach-Object { $Matches[1] }
+if (-not $publicUrl) {
+    throw "No remote named '$PublicRemote'. Add it: git remote add $PublicRemote https://github.com/$PublicRepo.git"
+}
+if ($publicUrl -notmatch 'github\.com[:/]([^/]+/[^/]+?)(\.git)?/?$' -or $Matches[1] -ne $PublicRepo) {
+    throw "Remote '$PublicRemote' points at $publicUrl, not github.com/$PublicRepo; nothing was published."
+}
+# Read from the full listing (keys come out lower-cased): `config --get` exits 1
+# when the key is unset, which Invoke-Git would treat as a failure.
+if (Invoke-Git @("config", "--list") | Where-Object { $_ -match '^core\.hookspath=.' }) {
+    throw "core.hooksPath is set, so the pre-push hook in the git directory never runs. Unset it before publishing."
+}
+$HookPath = Join-Path $CommonDir "hooks/pre-push"
+# $Source's copy, not the working tree's: the checkout may be on another branch.
+$expectedHook = (Invoke-Git @("show", "${Source}:scripts/pre-push")) -join "`n"
+if (-not (Test-Path -LiteralPath $HookPath) -or
+        ((Get-Content -LiteralPath $HookPath -Raw) -replace "`r`n", "`n").TrimEnd("`n") -cne $expectedHook.TrimEnd("`n")) {
+    throw @"
+The pre-push hook is missing or differs from $Source's scripts/pre-push. With
+$Source checked out, install it (a copy, not a PowerShell redirect: that would
+re-encode the file or give it CRLF endings, and sh would then fail on it):
+    Copy-Item scripts/pre-push "`$(git rev-parse --git-common-dir)/hooks/pre-push"
+"@
+}
+# git skips a hook without the execute bit, saying at most a hint. Not
+# $IsWindows: Windows PowerShell 5.1 has no such variable, and $null would
+# send it down this branch on every run.
+if ([Environment]::OSVersion.Platform -ne 'Win32NT' -and (Get-Item -LiteralPath $HookPath).UnixMode -notmatch '^-..x') {
+    throw "The pre-push hook is not executable, so git skips it: chmod +x `"$HookPath`""
+}
+
+Invoke-Git @("fetch", $PublicRemote) | Out-Null
 $localMain = Invoke-GitLine @("rev-parse", "main")
-$remoteMain = Invoke-GitLine @("rev-parse", "origin/main")
+$remoteMain = Invoke-GitLine @("rev-parse", "$PublicRemote/main")
 if ($localMain -ne $remoteMain) {
     throw @"
-Local main ($localMain) and origin/main ($remoteMain) disagree. Reset the local
+Local main ($localMain) and $PublicRemote/main ($remoteMain) disagree. Reset the local
 ref to the remote one before publishing:
     git update-ref refs/heads/main $remoteMain
+"@
+}
+
+# Every external PR merged on GitHub must already be in $Source, or this
+# snapshot -- $Source's tree -- silently reverts it on main. main and $Source
+# share no history, so the only evidence is the `cherry picked from commit`
+# line `git cherry-pick -x` leaves. What counts as an external PR: every commit
+# on main's first-parent line above the last snapshot this script made (its
+# message carries `Published-From:`). First parent, so a PR merged with a merge
+# commit counts once, as the commit `git cherry-pick -x -m 1` records.
+#
+# $LegacyBaseline stands in for that last snapshot until one carries the line:
+# snapshots made before 2026-09-24 do not. It is main's tip on that day (the
+# 0.5.1 release); the PRs below it (#1 #5 #7 #8) were published over by later
+# snapshots long ago, so checking them now could only refuse, never rescue.
+# Delete it once a snapshot with `Published-From:` is on main.
+$LegacyBaseline = "b9b2f10c80abd58ddff739b60461624f51c0789c"
+$unreconciled = @()
+$reachedBase = $false
+foreach ($commit in Invoke-Git @("rev-list", "--first-parent", $remoteMain)) {
+    if ($commit -eq $LegacyBaseline) { $reachedBase = $true; break }
+    $body = (Invoke-Git @("log", "-1", "--format=%B", $commit)) -join "`n"
+    if ($body -match '(?m)^Published-From: ') { $reachedBase = $true; break }
+    $picked = @(Invoke-Git @("log", $Source, "--format=%H", "-1", "--fixed-strings", "--grep=cherry picked from commit $commit"))
+    if (-not $picked) { $unreconciled += $commit }
+}
+if (-not $reachedBase) {
+    throw "Walked all of main without meeting a snapshot marked Published-From: or the legacy baseline $LegacyBaseline; refusing rather than treating every commit as an unreconciled PR."
+}
+if ($unreconciled.Count -gt 0) {
+    $picks = ($unreconciled | ForEach-Object { "    git cherry-pick -x $_" }) -join "`n"
+    throw @"
+main carries commits that $Source does not, so this snapshot would revert them
+(external PRs merged on GitHub). Bring each into $Source first -- add -m 1 for a
+merge commit -- then run this again:
+$picks
+If a change is already in $Source by some other route (its commits picked one
+by one, or rewritten), record that instead with an empty commit:
+    git commit --allow-empty -m "Reconcile external PR (cherry picked from commit <sha>)"
 "@
 }
 
@@ -137,7 +240,7 @@ function Get-RemoteTagsAt {
     # it. Annotated tags list twice (the tag object and its `^{}` target); the
     # target is the line that matters.
     $tags = @()
-    foreach ($line in Invoke-Git @("ls-remote", "--tags", "origin")) {
+    foreach ($line in Invoke-Git @("ls-remote", "--tags", $PublicRemote)) {
         $parts = $line -split "`t"
         if ($parts.Count -eq 2 -and $parts[0] -eq $Sha) {
             $tags += $parts[1] -replace '^refs/tags/', '' -replace '\^\{\}$', ''
@@ -200,12 +303,13 @@ try {
 
 # A stale entry -- a directory since renamed, or a typo -- removed nothing
 # above and guards nothing below, because both read this same list: they would
-# go blind together and read as clean. Nothing here
-# can tell a renamed path from one that simply does not exist yet, so this
-# warns rather than throws, at the moment someone is watching the output.
+# go blind together and read as clean. It used to warn; a warning scrolls past,
+# and the one case it exists for is a rename whose new name is now published
+# whole (owner 2026-09-24: refuse). An entry for something that does not exist
+# yet has no use, so there is no legitimate empty match.
 foreach ($path in $PrivatePaths) {
     if (-not @(Invoke-Git @("ls-tree", "-r", "--name-only", "$Source^{tree}", "--", $path))) {
-        Write-Warning "`$PrivatePaths entry '$path' matches nothing in ${Source}: renamed, or misspelled? That name is protecting nothing."
+        throw "`$PrivatePaths entry '$path' matches nothing in ${Source}: renamed, or misspelled? Its new name, if it has one, would be published. Fix the list; nothing was pushed."
     }
 }
 
@@ -249,18 +353,25 @@ if ($tree -eq (Invoke-GitLine @("rev-parse", "main^{tree}"))) {
     Write-Host "main already carries $Source's public tree; nothing to publish."
     return
 }
-$snapshot = Invoke-GitLine @("commit-tree", $tree, "-p", $parent, "-m", $Message)
+if ($DryRun) {
+    Write-Host "Dry run: the snapshot tree is $tree on parent $parent; every check passed. Nothing was committed or pushed."
+    return
+}
+# The trailer is how the next run tells this script's snapshots from external
+# PRs merged on GitHub (see the check after the fetch).
+$sourceHead = Invoke-GitLine @("rev-parse", $Source)
+$snapshot = Invoke-GitLine @("commit-tree", $tree, "-p", $parent, "-m", $Message, "-m", "Published-From: $sourceHead")
 if ($replacing) {
     Write-Host "Replacing checkpoint $replacing (untagged, default message); parent is $parent"
 }
 
 Write-Host "Snapshot $snapshot -> $GateBranch (gating on CI)"
-Invoke-Git @("push", "--force", "origin", "${snapshot}:refs/heads/$GateBranch") | Out-Null
+Invoke-Git @("push", "--force", $PublicRemote, "${snapshot}:refs/heads/$GateBranch") | Out-Null
 
 function Get-GateRuns {
     param([Parameter(Mandatory = $true)][string]$Sha)
 
-    $body = & gh run list --branch $GateBranch --limit 20 --json databaseId,name,headSha,status,conclusion,url
+    $body = & gh run list --repo $PublicRepo --branch $GateBranch --limit 20 --json databaseId,name,headSha,status,conclusion,url
     if ($LASTEXITCODE -ne 0) {
         # A transient API failure is not a verdict; the caller polls again.
         return $null
@@ -339,13 +450,13 @@ is a release now and is not replaced. main was not moved; the approved snapshot
 is $snapshot on $GateBranch. Run the script again: it will stack on the tag.
 "@
     }
-    Invoke-Git @("push", "--force-with-lease=refs/heads/main:$replacing", "origin", "${snapshot}:refs/heads/main") | Out-Null
+    Invoke-Git @("push", "--force-with-lease=refs/heads/main:$replacing", $PublicRemote, "${snapshot}:refs/heads/main") | Out-Null
 } else {
-    Invoke-Git @("push", "origin", "${snapshot}:refs/heads/main") | Out-Null
+    Invoke-Git @("push", $PublicRemote, "${snapshot}:refs/heads/main") | Out-Null
 }
 Invoke-Git @("update-ref", "refs/heads/main", $snapshot) | Out-Null
 if (-not $KeepGate) {
-    Invoke-Git @("push", "origin", "--delete", $GateBranch) | Out-Null
+    Invoke-Git @("push", $PublicRemote, "--delete", $GateBranch) | Out-Null
 }
 
 if ($replacing) {

@@ -7,8 +7,7 @@
 哈希、固定资源的 SHA-256 和模型清单决定内容是否可用；镜像只决定从哪儿取。这条贯穿全文，
 下面每个设计都是它的推论。
 
-设计取舍与被否决的做法在本地 `docs/archive/cli-bootstrap-logging-download-plan.md` §5
-——它不随仓库发布。**用户怎么读 `doctor` 那一行、什么时候该手动覆盖**在
+设计取舍与被否决的做法在维护者的本地归档里，不随仓库发布。**用户怎么读 `doctor` 那一行、什么时候该手动覆盖**在
 [`manual/resources.md`](manual/resources.md)「下载走哪条线」一节(2026-09-01 补;
 在那之前这句指向的说明并不存在)。本文只讲机制与取舍,不复述用法。
 
@@ -71,7 +70,7 @@ huggingface。
 从 canonical global lock 生成 `pylock.win-py312.cn.toml`（`scripts/make_cn_lock.py`）：
 
 - 只改 artifact URL，不重新解析版本；包名、版本、marker、文件名和 SHA-256 **必须逐项一致**；
-- torch 三件套优先于普通 wheel 处理；patched CT2 走与 §5 相同的 GitHub file proxy；
+- torch 三件套优先于普通 wheel 处理；patched CT2 走与 [§5 BS-Roformer 固定模型](#5-bs-roformer-固定模型) 相同的 GitHub file proxy；
 - 两者都只在存在通过验证的加速入口时才改，否则保留原地址——允许「部分加速」而不降低可复现性，
   但「只有普通 wheel 被加速」按前置判定不算达标；
 - ✱ 生成器**自带门禁**：生成后立刻自检，不等价就删掉产物并报错，不留一份「看起来生成成功了」
@@ -405,6 +404,6 @@ python -m pytest -q test/bootstrap/test_cn_lock.py test/bootstrap/test_runtime_r
 
 **实机验收（2026-08-21，境外出口）**：cn lock 的 174/174 artifact 整份下载后逐个哈希全部一致
 （3.23 GB，零重试）；地区判定、global 全新安装、破坏哈希、中断续传逐项通过。清单与逐项结果在
-本地 `docs/archive/cli-bootstrap-logging-download-plan.md` 文首与 §7.3。**仍未验**：大陆出口才能做的 cn 安装、中途切源与两条路线耗时对比（后者是
+维护者的本地归档里。**仍未验**：大陆出口才能做的 cn 安装、中途切源与两条路线耗时对比（后者是
 「cn 该不该当默认」的唯一判据，代理下没有意义），以及真实拔网线。owner 判定这两项不重要
 （2026-08-21）。

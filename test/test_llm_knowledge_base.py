@@ -156,7 +156,11 @@ def test_update_and_remove_by_handle(tmp_path) -> None:
     line_handle2 = next(h for h, (ident, _) in handles2.nodes.items() if repo.store.node(ident).kind == "term")
     text = "<knowledge_proposals>\n" + json.dumps({"op": "update", "id": line_handle2, "line": "不是五段行", "reason": "r"}, ensure_ascii=False) + "\n" + json.dumps({"op": "remove", "id": line_handle2, "reason": "r"}) + "\n</knowledge_proposals>"
     report = apply_model_proposals(text, repo=repo, task_id="t", knowledge_read_rev=repo.rev, handles=handles2).to_dict()
-    assert [r["op"] for r in report["skipped"]] == ["update"] and "行体" in report["skipped"][0]["reason"]
+    # `角色` takes free sentences now, so the refusal comes from the kind guard
+    # rather than from the section: rewriting a term into prose in place is
+    # still remove + append_lines.
+    assert [r["op"] for r in report["skipped"]] == ["update"]
+    assert "change kind" in report["skipped"][0]["reason"], report["skipped"]
     assert "三月七|" not in load_entry_texts(tmp_path, ["崩铁"])[0]["崩坏星穹铁道"]
 
 
@@ -402,10 +406,10 @@ def test_cli_generation_pin_helper_skips_knowledge_none(tmp_path) -> None:
 
     root = tmp_path / "cli-pin-kb"
     root.mkdir()
-    with _generation_pin({"knowledge": "none", "knowledge_root": root}):
+    with _generation_pin("none", root):
         pass
     assert not (root / "knowledge.sqlite").exists()
-    with _generation_pin({"knowledge": "collect", "knowledge_root": root}):
+    with _generation_pin("read", root):
         pass
     assert (root / "knowledge.sqlite").exists()
 
@@ -434,3 +438,771 @@ def test_shared_node_remove_is_refused(tmp_path) -> None:
                                    knowledge_read_rev=repo.rev, handles=handles).to_dict()
     assert report["skipped"] and "shared" in report["skipped"][0]["reason"]
     assert repo.store.node("T") is not None  # still alive under both subjects
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-07: the two moves (plan §0 requirements 7, 11, 13)
+
+
+def _subject(root: Path, surface: str):  # type: ignore[no-untyped-def]
+    repo = KnowledgeRepo.open(root)
+    return repo, next(s for s in repo.subjects() if s.payload["surface"] == surface)
+
+
+def test_move_line_relocates_a_line_instead_of_retyping_it(tmp_path: Path) -> None:
+    """The engine op existed all along; the model just could not reach it.
+
+    What matters is that the NODE survives: deleting and re-appending the text
+    would produce a different node, and everything hanging off the old one --
+    history, evidence, canonical id -- would be silently orphaned.
+    """
+
+    _seed(tmp_path)
+    repo, subject = _subject(tmp_path, "星野灯")
+    handles = HandleMap()
+    repo.entry_prompt_text(subject.local_id, handles)
+    membership = next(
+        m for m in repo.store.children(subject.local_id) if m.section == "直播内容"
+    )
+    before = membership.child_id
+    line_handle = next(
+        handle for handle, (ident, _) in handles.nodes.items() if ident == before
+    )
+
+    report = _apply(tmp_path, [
+        {"op": "move_line", "id": line_handle, "section": "特点", "reason": "杂谈是特点不是内容"}
+    ])
+    assert [record["op"] for record in report["applied"]] == ["move_line"], report
+
+    repo = KnowledgeRepo.open(tmp_path)
+    placed = {m.section: m.child_id for m in repo.store.children(subject.local_id)}
+    assert placed.get("特点") == before, "the node itself must survive the move"
+    assert "直播内容" not in placed or placed["直播内容"] != before
+
+
+def test_move_line_refuses_a_section_the_template_does_not_have(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    repo, subject = _subject(tmp_path, "星野灯")
+    handles = HandleMap()
+    repo.entry_prompt_text(subject.local_id, handles)
+    membership = next(
+        m for m in repo.store.children(subject.local_id) if m.section == "直播内容"
+    )
+    line_handle = next(
+        handle for handle, (ident, _) in handles.nodes.items()
+        if ident == membership.child_id
+    )
+    report = _apply(tmp_path, [
+        {"op": "move_line", "id": line_handle, "section": "不存在的节", "reason": "r"}
+    ])
+    assert report["applied"] == []
+    assert "没有" in report["skipped"][0]["reason"]
+
+
+def test_recategorize_needs_a_reason_and_records_it_for_maintenance_only(
+    tmp_path: Path,
+) -> None:
+    """§0 requirement 13: the reason is stored, and shown only where the entry
+    can be moved again -- never on the injection surface a correction round
+    pays tokens for."""
+
+    _seed(tmp_path)
+
+    # No reason: refused outright rather than applied with an empty one.
+    silent = _apply(tmp_path, [
+        {"op": "recategorize", "entry": "星野灯", "category": "streamer",
+         "to_category": "common"}
+    ])
+    assert silent["applied"] == []
+    assert "reason" in silent["skipped"][0]["reason"]
+
+    moved = _apply(tmp_path, [
+        {"op": "recategorize", "entry": "星野灯", "category": "streamer",
+         "to_category": "common", "reason": "这条其实不是主播"}
+    ])
+    assert [record["op"] for record in moved["applied"]] == ["recategorize"], moved
+
+    repo = KnowledgeRepo.open(tmp_path)
+    subject = next(s for s in repo.subjects() if s.payload["surface"] == "星野灯")
+    assert subject.payload["category"] == "common"
+
+    from finesub.llm.knowledge.node.render import render_subject
+
+    full = render_subject(repo.store, subject.local_id, mode="human", preview="full")
+    partial = render_subject(repo.store, subject.local_id, mode="human", preview="partial")
+    assert "重分类理由" in full and "不是主播" in full
+    assert "重分类理由" not in partial
+
+
+def test_recategorize_parks_a_section_the_target_template_does_not_have(
+    tmp_path: Path,
+) -> None:
+    """The move is where the target preset first applies, so it is where the
+    mismatch has to surface — afterwards the entry just looks like it was
+    always wrong.
+
+    Surfacing it is not the same as refusing it, though. The seeded `common`
+    entry keeps a `角色` section and `streamer` fixes its sections with no such
+    name; the line goes to `streamer`'s staging section and the move lands.
+    Refusing instead rolled back the whole ENVELOPE and told nobody who could
+    act (owner 2026-09-07) — see the blast-radius test below.
+    """
+
+    _seed(tmp_path)
+    report = _apply(tmp_path, [
+        {"op": "recategorize", "entry": "崩坏星穹铁道", "category": "common",
+         "to_category": "streamer", "reason": "试着挪一下"}
+    ])
+    assert [r["op"] for r in report["applied"]] == ["recategorize"], report
+    assert [(p["entry"], p["from_section"]) for p in report["parked"]] == [
+        ("崩坏星穹铁道", "角色")
+    ], report["parked"]
+
+    repo = KnowledgeRepo.open(tmp_path)
+    subject = next(s for s in repo.subjects() if s.payload["surface"] == "崩坏星穹铁道")
+    placed = {m.section for m in repo.store.children(subject.local_id)}
+    assert "角色" not in placed and "待归类" in placed
+
+
+def test_recategorize_still_refuses_when_the_target_cannot_park(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Parking is the remedy; the shape check is still the invariant.
+
+    A preset with no staging section has nowhere to put a homeless line, and
+    then the only honest answer is to refuse the move rather than leave the
+    line sitting in a section that forbids it.
+    """
+
+    from finesub.llm.knowledge.node.presets import Preset
+
+    _seed(tmp_path)
+    monkeypatch.setattr(Preset, "staging_section", lambda self: None)
+    report = _apply(tmp_path, [
+        {"op": "recategorize", "entry": "崩坏星穹铁道", "category": "common",
+         "to_category": "streamer", "reason": "试着挪一下"}
+    ])
+    assert report["applied"] == []
+    assert "角色" in report["rollback_reason"]
+
+# 2026-09-07, second review round: what the two move ops still let through.
+
+
+def _raw_apply(root: Path, ops: list[dict], bindings: list):  # type: ignore[no-untyped-def]
+    """Engine-level apply, for shapes the model vocabulary cannot express."""
+
+    from finesub.llm.knowledge.node.apply import apply_envelope
+    from finesub.llm.knowledge.node.envelope import Envelope
+
+    repo = KnowledgeRepo.open(root)
+    return apply_envelope(
+        repo.store,
+        Envelope(
+            task_id="t", assignment_id="", context_epoch=0,
+            knowledge_read_rev=repo.rev, ops=ops, handle_bindings=bindings,
+        ),
+    )
+
+
+def _line_in(root: Path, surface: str, section: str) -> str:
+    repo = KnowledgeRepo.open(root)
+    subject = next(s for s in repo.subjects() if s.payload["surface"] == surface)
+    return next(
+        m.child_id for m in repo.store.children(subject.local_id) if m.section == section
+    )
+
+
+def _handle_for(root: Path, surface: str, node_id: str) -> tuple[HandleMap, str]:
+    repo = KnowledgeRepo.open(root)
+    subject = next(s for s in repo.subjects() if s.payload["surface"] == surface)
+    handles = HandleMap()
+    repo.entry_prompt_text(subject.local_id, handles)
+    return handles, next(
+        handle for handle, (ident, _) in handles.nodes.items() if ident == node_id
+    )
+
+
+def test_recategorize_parks_a_line_the_target_section_cannot_hold(
+    tmp_path: Path, reported, monkeypatch
+) -> None:
+    """The section NAME fitting is not the same as the LINE fitting.
+
+    A non-strict target accepts every section name, so a name-only check has
+    nothing to report while the section can still forbid the line's shape.
+    ⚠ The shipped presets stopped producing this case when `common`'s free
+    sections were widened to take free sentences too (owner 2026-09-07), so it
+    is driven through the preset seam — the branch is still exactly what the
+    next category with term-only sections will hit.
+    """
+
+    import shutil
+
+    from finesub.llm.knowledge.node import presets as presets_module
+
+    folder = tmp_path / "presets"
+    folder.mkdir()
+    shipped = presets_module._preset_folder()
+    for name in presets_module.CATEGORIES:
+        shutil.copy(str(shipped / f"{name}.toml"), folder / f"{name}.toml")
+    # `_seed` imports the legacy markdown tree, which loads the v1 presets from
+    # a subfolder — the redirect has to bring those along.
+    (folder / "legacy").mkdir()
+    for name in presets_module.CATEGORIES:
+        source = shipped / "legacy" / f"{name}.toml"
+        try:
+            shutil.copy(str(source), folder / "legacy" / f"{name}.toml")
+        except (FileNotFoundError, OSError):
+            pass
+    narrowed = (folder / "common.toml").read_text(encoding="utf-8")
+    narrowed = narrowed.replace('body_kinds = ["term", "note"]', 'body_kinds = ["term"]', 1)
+    (folder / "common.toml").write_text(narrowed, encoding="utf-8")
+    monkeypatch.setattr(presets_module, "_preset_folder", lambda: folder)
+    presets_module.load_preset.cache_clear()
+    try:
+        _seed(tmp_path)
+        report = _apply(tmp_path, [
+            {"op": "recategorize", "entry": "星野灯", "category": "streamer",
+             "to_category": "common", "reason": "这条其实不是主播"}
+        ])
+        assert [r["op"] for r in report["applied"]] == ["recategorize"], report
+        assert "直播内容" in [p["from_section"] for p in report["parked"]], report["parked"]
+
+        repo = KnowledgeRepo.open(tmp_path)
+        subject = next(s for s in repo.subjects() if s.payload["surface"] == "星野灯")
+        staged = [
+            repo.store.node(m.child_id).payload.get("text")
+            for m in repo.store.children(subject.local_id) if m.section == "待归类"
+        ]
+        assert "杂谈" in staged, staged
+        # ...and it is announced. A silent restructuring is the one outcome no
+        # front end should have to read a report to notice.
+        assert "knowledge-recategorize-parked" in reported.codes()
+    finally:
+        presets_module.load_preset.cache_clear()
+
+
+def test_one_unmovable_line_no_longer_drops_the_whole_batch(tmp_path: Path) -> None:
+    """Why parking, and not just a nicer refusal message.
+
+    The shape check reports at the ENVELOPE level, so a refused move used to
+    take every unrelated proposal in the same chunk with it — and the reason
+    reached nobody who could act on it: the knowledge-update round only warns
+    a human, and `conflicted_entries` excludes a rolled-back report from the
+    B' repair round on purpose (owner 2026-09-07).
+    """
+
+    _seed(tmp_path)
+    report = _apply(tmp_path, [
+        {"op": "append_lines", "entry": "崩坏星穹铁道", "category": "common",
+         "section": "角色", "content": "丹恒|丹恒|Dan Heng|列车护卫。", "reason": "无关的一条"},
+        {"op": "recategorize", "entry": "星野灯", "category": "streamer",
+         "to_category": "common", "reason": "会被拒的那条"},
+    ])
+    assert not report["rolled_back"], report["rollback_reason"]
+    assert {r["op"] for r in report["applied"]} == {"append_lines", "recategorize"}, report
+
+    repo = KnowledgeRepo.open(tmp_path)
+    subject = next(s for s in repo.subjects() if s.payload["surface"] == "崩坏星穹铁道")
+    surfaces = {
+        repo.store.node(m.child_id).payload.get("surface")
+        for m in repo.store.children(subject.local_id) if m.section == "角色"
+    }
+    assert "丹恒" in surfaces, surfaces
+
+
+def test_recategorize_demotes_lines_the_target_would_not_share(tmp_path: Path) -> None:
+    """The target preset's share policy governs the lines already there.
+
+    `[人设]` is registered under `streamer` and inherits 档案's `inherit`;
+    `common` does not register it at all, and its `unknown_label_share` is
+    fail-closed `local`. A move that leaves the line `shareable` hands the next
+    push a line the new category never agreed to share.
+    """
+
+    _seed(tmp_path)
+    prep = _apply(tmp_path, [
+        {"op": "append_lines", "entry": "星野灯", "category": "streamer",
+         "section": "档案", "content": "[人设] 元气后辈", "reason": "r"},
+    ])
+    assert len(prep["applied"]) == 1, prep
+
+    repo = KnowledgeRepo.open(tmp_path)
+    subject = next(s for s in repo.subjects() if s.payload["surface"] == "星野灯")
+    persona = next(
+        m.child_id for m in repo.store.children(subject.local_id)
+        if m.section == "档案"
+        and (repo.store.node(m.child_id).payload.get("label") or "") == "人设"
+    )
+    with repo.store.begin("user", note="mark") as txn:
+        txn.update_node(subject.local_id, visibility="shareable")
+        txn.update_node(persona, visibility="shareable")
+
+    moved = _apply(tmp_path, [
+        {"op": "recategorize", "entry": "星野灯", "category": "streamer",
+         "to_category": "common", "reason": "这条其实不是主播"}
+    ])
+    assert [r["op"] for r in moved["applied"]] == ["recategorize"], moved
+    repo = KnowledgeRepo.open(tmp_path)
+    assert repo.store.node(persona).visibility == "local", (
+        "a label the target category does not register must not stay shareable"
+    )
+
+
+def test_move_line_refuses_a_line_that_sits_under_two_entries(tmp_path: Path) -> None:
+    """One handle names the LINE, and a line can be placed under two entries.
+
+    Taking the first membership moves whichever placement the store happens to
+    return first — possibly the one the model was never shown.
+    """
+
+    _seed(tmp_path)
+    from finesub.llm.knowledge.node.envelope import Binding
+
+    repo = KnowledgeRepo.open(tmp_path)
+    streamer = next(s for s in repo.subjects() if s.payload["surface"] == "星野灯")
+    shared = _line_in(tmp_path, "崩坏星穹铁道", "角色")
+    result = _raw_apply(
+        tmp_path,
+        [{"op": "add_membership", "id": "@line", "parent": "@streamer",
+          "section": "人际关系"}],
+        [Binding(handle="@line", kind="node", id=shared,
+                 expected_valid_from_rev=repo.store.node(shared).valid_from_rev),
+         Binding(handle="@streamer", kind="node", id=streamer.local_id,
+                 expected_valid_from_rev=streamer.valid_from_rev)],
+    )
+    assert result.rev is not None, result.rollback_reason
+
+    handles, line_handle = _handle_for(tmp_path, "崩坏星穹铁道", shared)
+    text = ("<knowledge_proposals>\n" + json.dumps(
+        {"op": "move_line", "id": line_handle, "section": "待归类", "reason": "r"},
+        ensure_ascii=False,
+    ) + "\n</knowledge_proposals>")
+    repo = KnowledgeRepo.open(tmp_path)
+    report = apply_model_proposals(
+        text, repo=repo, task_id="t", knowledge_read_rev=repo.rev, handles=handles
+    ).to_dict()
+    assert report["applied"] == [], report
+    assert "两个条目" in report["skipped"][0]["reason"], report
+
+    # ...and it goes through once the proposal says which entry it means.
+    text = ("<knowledge_proposals>\n" + json.dumps(
+        {"op": "move_line", "id": line_handle, "section": "待归类",
+         "entry": "崩坏星穹铁道", "reason": "r"},
+        ensure_ascii=False,
+    ) + "\n</knowledge_proposals>")
+    repo = KnowledgeRepo.open(tmp_path)
+    report = apply_model_proposals(
+        text, repo=repo, task_id="t", knowledge_read_rev=repo.rev, handles=handles
+    ).to_dict()
+    assert [r["op"] for r in report["applied"]] == ["move_line"], report
+    repo = KnowledgeRepo.open(tmp_path)
+    placed = {
+        m.parent_id: m.section for m in repo.store.parents(shared)
+    }
+    assert placed[streamer.local_id] == "人际关系", "the other entry must not move"
+
+
+def test_a_recategorized_entry_still_round_trips_through_the_editor(tmp_path: Path) -> None:
+    """The full preview is an EDITABLE face: whatever it renders must parse.
+
+    The move reason renders there (§0 requirement 13) — and the editor handed
+    that same text back rejected it as an unknown metadata line, so a moved
+    entry could not be edited at all.
+    """
+
+    _seed(tmp_path)
+    moved = _apply(tmp_path, [
+        {"op": "recategorize", "entry": "崩坏星穹铁道", "category": "common",
+         "to_category": "common", "reason": "x"}
+    ])
+    assert moved["applied"] == []  # unchanged category is refused; set it directly
+
+    repo = KnowledgeRepo.open(tmp_path)
+    subject = next(s for s in repo.subjects() if s.payload["surface"] == "崩坏星穹铁道")
+    payload = dict(subject.payload)
+    payload["recategorized_reason"] = "本来放错了类别"
+    with repo.store.begin("user", note="reason") as txn:
+        txn.update_node(subject.local_id, payload=payload)
+
+    from finesub.llm.knowledge.node.edit import edit_subject
+    from finesub.llm.knowledge.node.render import render_subject
+
+    repo = KnowledgeRepo.open(tmp_path)
+    subject = repo.store.node(subject.local_id)
+    text = render_subject(repo.store, subject.local_id, mode="human", preview="full")
+    assert "重分类理由" in text
+    report = edit_subject(repo, subject, text)  # must not raise
+    assert not report.changed, report
+
+
+def test_move_line_refuses_a_section_that_will_not_take_the_line(tmp_path: Path) -> None:
+    """归位 out of the staging section is the move parking makes routine, and
+    the section it goes back into is exactly the one that may not take its
+    shape.
+
+    Per OP, not per envelope: letting it through means `validate_overlay`
+    catches it instead, and that rolls the whole chunk back under a message
+    naming an internal membership id (owner 2026-09-07).
+    """
+
+    _seed(tmp_path)
+    term = _line_in(tmp_path, "崩坏星穹铁道", "角色")
+    handles, handle = _handle_for(tmp_path, "崩坏星穹铁道", term)
+
+    # `档案` takes free sentences only, so a TERM is what it cannot hold. The
+    # batch also carries an unrelated line, which has to survive.
+    repo = KnowledgeRepo.open(tmp_path)
+    text = ("<knowledge_proposals>\n" + "\n".join(json.dumps(p, ensure_ascii=False) for p in [
+        {"op": "append_lines", "entry": "崩坏星穹铁道", "category": "common",
+         "section": "角色", "content": "彦卿|彦卿|Yanqing|云骑军将领。", "reason": "无关的一条"},
+        {"op": "move_line", "id": handle, "section": "档案", "reason": "归位"},
+    ]) + "\n</knowledge_proposals>")
+    report = apply_model_proposals(
+        text, repo=repo, task_id="t", knowledge_read_rev=repo.rev, handles=handles
+    ).to_dict()
+    assert not report["rolled_back"], report["rollback_reason"]
+    assert {r["op"] for r in report["applied"]} == {"append_lines"}, report
+    assert "只放自由句" in report["skipped"][0]["reason"], report["skipped"]
+
+    # ...and a free section does take it, now that those hold both shapes.
+    repo = KnowledgeRepo.open(tmp_path)
+    text = ("<knowledge_proposals>\n" + json.dumps(
+        {"op": "move_line", "id": handle, "section": "地区", "reason": "归位"},
+        ensure_ascii=False) + "\n</knowledge_proposals>")
+    ok = apply_model_proposals(
+        text, repo=repo, task_id="t", knowledge_read_rev=repo.rev, handles=handles
+    ).to_dict()
+    assert [r["op"] for r in ok["applied"]] == ["move_line"], ok
+
+
+def test_a_parked_line_loses_shareable_for_where_it_LANDED(tmp_path: Path) -> None:
+    """The share policy resolves from the section a line sits in, so it has to
+    be answered about the section the line ENDS in.
+
+    `直播内容` inherits sharing; the staging section shares nothing. Demoting
+    before the move asked the question about the section the line just left,
+    and the answer was "keep sharing" (review 2026-09-07, third round).
+    """
+
+    _seed(tmp_path)
+    repo = KnowledgeRepo.open(tmp_path)
+    subject = next(s for s in repo.subjects() if s.payload["surface"] == "崩坏星穹铁道")
+    line = _line_in(tmp_path, "崩坏星穹铁道", "角色")
+    with repo.store.begin("user", note="mark") as txn:
+        txn.update_node(subject.local_id, visibility="shareable")
+        txn.update_node(line, visibility="shareable")
+
+    # `角色` inherits sharing (`common`'s free sections are `"*" = "inherit"`);
+    # `streamer` has no such section, so the line lands in the staging one,
+    # which shares nothing.
+    report = _apply(tmp_path, [
+        {"op": "recategorize", "entry": "崩坏星穹铁道", "category": "common",
+         "to_category": "streamer", "reason": "r"}
+    ])
+    assert [r["op"] for r in report["applied"]] == ["recategorize"], report
+
+    repo = KnowledgeRepo.open(tmp_path)
+    placed = {m.child_id: m.section for m in repo.store.children(subject.local_id)}
+    assert placed[line] == "待归类"
+    assert repo.store.node(line).visibility == "local", (
+        "the staging section shares nothing; a line parked into it must not "
+        "still be a share candidate"
+    )
+
+
+def test_parking_reads_the_placement_this_batch_ends_with(tmp_path: Path) -> None:
+    """An explicit move earlier in the batch is an instruction, not noise.
+
+    Moving a line somewhere the target template CAN hold and then
+    recategorizing is exactly what the contract tells a session to do. Judging
+    against the section the store still records parked it anyway — an
+    automatic move undoing an explicit one.
+    """
+
+    _seed(tmp_path)
+    repo = KnowledgeRepo.open(tmp_path)
+    subject = next(s for s in repo.subjects() if s.payload["surface"] == "崩坏星穹铁道")
+    term = _line_in(tmp_path, "崩坏星穹铁道", "角色")
+    handles, handle = _handle_for(tmp_path, "崩坏星穹铁道", term)
+
+    text = ("<knowledge_proposals>\n" + "\n".join(json.dumps(p, ensure_ascii=False) for p in [
+        # `人际关系` is a streamer section that takes term bodies
+        {"op": "move_line", "id": handle, "section": "人际关系", "reason": "先安顿好"},
+        {"op": "recategorize", "entry": "崩坏星穹铁道", "category": "common",
+         "to_category": "streamer", "reason": "r"},
+    ]) + "\n</knowledge_proposals>")
+    repo = KnowledgeRepo.open(tmp_path)
+    report = apply_model_proposals(
+        text, repo=repo, task_id="t", knowledge_read_rev=repo.rev, handles=handles
+    ).to_dict()
+    assert [r["op"] for r in report["applied"]] == ["move_line", "recategorize"], report
+    assert report["parked"] == [], report["parked"]
+
+    repo = KnowledgeRepo.open(tmp_path)
+    placed = {m.child_id: m.section for m in repo.store.children(subject.local_id)}
+    assert placed[term] == "人际关系", placed
+
+
+def test_a_line_added_in_the_same_batch_is_parked_too(tmp_path: Path) -> None:
+    """The batch's own new lines are judged by the shape check, so they have to
+    reach the parking pass as well — otherwise appending one before the move
+    is the one way left to make the move roll back."""
+
+    _seed(tmp_path)
+    report = _apply(tmp_path, [
+        {"op": "append_lines", "entry": "崩坏星穹铁道", "category": "common",
+         "section": "地区", "content": "贝洛伯格|贝洛伯格|Belobog|雅利洛的城市。", "reason": "r"},
+        {"op": "recategorize", "entry": "崩坏星穹铁道", "category": "common",
+         "to_category": "streamer", "reason": "r"},
+    ])
+    assert not report["rolled_back"], report["rollback_reason"]
+    assert {p["from_section"] for p in report["parked"]} == {"角色", "地区"}, (
+        report["parked"]
+    )
+
+
+def test_a_later_proposal_sees_the_category_this_batch_moved_the_entry_INTO(
+    tmp_path: Path,
+) -> None:
+    """`recategorize` does not take effect until the ops are folded, so every
+    proposal after it resolved the entry from the STORE and was judged against
+    the category it is leaving (review 2026-09-07, fourth round).
+
+    Both directions were wrong, and they fail differently: judged too strictly
+    it is refused per op, judged too loosely it passes translation and dies in
+    validation, which rolls the whole batch back.
+    """
+
+    _seed(tmp_path)
+    # A common entry with a free sentence parked in its staging section.
+    _apply(tmp_path, [
+        {"op": "append_lines", "entry": "崩坏星穹铁道", "category": "common",
+         "section": "待归类", "content": "开播时常提到这部作品。", "reason": "r"},
+    ])
+    parked = _line_in(tmp_path, "崩坏星穹铁道", "待归类")
+    handles, handle = _handle_for(tmp_path, "崩坏星穹铁道", parked)
+
+    repo = KnowledgeRepo.open(tmp_path)
+    text = ("<knowledge_proposals>\n" + "\n".join(json.dumps(p, ensure_ascii=False) for p in [
+        {"op": "recategorize", "entry": "崩坏星穹铁道", "category": "common",
+         "to_category": "streamer", "reason": "r"},
+        # `直播内容` exists only in streamer, and takes free sentences
+        {"op": "move_line", "id": handle, "section": "直播内容", "reason": "归位"},
+    ]) + "\n</knowledge_proposals>")
+    report = apply_model_proposals(
+        text, repo=repo, task_id="t", knowledge_read_rev=repo.rev, handles=handles
+    ).to_dict()
+    assert [r["op"] for r in report["applied"]] == ["recategorize", "move_line"], report
+
+    repo = KnowledgeRepo.open(tmp_path)
+    subject = next(s for s in repo.subjects() if s.payload["surface"] == "崩坏星穹铁道")
+    placed = {m.child_id: m.section for m in repo.store.children(subject.local_id)}
+    assert placed[parked] == "直播内容", placed
+
+
+def test_an_append_after_a_recategorize_is_judged_by_the_new_template(
+    tmp_path: Path,
+) -> None:
+    """The other direction: judged by the category being LEFT, an append that
+    the target forbids passes translation and only fails in `validate_overlay`
+    — which reports per envelope, so the whole batch rolls back."""
+
+    _seed(tmp_path)
+    repo = KnowledgeRepo.open(tmp_path)
+    text = ("<knowledge_proposals>\n" + "\n".join(json.dumps(p, ensure_ascii=False) for p in [
+        {"op": "recategorize", "entry": "崩坏星穹铁道", "category": "common",
+         "to_category": "streamer", "reason": "r"},
+        # a freely named section is legal under `common` and does not exist
+        # under `streamer`, whose six are fixed
+        {"op": "append_lines", "entry": "崩坏星穹铁道", "category": "common",
+         "section": "地区", "content": "贝洛伯格|贝洛伯格|Belobog|雅利洛的城市。", "reason": "r"},
+    ]) + "\n</knowledge_proposals>")
+    report = apply_model_proposals(
+        text, repo=repo, task_id="t", knowledge_read_rev=repo.rev, handles=HandleMap()
+    ).to_dict()
+    assert not report["rolled_back"], report["rollback_reason"]
+    assert [r["op"] for r in report["applied"]] == ["recategorize"], report
+    assert report["skipped"], report
+
+
+def test_a_nickname_left_in_the_alias_column_injects_two_renderings(tmp_path: Path) -> None:
+    """Why "有稳定独立译法的叫法提升为独立术语行" comes with "并从别名列摘掉".
+
+    The match index covers term surfaces AND alias items, and buckets hits by
+    node, so a nickname that is both its own term and an alias of the formal
+    name matches twice — and each hit injects its own line, carrying its own
+    中文定名. The model then gets two answers to one occurrence.
+
+    Also pins the other half of the rule: a term hit injects `format_line` of
+    the matched node and nothing else, so a condition has to live in that
+    line's own fourth column (owner 2026-09-07).
+    """
+
+    from finesub.llm.knowledge.base import match_terms
+
+    _seed(tmp_path)
+    _apply(tmp_path, [
+        {"op": "append_lines", "entry": "崩坏星穹铁道", "category": "common", "section": "角色",
+         "content": "ゆきの|雪乃|ユキノ、ゆっきー|人物正式名。", "reason": "昵称还挂在别名列"},
+        {"op": "append_lines", "entry": "崩坏星穹铁道", "category": "common", "section": "角色",
+         "content": "ゆっきー|小雪|ユッキー|雪乃的昵称；原文用此称呼时译作「小雪」。",
+         "reason": "拆出来的第二条"},
+    ])
+
+    lines = [m.line for m in match_terms(tmp_path, "今日はゆっきーと一緒に配信します")]
+    assert len(lines) == 2, lines
+    assert any(line.startswith("ゆっきー|小雪|") for line in lines)
+    assert any(line.startswith("ゆきの|雪乃|") for line in lines), (
+        "one occurrence, two lines, two different 中文定名 — this is the state "
+        "the discipline exists to prevent"
+    )
+
+    # The remedy is an ordinary `update`: the alias column syncs both ways.
+    repo = KnowledgeRepo.open(tmp_path)
+    subject = next(s for s in repo.subjects() if s.payload["surface"] == "崩坏星穹铁道")
+    formal = next(
+        m.child_id for m in repo.store.children(subject.local_id)
+        if (repo.store.node(m.child_id).payload or {}).get("surface") == "ゆきの"
+    )
+    handles, handle = _handle_for(tmp_path, "崩坏星穹铁道", formal)
+    repo = KnowledgeRepo.open(tmp_path)
+    text = ("<knowledge_proposals>\n" + json.dumps(
+        {"op": "update", "id": handle, "line": "ゆきの|雪乃|ユキノ|人物正式名。",
+         "reason": "昵称已独立成行"}, ensure_ascii=False) + "\n</knowledge_proposals>")
+    report = apply_model_proposals(
+        text, repo=repo, task_id="t", knowledge_read_rev=repo.rev, handles=handles
+    ).to_dict()
+    assert "alias removed" in report["applied"][0]["reason"], report
+
+    lines = [m.line for m in match_terms(tmp_path, "今日はゆっきーと一緒に配信します")]
+    assert len(lines) == 1 and lines[0].startswith("ゆっきー|小雪|"), lines
+
+
+def test_update_reads_the_category_and_section_this_batch_gave_the_line(
+    tmp_path: Path,
+) -> None:
+    """The third entry point with the same hole.
+
+    `recategorize` and `move_line` both land later, at fold time, so an
+    `update` after them resolved the line's owning category AND its section
+    from the store — and the section is what picks the spec the new text is
+    classified against. Judged under `common`'s staging section, a free
+    sentence carrying two pipes was read as a malformed term row; under
+    `streamer`'s `直播内容`, which takes free sentences only, a pipe is just a
+    character (review 2026-09-07, fifth round).
+    """
+
+    _seed(tmp_path)
+    _apply(tmp_path, [
+        {"op": "append_lines", "entry": "崩坏星穹铁道", "category": "common",
+         "section": "待归类", "content": "开播时常提到这部作品。", "reason": "r"},
+    ])
+    line = _line_in(tmp_path, "崩坏星穹铁道", "待归类")
+    handles, handle = _handle_for(tmp_path, "崩坏星穹铁道", line)
+
+    repo = KnowledgeRepo.open(tmp_path)
+    text = ("<knowledge_proposals>\n" + "\n".join(json.dumps(p, ensure_ascii=False) for p in [
+        {"op": "recategorize", "entry": "崩坏星穹铁道", "category": "common",
+         "to_category": "streamer", "reason": "r"},
+        {"op": "move_line", "id": handle, "section": "直播内容", "reason": "归位"},
+        {"op": "update", "id": handle,
+         "line": "常玩的几款：原神 | 星铁 | 绝区零。", "reason": "补全"},
+    ]) + "\n</knowledge_proposals>")
+    report = apply_model_proposals(
+        text, repo=repo, task_id="t", knowledge_read_rev=repo.rev, handles=handles
+    ).to_dict()
+    assert not report["rolled_back"], report["rollback_reason"]
+    assert [r["op"] for r in report["applied"]] == [
+        "recategorize", "move_line", "update"
+    ], report
+
+    repo = KnowledgeRepo.open(tmp_path)
+    assert repo.store.node(line).payload["text"] == "常玩的几款：原神 | 星铁 | 绝区零。"
+
+
+def test_prose_with_pipes_is_read_as_a_term_in_a_mixed_section(tmp_path: Path) -> None:
+    """A known limit, pinned so it is not rediscovered as a bug.
+
+    The v3 grammar infers a line's kind from its shape, and it scoped the pipe
+    rule to term-accepting sections precisely because subtitle lines join
+    speakers with " | ". A section that takes BOTH shapes cannot have it both
+    ways — so widening `common`'s free sections to hold free sentences
+    (owner 2026-09-07) moved that ambiguity into the sections prose now lives
+    in. Three segments is refused, four or more is stored as a term and enters
+    the match index.
+
+    The mitigation is in the contract (write 、 or / instead of |); the real
+    fix, if this ever bites, is an explicit marker for prose in mixed sections,
+    which is a grammar change.
+    """
+
+    _seed(tmp_path)
+    refused = _apply(tmp_path, [
+        {"op": "append_lines", "entry": "崩坏星穹铁道", "category": "common",
+         "section": "角色", "content": "常玩的几款：原神 | 星铁 | 绝区零。", "reason": "r"},
+    ])
+    assert refused["applied"] == [] and "四列" in refused["skipped"][0]["reason"]
+
+    _apply(tmp_path, [
+        {"op": "append_lines", "entry": "崩坏星穹铁道", "category": "common",
+         "section": "角色", "content": "同台的四人：A | B | C | D。", "reason": "r"},
+    ])
+    repo = KnowledgeRepo.open(tmp_path)
+    subject = next(s for s in repo.subjects() if s.payload["surface"] == "崩坏星穹铁道")
+    stored = {
+        repo.store.node(m.child_id).kind: repo.store.node(m.child_id).payload
+        for m in repo.store.children(subject.local_id)
+        if m.section == "角色" and "同台" in str(repo.store.node(m.child_id).payload)
+    }
+    assert "term" in stored, stored
+    assert stored["term"]["surface"].startswith("同台的四人"), stored
+
+    # ...and the same sentence written without pipes is prose, as intended.
+    _apply(tmp_path, [
+        {"op": "append_lines", "entry": "崩坏星穹铁道", "category": "common",
+         "section": "角色", "content": "同台的另外四人：A、B、C、D。", "reason": "r"},
+    ])
+    repo = KnowledgeRepo.open(tmp_path)
+    kinds = {
+        repo.store.node(m.child_id).kind
+        for m in repo.store.children(subject.local_id)
+        if m.section == "角色" and "另外四人" in str(repo.store.node(m.child_id).payload)
+    }
+    assert kinds == {"note"}, kinds
+
+
+def test_update_after_a_recategorize_follows_the_line_into_the_staging_section(
+    tmp_path: Path,
+) -> None:
+    """The automatic move has to be as visible to the batch as the explicit one.
+
+    Parking happens at fold time inside the engine, so the translation layer
+    went on judging a later `update` against the section the line was being
+    moved OUT of — and the sequence the contract teaches (recategorize, then
+    fix the line) was the one shape that failed, while the identical edit in a
+    second batch worked (review 2026-09-07, sixth round).
+    """
+
+    _seed(tmp_path)
+    term = _line_in(tmp_path, "崩坏星穹铁道", "角色")
+    handles, handle = _handle_for(tmp_path, "崩坏星穹铁道", term)
+
+    repo = KnowledgeRepo.open(tmp_path)
+    text = ("<knowledge_proposals>\n" + "\n".join(json.dumps(p, ensure_ascii=False) for p in [
+        {"op": "recategorize", "entry": "崩坏星穹铁道", "category": "common",
+         "to_category": "streamer", "reason": "r"},
+        {"op": "update", "id": handle,
+         "line": "三月七|三月七|March 7th|开朗少女，列车组成员。", "reason": "补描述"},
+    ]) + "\n</knowledge_proposals>")
+    report = apply_model_proposals(
+        text, repo=repo, task_id="t", knowledge_read_rev=repo.rev, handles=handles
+    ).to_dict()
+    assert not report["rolled_back"], report["rollback_reason"]
+    assert [r["op"] for r in report["applied"]] == ["recategorize", "update"], report
+    assert [p["from_section"] for p in report["parked"]] == ["角色"], report["parked"]
+
+    repo = KnowledgeRepo.open(tmp_path)
+    subject = next(s for s in repo.subjects() if s.payload["surface"] == "崩坏星穹铁道")
+    placed = {m.child_id: m.section for m in repo.store.children(subject.local_id)}
+    assert placed[term] == "待归类"
+    assert repo.store.node(term).payload["desc"] == "开朗少女，列车组成员。"

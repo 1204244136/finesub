@@ -3,7 +3,8 @@
 本手册各篇末尾都设有故障排查小节，本页将这些内容汇总为**总索引**：按观察到的现象定位对应文档。
 先介绍两条通用方法：
 
-- **`finesub doctor`** 检查运行环境状态与各路径，怀疑安装异常时优先运行（源码安装对应的自检见
+- **`finesub doctor`** 检查运行环境状态与各路径，并按依赖锁核对运行环境里的文件（`integrity` 一行；
+  加 `--verify-hashes` 连文件内容一起核对），怀疑安装异常时优先运行（源码安装对应的自检见
   [`repo-install.md`](repo-install.md)）。
 - **`--log-level verbose`** 输出更详细的日志，记录各阶段耗时、资源占用与恢复细节。运行结束后，
   `<名字>-metadata.json` 中也包含各阶段耗时，LLM 阶段的汇总位于
@@ -14,17 +15,23 @@
 | 现象 | 去哪 |
 | --- | --- |
 | 运行时报缺少 CTranslate2，或版本号仅为 `4.8.1`（无 `+finesub…` 后缀） | [`ct2-wheel.md`](ct2-wheel.md)：本项目必须使用打过补丁的版本 |
-| `torch.__version__` 不带 `+cu128`（装成了 CPU 版） | [`repo-install.md`](repo-install.md):torch 三件套必须从 PyTorch 官方索引装 |
+| `torch.__version__` 不带平台对应的后缀（`+cu128` / `+rocm7.1` / `+rocm7.2.1`，macOS 无后缀），多半是装成了 CPU 版 | [`repo-install.md`](repo-install.md)：torch 三件套必须从该平台对应的索引装 |
 | URL 输入报「找不到 yt-dlp」 | 源码安装需自行执行 `uv pip install yt-dlp`；托管 CLI 已内置 |
 | 下载模型或运行环境时卡住或极慢 | [`resources.md`](resources.md)「下载走哪条线」：镜像判定与手动覆盖 |
+| 报某个模型文件「不存在」（`No such file or directory`），而文件其实在；安装路径含中文 | [`resources.md`](resources.md)「第一次安装时选盘（仅托管 CLI）」：系统代码页与中文路径 |
+| 提示运行环境「与锁不一致」、正在重建，或自己装进运行环境的包不见了 | [`resources.md`](resources.md)「运行环境的核对与重建」 |
 
 ## 显卡与显存
 
 | 现象 | 意思与去处 |
 | --- | --- |
+| `Warning: a graphics card is installed (NVIDIA / AMD) but nothing here can use it` | 机器上有卡，但这套环境用不上它，整趟都在 CPU 上跑：多半是 torch 装成了不带 GPU 支持的构建，也可能是驱动缺失/过旧，或 `CUDA_VISIBLE_DEVICES` 之类把卡藏了。按告警里的 action 处理；装法见 [`repo-install.md`](repo-install.md) |
 | `Warning: ... falling back to CPU` | 当前阶段无法使用显卡，自动改用 CPU：仍能生成正确字幕，仅速度较慢。各阶段的回退情况见 [`resources.md`](resources.md)「显卡档位与 CPU 回退」 |
 | `Warning: ... the <档位> tier expects N GiB of free VRAM, but only M GiB is free` | **仅为提醒，不会自动降档**：可关闭占用显存的程序、将 `--gpu-tier` 降低一档，或使用 `--device cpu`。详见上一节 |
 | 报错： `--gpu-tier cpu` 与 `--device cuda` 不能同时指定 | 二者互相矛盾；`--gpu-tier cpu` 即表示「本次不使用显卡」 |
+| `Warning: ... runs on ... a combination that is not verified` | 这一阶段跑在未经验收的平台与显卡组合上（例如原生 Linux 上的 N 卡、任一平台上的 A 卡；WSL2 + NVIDIA 属官方支持，不会有这条；只在跑上显卡的阶段提示，所以 macOS 与 CPU 不会出现）：只是提示，行为不变。结果若有异常加 `--device cpu` 对照，并按警告里的地址反馈。等级表见 [`resources.md`](resources.md)「平台与支持等级」 |
+| `Warning: ... an AMD card needs the ROCm/HIP build` | 装的 CTranslate2 不是 AMD 那一版，识别改在 CPU 上跑。**Windows 上属正常**（那版还没发布），Linux 上换成文件名带 `rocm` 的 wheel——见 [`ct2-wheel.md`](ct2-wheel.md) |
+| `Warning: ... amd-device-choice` / 提示设置 `HIP_VISIBLE_DEVICES` | 有核显又有独显时用的是 0 号卡（常是核显），程序不自己换卡。按提示设环境变量后重跑，见 [`resources.md`](resources.md)「AMD 显卡」 |
 | GTX 10 系及更早的老显卡上出现多条回退 CPU 的警告 | 属正常现象：这类显卡的各阶段均在 CPU 上运行，速度较慢但结果正确。如需避免这些警告，可直接使用 `--device cpu`，见 [`resources.md`](resources.md)「这张卡能不能用不是一个问题，是两个」 |
 | 运行中因 CUDA 显存不足而中止 | 处理方法同上：关闭占用显存的程序、降低档位，或使用 `--device cpu`。⚠ 显存不足属进程级中止，程序无法捕获 |
 
@@ -55,7 +62,7 @@
 | 现象 | 去哪 |
 | --- | --- |
 | 修改了 `rendered/` 中的 markdown，本次运行未见生效 | 改动会在**下一次纠错运行**时被收录，见 [`knowledge.md`](knowledge.md) |
-| 运行结束后知识库未更新 | 默认 `--knowledge collect` 只读不写；如需写入须传 `--knowledge update` |
+| 运行结束后知识库未更新 | 默认 `--knowledge read` 只读不写；如需写入须传 `--knowledge update` |
 | `--style` 提示找不到条目 | 需先创建风格条目，见 [`knowledge.md`](knowledge.md)「记住一套翻译口味」 |
 
 ## 批量、中断与续跑
@@ -70,6 +77,7 @@
 
 | 现象 | 去哪 |
 | --- | --- |
+| `Warning: config.toml [<节>] has no setting named '...'; it is ignored` | 这个键或子表没有程序读，写了等于没写，多半是拼错：照提示里列出的认得的键改正。`[llm.bindings]` 要写进某个预设，见 [`model-routing.md`](model-routing.md) |
 | 已写 `config.toml` 但似乎未被读取 | 多为文件名被存成了 `config.toml.txt`，或文件放错了目录，见 [`resources.md`](resources.md)「设置文件 `config.toml`」 |
 | 更换磁盘后模型被重新下载 | [`resources.md`](resources.md)「搬到别的盘」：哪些目录可迁移，以及迁移后缓存为何需留在原处 |
 | 以前用桌面端，换 CLI 后模型又重下 / 卸了桌面端模型没了 | [`resources.md`](resources.md)「从 0.4.x 桌面端迁移」：哪些自动接上、卸桌面之前要先搬什么、手动登记怎么做 |

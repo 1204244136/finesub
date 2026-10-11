@@ -9,9 +9,11 @@ import pytest
 
 from finesub.llm.routing.config import LLMRole, default_role_configs, role_config_for
 from finesub.llm.routing.model_routes import (
+    AUTO_TARGET_LOCAL_AGENT_PROFILES,
     DIFFICULTIES,
     TASK_GROUP_IDS,
     ModelRouteConfigError,
+    auto_pair_native_target_id,
     default_model_routes,
     load_model_routes,
 )
@@ -51,10 +53,6 @@ EXPECTED_GROUPS = {
         "gemini-paid-3_7-flash",
         "gemini-paid-3_8-flash",
     ],
-    "lightweight-default": [
-        "gemini-free-3_5-flash-lite",
-        "gemini-paid-3_5-flash-lite",
-    ],
     "gemini-native-search": [
         "gemini-free-2_5-flash",
         "gemini-paid-3_7-flash",
@@ -66,24 +64,25 @@ EXPECTED_GROUPS = {
     "agy-capable": [
         "gemini-free-3_7-flash",
         "gemini-free-3_8-flash",
-        "local-agy-opus-4_6",
+        "local-agy-sonnet-5_5",
         "local-agy-media-gemini-3_7-flash",
         "local-agy-native-gemini-3_7-flash",
     ],
     "agy-basic": [
         "gemini-free-3_5-flash",
-        "local-agy-opus-4_6",
+        "local-agy-sonnet-5_5",
         "local-agy-media-gemini-3_7-flash",
         "local-agy-native-gemini-3_7-flash",
     ],
     # The `agy` preset's pair: the same rosters with the API head removed.
     "agy-only-capable": [
-        "local-agy-opus-4_6",
+        "local-agy-sonnet-5_5",
         "local-agy-media-gemini-3_7-flash",
         "local-agy-native-gemini-3_7-flash",
     ],
+    "agy-only-fast": ["local-agy-media-gemini-3_7-flash"],
     "agy-only-basic": [
-        "local-agy-opus-4_6",
+        "local-agy-sonnet-5_5",
         "local-agy-media-gemini-3_7-flash",
         "local-agy-native-gemini-3_7-flash",
     ],
@@ -91,28 +90,29 @@ EXPECTED_GROUPS = {
     # headless` takes its task from its command line, which a whole window
     # does not fit into.
     "dsh-capable": [
+        "local-dsh-deepseek-v4_1-flash",
         "local-dsh-deepseek-v4-pro",
-        "local-dsh-deepseek-v4-flash",
+        "local-dsh-native-deepseek-v4_1-flash",
         "local-dsh-native-deepseek-v4-pro",
     ],
     "dsh-basic": [
-        "local-dsh-deepseek-v4-flash",
-        "local-dsh-native-deepseek-v4-pro",
+        "local-dsh-deepseek-v4_1-flash",
+        "local-dsh-native-deepseek-v4_1-flash",
     ],
     # Bound by no packaged preset, like the dsh pair: a person names them, and
-    # then only if their WorkBuddy plan actually reaches these models.
-    "workbuddy-capable": [
-        "local-workbuddy-hy4",
-        "local-workbuddy-deepseek-v4-pro",
-        "local-workbuddy-deepseek-v4-flash",
-        "local-workbuddy-glm-5_3-flash",
-        "local-workbuddy-native-hy4",
+    # then only if their CodeBuddy plan actually reaches these models.
+    "codebuddy-capable": [
+        "local-codebuddy-glm-5_3-flash",
+        "local-codebuddy-deepseek-v4_1-flash",
+        "local-codebuddy-deepseek-v4-pro",
+        "local-codebuddy-native-deepseek-v4_1-flash",
+        "local-codebuddy-native-deepseek-v4-pro",
     ],
-    "workbuddy-basic": [
-        "local-workbuddy-hy3",
-        "local-workbuddy-glm-5_3-flash",
-        "local-workbuddy-deepseek-v4-flash",
-        "local-workbuddy-native-hy3",
+    "codebuddy-basic": [
+        "local-codebuddy-hy3",
+        "local-codebuddy-glm-5_3-flash",
+        "local-codebuddy-deepseek-v4_1-flash",
+        "local-codebuddy-native-hy3",
     ],
     # Reserved and bound by nothing: a conversational worker claims tasks
     # instead of being called, so it may only ever be alone here.
@@ -130,17 +130,14 @@ def test_packaged_groups_expand_to_the_declared_order() -> None:
     } == EXPECTED_GROUPS
 
 
-# Every local-agent target, and what each one promises. No packaged group
-# binds the Codex/Claude rows any more, so nothing else in the suite would
-# notice a rename or a deletion -- and the manuals tell people to bind these
-# ids by hand (quick model selection), which makes them public API.
-EXPECTED_LOCAL_AGENT_TARGETS = {
-    "local-codex-completion-gpt-5_6-luna": ("LOCAL_CODEX", ""),
-    "local-codex-native-gpt-5_6-luna": ("LOCAL_CODEX", "web_search"),
-    "local-codex-completion-gpt-5_6-terra": ("LOCAL_CODEX", ""),
-    "local-codex-native-gpt-5_6-terra": ("LOCAL_CODEX", "web_search"),
-    "local-codex-completion-gpt-5_6-sol": ("LOCAL_CODEX", ""),
-    "local-codex-native-gpt-5_6-sol": ("LOCAL_CODEX", "web_search"),
+# Hand-written local-agent targets (Codex / Claude / agy). dsh and CodeBuddy
+# packaged rows are auto-paired from the catalog -- the structural test below
+# covers those ids so adding a Flash sibling does not copy this table.
+HANDWRITTEN_LOCAL_AGENT_TARGETS = {
+    "local-codex-completion-gpt-6-luna": ("LOCAL_CODEX", ""),
+    "local-codex-native-gpt-6-luna": ("LOCAL_CODEX", "web_search"),
+    "local-codex-completion-gpt-6_1-sol": ("LOCAL_CODEX", ""),
+    "local-codex-native-gpt-6_1-sol": ("LOCAL_CODEX", "web_search"),
     "local-claude-completion-opus-5": ("LOCAL_CLAUDE", ""),
     "local-claude-native-opus-5": ("LOCAL_CLAUDE", "web_search"),
     "local-claude-completion-sonnet-5": ("LOCAL_CLAUDE", ""),
@@ -150,27 +147,11 @@ EXPECTED_LOCAL_AGENT_TARGETS = {
     "local-agy-media-gemini-3_8-flash": ("LOCAL_AGY", ""),
     "local-agy-native-gemini-3_8-flash": ("LOCAL_AGY", "search_web"),
     "local-agy-media-gemini-3_7-flash": ("LOCAL_AGY", ""),
+    "local-agy-media-gemini-3_6-flash": ("LOCAL_AGY", ""),
+    "local-agy-native-gemini-3_6-flash": ("LOCAL_AGY", "search_web"),
     "local-agy-native-gemini-3_7-flash": ("LOCAL_AGY", "search_web"),
-    "local-agy-opus-4_6": ("LOCAL_AGY", ""),
-    "local-dsh-deepseek-v4-flash": ("LOCAL_DSH", ""),
-    "local-dsh-deepseek-v4-pro": ("LOCAL_DSH", ""),
-    "local-dsh-native-deepseek-v4-pro": ("LOCAL_DSH", "web_search"),
-    # WorkBuddy names its rows the way dsh does -- no `completion-` infix --
-    # because both tiers auto-build targets for rows a user adds, and the
-    # generated ids have to look like the packaged ones.
-    "local-workbuddy-hy3": ("LOCAL_WORKBUDDY", ""),
-    "local-workbuddy-native-hy3": ("LOCAL_WORKBUDDY", "web_search"),
-    "local-workbuddy-hy4": ("LOCAL_WORKBUDDY", ""),
-    "local-workbuddy-native-hy4": ("LOCAL_WORKBUDDY", "web_search"),
-    "local-workbuddy-glm-5_3-flash": ("LOCAL_WORKBUDDY", ""),
-    "local-workbuddy-native-glm-5_3-flash": ("LOCAL_WORKBUDDY", "web_search"),
-    "local-workbuddy-deepseek-v4-flash": ("LOCAL_WORKBUDDY", ""),
-    "local-workbuddy-native-deepseek-v4-flash": (
-        "LOCAL_WORKBUDDY",
-        "web_search",
-    ),
-    "local-workbuddy-deepseek-v4-pro": ("LOCAL_WORKBUDDY", ""),
-    "local-workbuddy-native-deepseek-v4-pro": ("LOCAL_WORKBUDDY", "web_search"),
+    "local-agy-sonnet-5_5": ("LOCAL_AGY", ""),
+    "local-agy-opus-5_5": ("LOCAL_AGY", ""),
 }
 
 
@@ -193,21 +174,132 @@ def test_every_local_agent_target_stays_declared_and_keeps_its_promise() -> None
         if target.backend == "local_agent"
     }
 
-    assert declared == EXPECTED_LOCAL_AGENT_TARGETS
-    # The fact has to agree, or the two-layer filter drops the native target.
-    for target_id, (_tier, tool) in EXPECTED_LOCAL_AGENT_TARGETS.items():
+    handwritten = {
+        target_id: info
+        for target_id, info in declared.items()
+        if info[0] not in AUTO_TARGET_LOCAL_AGENT_PROFILES
+    }
+    assert handwritten == HANDWRITTEN_LOCAL_AGENT_TARGETS
+    for target_id, (_tier, tool) in handwritten.items():
         if tool:
             assert routes.target_fact(target_id).supports_native_search, target_id
     # agy grounds through a *second* project (2026-08-15). Opus is text-only and
     # still declares nothing; the Gemini agy fronts backs both the media target
     # and the search-entitled one, so its fact says it can ground while only the
     # native target is allowed to.
-    assert routes.target_fact("local-agy-opus-4_6").supports_native_search is False
+    assert routes.target_fact("local-agy-sonnet-5_5").supports_native_search is False
     assert (
         routes.target_fact("local-agy-native-gemini-3_7-flash").supports_native_search
         is True
     )
     assert routes.target_profile("local-agy-media-gemini-3_7-flash").native_search_tool == ""
+
+
+def test_packaged_dsh_and_codebuddy_facts_grow_a_plain_and_native_pair() -> None:
+    """Adding a catalog row on these tiers must not require a toml target.
+
+    Groups still name members by hand -- that is the product order. The pair
+    itself follows from the shipped fact ids so a Flash sibling is one psv
+    line, not four toml stanzas plus this table.
+    """
+
+    default_model_routes.cache_clear()
+    routes = default_model_routes()
+    packaged = [
+        entry
+        for entry in load_model_catalog()
+        if entry.provider_tier in AUTO_TARGET_LOCAL_AGENT_PROFILES
+    ]
+    assert packaged, "the shipped catalog must still list dsh / CodeBuddy rows"
+
+    expected: dict[str, tuple[str, str]] = {}
+    for entry in packaged:
+        expected[entry.fact_id] = (entry.provider_tier, "")
+        if entry.supports_native_search:
+            expected[auto_pair_native_target_id(entry.fact_id)] = (
+                entry.provider_tier,
+                "web_search",
+            )
+
+    auto_wired = {
+        target_id: (
+            routes.target_fact(target_id).provider_tier,
+            routes.target_profile(target_id).native_search_tool,
+        )
+        for target_id, target in routes.targets.items()
+        if routes.target_fact(target_id).provider_tier
+        in AUTO_TARGET_LOCAL_AGENT_PROFILES
+    }
+    assert auto_wired == expected
+    for target_id, (_tier, tool) in expected.items():
+        if tool:
+            assert routes.target_fact(target_id).supports_native_search, target_id
+            assert routes.targets[target_id].fact_id != target_id
+
+
+def test_a_user_dsh_row_still_gets_one_target_named_after_the_fact(
+    tmp_path: Path,
+) -> None:
+    """The manuals promise one row = one target, even when that row can search.
+
+    Packaged pairs are a product shape. A bind of `my-dsh-gateway` on a
+    searching user row must keep entitling the tool -- emitting a plain+native
+    pair would silently take search off the name they wrote.
+    """
+
+    extra = tmp_path / "model_catalog.psv"
+    extra.write_text(
+        "fact_id|provider_tier|api_model_id|max_input_tokens"
+        "|supports_native_search\n"
+        "my-dsh-gateway|LOCAL_DSH|my-provider/my-model|194000|true\n",
+        encoding="utf-8",
+    )
+    catalog = merge_catalogs(
+        load_model_catalog(), load_model_catalog(extra, self_reported=True)
+    )
+    routes = load_model_routes(catalog=catalog)
+    aliases = [
+        target_id
+        for target_id, target in routes.targets.items()
+        if target.fact_id == "my-dsh-gateway"
+    ]
+    assert aliases == ["my-dsh-gateway"]
+    assert routes.target_profile("my-dsh-gateway").native_search_tool == "web_search"
+
+
+def test_overriding_a_packaged_codebuddy_row_keeps_the_native_target(
+    tmp_path: Path,
+) -> None:
+    """self_reported must not drop the native half groups still name."""
+
+    extra = tmp_path / "model_catalog.psv"
+    extra.write_text(
+        "fact_id|provider_tier|provider_kind|base_url|key_env|display_name"
+        "|api_model_id|max_input_tokens|max_output_tokens|context_window"
+        "|supports_audio|supports_video|supports_native_search|thinking"
+        "|token_scale|rpm|tpm|rpd|tpd|is_free|quality_score"
+        "|video_high_resolution_only|hint_output_ceiling|fallback_model"
+        "|quota_pool\n"
+        "local-codebuddy-hy3|LOCAL_CODEBUDDY|local_agent|||Hunyuan 3 via "
+        "CodeBuddy|hy3|192000|64000|192000|false|false|true|high,high,low"
+        "|1.0|-1|-1|-1|-1|true|60|false|false||per-model\n",
+        encoding="utf-8",
+    )
+    catalog = merge_catalogs(
+        load_model_catalog(), load_model_catalog(extra, self_reported=True)
+    )
+    routes = load_model_routes(catalog=catalog)
+    assert "local-codebuddy-hy3" in routes.self_reported_fact_ids
+    assert routes.targets["local-codebuddy-hy3"].fact_id == "local-codebuddy-hy3"
+    assert (
+        routes.targets["local-codebuddy-native-hy3"].fact_id
+        == "local-codebuddy-hy3"
+    )
+    assert routes.target_profile("local-codebuddy-hy3").native_search_tool == ""
+    assert (
+        routes.target_profile("local-codebuddy-native-hy3").native_search_tool
+        == "web_search"
+    )
 
 
 def test_role_configs_are_derived_from_the_default_preset() -> None:
@@ -216,8 +308,6 @@ def test_role_configs_are_derived_from_the_default_preset() -> None:
     group_by_role = {
         LLMRole.AUDIO_MULTIMODAL: "correction-capable",
         LLMRole.GENERAL_CAPABLE: "research-default",
-        LLMRole.LIGHTWEIGHT: "lightweight-default",
-        LLMRole.LIGHTWEIGHT_MULTIMODAL: "lightweight-default",
     }
 
     for role, group_id in group_by_role.items():
@@ -366,8 +456,8 @@ def test_route_loader_rejects_tier_enablement_mismatch(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "old,new",
     [
-        ('fact = "local-codex-gpt-5_6-luna"', 'fact = "gemini-free-3_5-flash"'),
-        ('fact = "gemini-free-3_7-flash"', 'fact = "local-codex-gpt-5_6-luna"'),
+        ('fact = "local-codex-gpt-6-luna"', 'fact = "gemini-free-3_5-flash"'),
+        ('fact = "gemini-free-3_7-flash"', 'fact = "local-codex-gpt-6-luna"'),
     ],
 )
 def test_route_loader_rejects_backend_fact_provider_mismatch(
@@ -433,13 +523,13 @@ def test_package_data_declares_both_routing_files() -> None:
     assert "model_routes.toml" in package_data
 
 
-@pytest.mark.parametrize("model", ("luna", "sol"))
+@pytest.mark.parametrize("model", ("6-luna", "6_1-sol"))
 def test_local_completion_and_search_targets_reuse_one_runtime_fact(model: str) -> None:
     routes = default_model_routes()
-    completion = routes.targets[f"local-codex-completion-gpt-5_6-{model}"]
-    native = routes.targets[f"local-codex-native-gpt-5_6-{model}"]
+    completion = routes.targets[f"local-codex-completion-gpt-{model}"]
+    native = routes.targets[f"local-codex-native-gpt-{model}"]
 
-    assert completion.fact_id == native.fact_id == f"local-codex-gpt-5_6-{model}"
+    assert completion.fact_id == native.fact_id == f"local-codex-gpt-{model}"
     assert routes.target_profile(completion.id).native_search_tool == ""
     assert routes.target_profile(native.id).native_search_tool == "web_search"
     assert routes.target_fact(native.id).supports_audio is False
@@ -510,7 +600,7 @@ def test_advisory_fact_edits_leave_the_routing_identity_alone(tmp_path: Path) ->
 
 
 def test_default_preset_binds_all_cells_and_matches_the_plan() -> None:
-    """Plan v2 §7: the default preset covers 7 task groups x 3 difficulties;
+    """Plan v2 §7: the default preset covers 4 task groups x 3 difficulties;
     equivalent-migration groups keep today's expansion order, the deliberate
     changes (lites out of correction/high, knowledge's own narrow group) are
     asserted explicitly."""
@@ -519,17 +609,13 @@ def test_default_preset_binds_all_cells_and_matches_the_plan() -> None:
     assert set(routes.task_groups) == {
         "correction-mm",
         "correction-text",
-        "planning-mm",
-        "planning-text",
         "research",
-        "search_judge",
         "knowledge",
     }
-    # 9 bindings since the difficulty-fallback redesign (2026-08-11): every
-    # group binds high; only correction -- whose quality deliberately steps
-    # down at intermediate -- binds a second cell.
+    # 6 bindings: every group binds quality; only correction -- whose quality
+    # deliberately steps down at intermediate -- binds a second cell.
     default = routes.presets["default"]
-    assert len(default.bindings) == 9
+    assert len(default.bindings) == 6
     # Unbound cells walk up: research intermediate/efficiency reuse quality's
     # group, while correction efficiency reuses intermediate's; requested knobs stay.
     assert routes.resolve_binding("default", "research", "intermediate")[0].id == "research-default"
@@ -551,9 +637,6 @@ def test_default_preset_binds_all_cells_and_matches_the_plan() -> None:
     # Equivalent migration: same expansion order as the v1 chains had.
     assert routes.model_groups["research-default"].target_ids == tuple(
         EXPECTED_GROUPS["research-default"]
-    )
-    assert routes.model_groups["lightweight-default"].target_ids == tuple(
-        EXPECTED_GROUPS["lightweight-default"]
     )
 
     # Deliberate changes (§7): correction/high loses the lites (no silent
@@ -597,7 +680,7 @@ def test_a_media_cell_with_nothing_that_can_hear_still_warns() -> None:
 
     routes = load_model_routes(
         user_config={
-            "model_groups": {"deaf": {"targets": ["local-agy-opus-4_6"]}},
+            "model_groups": {"deaf": {"targets": ["local-agy-sonnet-5_5"]}},
             "presets": {
                 "deaf-mm": {
                     "name": "全聋",
@@ -626,7 +709,7 @@ def test_a_media_cell_with_one_hearing_member_reports_its_depth() -> None:
             "model_groups": {
                 "thin": {
                     "targets": [
-                        "local-agy-opus-4_6",
+                        "local-agy-sonnet-5_5",
                         "local-agy-media-gemini-3_8-flash",
                     ]
                 }
@@ -644,7 +727,7 @@ def test_a_media_cell_with_one_hearing_member_reports_its_depth() -> None:
     warnings = routes.preset_binding_warnings("thin-mm")
     depth = [m for m in warnings if "链长为 1" in m]
     assert depth, warnings
-    assert "local-agy-opus-4_6" in depth[0]
+    assert "local-agy-sonnet-5_5" in depth[0]
 
 
 def test_binding_warnings_fire_on_floor_envelope_and_media(tmp_path: Path) -> None:
@@ -680,8 +763,8 @@ def test_a_text_only_member_ahead_of_one_that_hears_is_not_a_warning(
 
     source = Path(__file__).resolve().parents[1] / "src" / "finesub" / "llm" / "routing" / "model_routes.toml"
     data = source.read_text(encoding="utf-8").replace(
-        '[model_groups.lightweight-default]\ntargets = ["gemini-free-3_5-flash-lite",',
-        '[model_groups.lightweight-default]\ntargets = ["local-codex-completion-gpt-5_6-luna", "gemini-free-3_5-flash-lite",',
+        '[model_groups.correction-basic]\ntargets = ["gemini-free-3_5-flash-lite",',
+        '[model_groups.correction-basic]\ntargets = ["local-codex-completion-gpt-6-luna", "gemini-free-3_5-flash-lite",',
         1,
     )
     path = tmp_path / "routes.toml"
@@ -1007,7 +1090,6 @@ def test_task_group_reference_model_is_derived_from_the_default_binding() -> Non
         == "3.5 Flash Lite"
     )
     assert routes.task_group_reference_model("research") == "3.6 Flash"
-    assert routes.task_group_reference_model("search_judge") == "3.5 Flash Lite"
     # Task groups that bind one group for every difficulty read the same.
     assert routes.task_group_reference_model("research", "efficiency") == "3.6 Flash"
 
@@ -1297,7 +1379,7 @@ def test_user_config_overrides_packaged_groups_and_presets() -> None:
     user = {
         "model_groups": {
             # A packaged id: replaces the shipped membership in place.
-            "lightweight-default": {"targets": ["gemini-free-3_1-flash-lite"]},
+            "correction-basic": {"targets": ["gemini-free-3_1-flash-lite"]},
             "mine": {"targets": ["gemini-free-3_5-flash"]},
         },
         "presets": {
@@ -1314,14 +1396,14 @@ def test_user_config_overrides_packaged_groups_and_presets() -> None:
     }
     routes = load_model_routes(user_config=user)
 
-    assert routes.model_groups["lightweight-default"].target_ids == (
+    assert routes.model_groups["correction-basic"].target_ids == (
         "gemini-free-3_1-flash-lite",
     )
     assert routes.presets["default"].name == "我的默认"
-    group, _cell = routes.resolve_binding("default", "search_judge", "quality")
+    group, _cell = routes.resolve_binding("default", "research", "quality")
     assert group.id == "mine"
     # Both overrides are announced; the new id is not (it collides with nothing).
-    assert set(routes.override_notices) == {"模型组 lightweight-default", "预设 default"}
+    assert set(routes.override_notices) == {"模型组 correction-basic", "预设 default"}
     # Overriding is a routing change, so checkpoints invalidate as they should.
     assert routes.routing_identity_digest != base.routing_identity_digest
 
@@ -1438,11 +1520,11 @@ def test_a_preferred_target_rebinds_the_cell_exclusively() -> None:
     silently routing elsewhere, and a deafened media cell says so at load."""
 
     routes = load_model_routes(
-        user_config={"preferred_targets": {"default": "local-agy-opus-4_6"}}
+        user_config={"preferred_targets": {"default": "local-agy-sonnet-5_5"}}
     )
 
     overlaid = _bound_targets(routes, "default", ("correction-mm", "quality"))
-    assert overlaid == ("local-agy-opus-4_6",)
+    assert overlaid == ("local-agy-sonnet-5_5",)
     # a text-only pin deafens the media cell — surfaced as a startup warning
     assert any(
         "没有成员支持音频" in message
@@ -1454,7 +1536,7 @@ def test_a_per_task_group_preference_beats_the_blanket_one() -> None:
     routes = load_model_routes(
         user_config={
             "preferred_targets": {
-                "default": "local-agy-opus-4_6",
+                "default": "local-agy-sonnet-5_5",
                 "research": "gemini-free-3_5-flash-lite",
             }
         }
@@ -1464,7 +1546,7 @@ def test_a_per_task_group_preference_beats_the_blanket_one() -> None:
         "gemini-free-3_5-flash-lite",
     )
     assert _bound_targets(routes, "default", ("knowledge", "quality")) == (
-        "local-agy-opus-4_6",
+        "local-agy-sonnet-5_5",
     )
 
 
@@ -1487,7 +1569,7 @@ def test_a_preference_invalidates_a_resume_that_was_planned_without_it() -> None
 
     assert (
         load_model_routes(
-            user_config={"preferred_targets": {"default": "local-agy-opus-4_6"}}
+            user_config={"preferred_targets": {"default": "local-agy-sonnet-5_5"}}
         ).routing_identity_digest
         != default_model_routes().routing_identity_digest
     )
@@ -1498,7 +1580,7 @@ def test_a_preference_must_name_a_real_target_and_a_real_task_group() -> None:
         load_model_routes(user_config={"preferred_targets": {"default": "nope"}})
     with pytest.raises(ModelRouteConfigError, match="names no task group"):
         load_model_routes(
-            user_config={"preferred_targets": {"correction": "local-agy-opus-4_6"}}
+            user_config={"preferred_targets": {"correction": "local-agy-sonnet-5_5"}}
         )
 
 
@@ -1537,16 +1619,16 @@ def test_runtime_overlay_chain_and_lifecycle() -> None:
 
     try:
         # CLI bare default beats a config per-group pin
-        install_runtime_preferred({"default": "local-agy-opus-4_6"})
+        install_runtime_preferred({"default": "local-agy-sonnet-5_5"})
         routes = load_model_routes(
             user_config={"preferred_targets": {"research": "gemini-free-3_5-flash-lite"}}
         )
         assert _bound_targets(routes, "default", ("research", "quality")) == (
-            "local-agy-opus-4_6",
+            "local-agy-sonnet-5_5",
         )
         # CLI per-group beats CLI default
         install_runtime_preferred(
-            {"default": "local-agy-opus-4_6", "research": "gemini-free-3_5-flash-lite"}
+            {"default": "local-agy-sonnet-5_5", "research": "gemini-free-3_5-flash-lite"}
         )
         routes = load_model_routes(user_config={})
         assert _bound_targets(routes, "default", ("research", "quality")) == (
@@ -1556,7 +1638,7 @@ def test_runtime_overlay_chain_and_lifecycle() -> None:
         install_runtime_preferred(None)
     # cleared: back to the declared composition
     assert _bound_targets(load_model_routes(user_config={}), "default", ("research", "quality")) != (
-        "local-agy-opus-4_6",
+        "local-agy-sonnet-5_5",
     )
 
 
@@ -1569,11 +1651,11 @@ def test_runtime_overlay_reaches_default_routes_and_planning() -> None:
 
     baseline_identity = default_model_routes().routing_identity_digest
     try:
-        install_runtime_preferred({"default": "local-agy-opus-4_6"})
+        install_runtime_preferred({"default": "local-agy-sonnet-5_5"})
         routes = default_model_routes()
         preset = routes.presets[routes.active_preset_id]
         for group_id in set(preset.bindings.values()):
-            assert routes.model_groups[group_id].target_ids == ("local-agy-opus-4_6",)
+            assert routes.model_groups[group_id].target_ids == ("local-agy-sonnet-5_5",)
         assert routes.routing_identity_digest != baseline_identity
     finally:
         install_runtime_preferred(None)
@@ -1634,11 +1716,11 @@ def test_the_correction_envelope_reserves_the_estimate_not_the_ceiling() -> None
     from finesub.llm.routing.profiles import resolve_profile
 
     try:
-        install_runtime_preferred(parse_llm_model_args(["local-workbuddy-hy3"]))
+        install_runtime_preferred(parse_llm_model_args(["local-codebuddy-hy3"]))
         profile = resolve_profile("text", "none", "quality")
         limits = correction_planning_limits(profile)
         routes = default_model_routes()
-        fact = routes.facts["local-workbuddy-hy3"]
+        fact = routes.facts["local-codebuddy-hy3"]
         cap = effective_window_subtitle_cap(None, limits)
         reserve = math.ceil(profile.output_scale * profile.output_coefficient * cap)
 
@@ -1649,3 +1731,127 @@ def test_the_correction_envelope_reserves_the_estimate_not_the_ceiling() -> None
     finally:
         install_runtime_preferred(None)
         default_model_routes.cache_clear()
+
+
+def _catalog_row(**overrides):
+    """A minimal packaged-shaped row, for guards that read whole tables."""
+
+    from finesub.llm.routing.model_catalog import ModelCatalogEntry
+
+    fields_ = dict(
+        fact_id="row-1",
+        provider_tier="LOCAL_CODEBUDDY",
+        provider_kind="local_agent",
+        base_url="",
+        key_env="",
+        display_name="row 1",
+        api_model_id="m1",
+        max_input_tokens=192000,
+        max_output_tokens=64000,
+        context_window=192000,
+        supports_audio=False,
+        supports_video=False,
+        video_high_resolution_only=False,
+        supports_native_search=True,
+        thinking_levels=None,
+        rpm=-1,
+        tpm=-1,
+        rpd=-1,
+        tpd=-1,
+        is_free=False,
+        quality_score=60,
+    )
+    fields_.update(overrides)
+    return ModelCatalogEntry(**fields_)
+
+
+def test_per_model_quota_pool_derives_a_name_nobody_has_to_invent() -> None:
+    """The sentinel is the point: a free line never needs a pool name.
+
+    Naming them by hand (`CODEBUDDY_FREE_HY3`) means renaming one the day a
+    line stops being free, which orphans whatever `.state` recorded under the
+    old key -- and means two rows can share a pool by typo.
+    """
+
+    from finesub.llm.routing.model_catalog import PER_MODEL_QUOTA_POOL
+
+    row = _catalog_row(quota_pool=PER_MODEL_QUOTA_POOL, api_model_id="hy3")
+
+    assert row.effective_quota_pool == "LOCAL_CODEBUDDY:hy3"
+    # Keyed on (tier, model) so an answering model name can be looked up by it.
+    assert _catalog_row(quota_pool="").effective_quota_pool == "LOCAL_CODEBUDDY"
+    assert (
+        _catalog_row(quota_pool="CODEBUDDY_CREDITS").effective_quota_pool
+        == "CODEBUDDY_CREDITS"
+    )
+
+
+def test_a_tier_with_several_allowances_refuses_to_guess_at_an_empty_pool() -> None:
+    """"Empty" is a question nobody answered, not a default worth guessing.
+
+    Either guess is wrong for some row on these tiers, and the expensive one
+    (merging) takes a working line out for hours with no call left to thaw it.
+    So the message says what to type instead.
+    """
+
+    from finesub.llm.routing.model_catalog import _validate_catalog_table
+
+    with pytest.raises(ValueError) as excinfo:
+        _validate_catalog_table([_catalog_row(quota_pool="")], "test table")
+
+    message = str(excinfo.value)
+    assert "per-model" in message and "CODEBUDDY_CREDITS" in message
+    # The other per-line tier is covered by the same rule.
+    with pytest.raises(ValueError):
+        _validate_catalog_table(
+            [_catalog_row(provider_tier="LOCAL_AGY", quota_pool="")], "test table"
+        )
+    # A tier backed by one subscription keeps the old meaning.
+    _validate_catalog_table(
+        [_catalog_row(provider_tier="LOCAL_CODEX", quota_pool="")], "test table"
+    )
+
+
+def test_a_free_row_sharing_a_paid_pool_warns_rather_than_failing_the_load(
+    reported,
+) -> None:
+    """It warns on purpose, and the asymmetry is the finding.
+
+    `is_free` drives nothing else and never has, so its values are unverified
+    annotations. Promoting one to a load-blocking gate would stop a working
+    configuration over a column nobody had reason to keep accurate -- which is
+    exactly what happened the first time this ran (owner 2026-09-05).
+    """
+
+    from finesub.llm.routing.model_catalog import _validate_catalog_table
+
+    _validate_catalog_table(
+        [
+            _catalog_row(fact_id="free", api_model_id="a", quota_pool="SHARED", is_free=True),
+            _catalog_row(fact_id="paid", api_model_id="b", quota_pool="SHARED", is_free=False),
+        ],
+        "test table",
+    )
+
+    notices = [w for w in reported.warnings if "SHARED" in w.message]
+    assert len(notices) == 1
+    assert "free" in notices[0].message and "paid" in notices[0].message
+
+
+def test_the_packaged_catalog_is_validated_even_with_no_override_file() -> None:
+    """The effective table is reached two ways, and both must be checked.
+
+    `default_model_catalog` returns the packaged rows untouched when there is
+    no override, so a guard wired only into `merge_catalogs` is a guard the
+    common case skips.
+    """
+
+    import inspect
+
+    from finesub.llm.routing import model_catalog
+
+    source = inspect.getsource(model_catalog.load_model_catalog)
+    assert "_validate_catalog_table" in source, (
+        "the single-file path must run the whole-table checks too"
+    )
+    assert "_validate_catalog_table" in inspect.getsource(model_catalog.merge_catalogs)

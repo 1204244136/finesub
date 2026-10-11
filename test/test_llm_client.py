@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from datetime import datetime, timedelta, timezone
+import time
 
 import pytest
 
@@ -558,29 +559,15 @@ def test_the_gemini_rest_url_takes_the_base_it_is_given(monkeypatch) -> None:
         def json():
             return {"candidates": []}
 
-        @staticmethod
-        def raise_for_status():
-            return None
-
-    class _Client:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-        def post(self, url, **kwargs):
-            seen["url"] = url
-            return _Response()
+    def fake_post(url, **kwargs):
+        seen["url"] = url
+        return _Response()
 
     # Patched at the module's own seam, not on `httpx` itself. Reaching
     # into `httpx.Client` used to work only because every module shared the
     # one module object -- it silently rerouted the whole process, this test
     # included in whatever else was running.
-    monkeypatch.setattr(llm_runtime, "llm_http_client", _Client)
+    monkeypatch.setattr(llm_runtime, "post_within_deadline", fake_post)
     llm_runtime._gemini_generate_content(
         model="gemini/gemini-3.1-flash-lite",
         messages=[{"role": "user", "content": "hi"}],
@@ -835,7 +822,37 @@ def test_a_credentialed_url_in_an_endpoint_error_is_redacted(monkeypatch) -> Non
     assert all("proxy.example" in entry["why"] for entry in lines)
 
 
-def test_chat_complete_sets_fifteen_minute_timeout(monkeypatch) -> None:
+def test_api_timeouts_scale_with_the_allowed_output() -> None:
+    """64k tokens at 35 tok/s is ~30 min of generation: a flat 15 min cut it off."""
+
+    from finesub.llm import llm_runtime
+
+    big = llm_runtime.api_timeouts(64_000)
+    assert big.soft == 180 + 64_000 / 25
+    assert big.hard == 2 * big.soft
+    assert big.soft > 64_000 / 35, "must outlast a full answer at a slow-but-alive rate"
+
+    small = llm_runtime.api_timeouts(8_000)
+    assert small.soft < big.soft, "a small call gives up on a dead connection sooner"
+
+    # No cap named: the provider applies its own, so budget for the default one.
+    assert llm_runtime.api_timeouts(None) == llm_runtime.api_timeouts(
+        llm_runtime.API_TIMEOUT_DEFAULT_OUTPUT_TOKENS
+    )
+
+
+def _one_key_gemini(monkeypatch, llm_runtime, completion) -> None:
+    monkeypatch.delenv("GEMINI_FREE", raising=False)
+    monkeypatch.delenv("GEMINI_PAID", raising=False)
+    monkeypatch.setattr(
+        llm_runtime,
+        "_read_dotenv",
+        lambda: {"GEMINI_FREE": "{free-main:key1}"},
+    )
+    monkeypatch.setattr(llm_runtime, "_gemini_generate_content", completion)
+
+
+def test_chat_complete_sizes_the_http_timeout_from_max_tokens(monkeypatch) -> None:
     from finesub.llm import llm_runtime
 
     captured: dict = {}
@@ -844,23 +861,94 @@ def test_chat_complete_sets_fifteen_minute_timeout(monkeypatch) -> None:
         captured["timeout"] = kwargs["timeout"]
         return {"choices": [{"message": {"content": "ok"}}], "usage": {}}
 
-    monkeypatch.delenv("GEMINI_FREE", raising=False)
-    monkeypatch.delenv("GEMINI_PAID", raising=False)
-    monkeypatch.setattr(
-        llm_runtime,
-        "_read_dotenv",
-        lambda: {"GEMINI_FREE": "{free-main:key1}"},
-    )
-    monkeypatch.setattr(llm_runtime, "_gemini_generate_content", fake_completion)
+    _one_key_gemini(monkeypatch, llm_runtime, fake_completion)
 
     llm_runtime.chat_complete(
         [{"role": "user", "content": "hi"}],
         provider_tier=GEMINI_FREE_TIER,
         model="gemini/gemini-3.1-flash-lite",
+        max_tokens=32_000,
         retries=0,
     )
 
-    assert captured["timeout"] == 15 * 60
+    # The transport gets the HARD deadline for the whole call; the soft one
+    # never reaches the network. (That the deadline really holds against a
+    # trickling server is `test_llm_http_deadline.py`, which needs sockets.)
+    assert captured["timeout"] == llm_runtime.api_timeouts(32_000).hard
+
+
+def test_a_late_answer_is_used_and_says_how_late(monkeypatch) -> None:
+    """Past the soft deadline the call is held open, not dropped.
+
+    Two warnings bracket it -- "still waiting" when the deadline passes, and
+    how late it was when the answer lands -- and the attempt ledger carries the
+    overrun, so an exchange file shows it too.
+    """
+
+    from finesub.llm import llm_runtime
+    from finesub.reporting import NullReporter, reporting_to
+
+    warnings: list[tuple[str, str]] = []
+
+    class _Warnings(NullReporter):
+        def warning(self, code, message, *, impact="", action="") -> None:
+            warnings.append((code, message))
+
+    def slow_completion(**kwargs):
+        time.sleep(0.3)
+        return {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+    _one_key_gemini(monkeypatch, llm_runtime, slow_completion)
+    monkeypatch.setattr(
+        llm_runtime,
+        "api_timeouts",
+        lambda max_tokens: llm_runtime.ApiTimeouts(soft=0.05, hard=5.0),
+    )
+
+    with reporting_to(_Warnings()):
+        response = llm_runtime.chat_complete(
+            [{"role": "user", "content": "hi"}],
+            provider_tier=GEMINI_FREE_TIER,
+            model="gemini/gemini-3.1-flash-lite",
+            retries=0,
+        )
+
+    assert [code for code, _ in warnings] == [
+        "llm-api-soft-timeout",
+        "llm-api-late-response",
+    ]
+    (attempt,) = response["_harness_api_attempts"]
+    assert attempt["return_code"] == "200", "the late answer is used, not dropped"
+    assert attempt["soft_timeout_sec"] == 0.05
+    assert attempt["soft_timeout_overrun_sec"] > 0
+
+
+def test_an_answer_inside_the_soft_deadline_says_nothing(monkeypatch) -> None:
+    from finesub.llm import llm_runtime
+    from finesub.reporting import NullReporter, reporting_to
+
+    warnings: list[str] = []
+
+    class _Warnings(NullReporter):
+        def warning(self, code, message, *, impact="", action="") -> None:
+            warnings.append(code)
+
+    def fast_completion(**kwargs):
+        return {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+    _one_key_gemini(monkeypatch, llm_runtime, fast_completion)
+
+    with reporting_to(_Warnings()):
+        response = llm_runtime.chat_complete(
+            [{"role": "user", "content": "hi"}],
+            provider_tier=GEMINI_FREE_TIER,
+            model="gemini/gemini-3.1-flash-lite",
+            retries=0,
+        )
+
+    assert warnings == []
+    (attempt,) = response["_harness_api_attempts"]
+    assert "soft_timeout_overrun_sec" not in attempt
 
 
 def test_chat_complete_aborts_after_two_consecutive_timeouts(monkeypatch) -> None:
@@ -1026,6 +1114,12 @@ def test_is_likely_output_limited_uses_usage_metadata() -> None:
         {"usageMetadata": {"candidatesTokenCount": 1_000}}, max_tokens=65_536
     )
     assert not is_likely_output_limited({}, max_tokens=65_536)
+
+
+def test_a_reply_that_only_thought_keeps_its_thinking_tokens() -> None:
+    """Thinking that ran into the output ceiling can come back with no candidates count at all."""
+    dist = extract_token_distribution({"usageMetadata": {"promptTokenCount": 10, "thoughtsTokenCount": 65_000}})
+    assert (dist["thinking_tokens"], dist["output_tokens"], dist["total_output_tokens"]) == (65_000, 0, 65_000)
 
 
 def test_extract_token_distribution_splits_modalities_and_thinking() -> None:
@@ -2526,7 +2620,7 @@ def test_cancel_during_a_polling_wait_returns_at_once(tmp_path, monkeypatch) -> 
 def test_agent_transport_usage_never_trips_the_output_limit_heuristic() -> None:
     """Agent CLIs report SESSION-CUMULATIVE usage in the result event; comparing
     it against a per-turn cap misreads healthy calls as truncated and triggers a
-    needless split-in-half rerun (docs/report 2026-08-28 §2.2: 61,446/65,536
+    needless split-in-half rerun (docs/llm_harness_behavior.md 重试与拼接; 2026-08-28: 61,446/65,536
     observed with zero truncated turns). The agent-shaped raw_response — the
     dict the LOCAL dispatch branch builds with an "agent" key — is exempt; the
     REST path keeps the proximity heuristic."""
@@ -2548,3 +2642,65 @@ def test_agent_transport_usage_never_trips_the_output_limit_heuristic() -> None:
     check = _output_limit_check(dict(agent_response, usage={"completion_tokens": 65_530}), 65_536, 100)
     assert check["limited"] is False
     assert check["basis"] == "agent_session_cumulative_usage_not_comparable"
+
+
+@pytest.mark.parametrize(
+    ("usage", "uncached", "cached"),
+    [
+        # CodeBuddy: input_tokens = cache write + cache read (measured 2026-09-30).
+        (
+            {"input_tokens": 113743, "cache_creation_input_tokens": 24271,
+             "cache_read_input_tokens": 89472, "output_tokens": 100,
+             "source": "codebuddy_result_event"},
+            24271, 89472,
+        ),
+        # Claude Code: Anthropic's split, input_tokens leaves the cache out.
+        (
+            {"input_tokens": 3589, "cache_creation_input_tokens": 2400,
+             "cache_read_input_tokens": 11000, "output_tokens": 100,
+             "source": "claude_code_result_event"},
+            3589 + 2400, 11000,
+        ),
+        # agy: input excludes the cache read reported beside it.
+        (
+            {"input_tokens": 76469, "cached_input_tokens": 93886, "output_tokens": 26383,
+             "reasoning_output_tokens": 23000, "total_tokens": 102852,
+             "source": "agy_result_event"},
+            76469, 93886,
+        ),
+        # Codex: OpenAI's shape, input includes the cached share.
+        (
+            {"input_tokens": 89410, "cached_input_tokens": 43520, "output_tokens": 10549},
+            45890, 43520,
+        ),
+        # Ended on accept: the per-request sums keep their vendor's units.
+        (
+            {"input_tokens": 19792, "cache_creation_input_tokens": 9808,
+             "cache_read_input_tokens": 9984, "output_tokens": 714,
+             "source": "codebuddy_message_events"},
+            9808, 9984,
+        ),
+        (
+            {"input_tokens": 120, "cache_creation_input_tokens": 1200,
+             "cache_read_input_tokens": 900, "output_tokens": 405,
+             "source": "claude_code_message_events"},
+            120 + 1200, 900,
+        ),
+        (
+            {"input_tokens": 28600, "cached_input_tokens": 81339, "output_tokens": 6383,
+             "reasoning_output_tokens": 5202, "total_tokens": 34983,
+             "source": "agy_step_events"},
+            28600, 81339,
+        ),
+    ],
+)
+def test_agent_usage_counts_the_cache_once_in_each_vendors_units(usage, uncached, cached) -> None:
+    """2026-09-30: CodeBuddy's cache vanished (wrong key) and agy's uncached
+    input was subtracted to nothing (its input already excludes the cache)."""
+
+    from finesub.llm.client import agent_usage_payload, extract_token_distribution
+
+    dist = extract_token_distribution({"usage": agent_usage_payload(usage)})
+
+    assert (dist["uncached_input_tokens"], dist["cached_input_tokens"]) == (uncached, cached)
+    assert dist["total_input_tokens"] == uncached + cached

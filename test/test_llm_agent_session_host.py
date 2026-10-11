@@ -752,6 +752,34 @@ def test_a_cli_that_leaves_mid_task_gets_one_fresh_session_on_the_same_task(
     assert any(item.get("premature_stop") for item in result.execution_attempts)
 
 
+def test_a_session_that_left_mid_task_records_how_it_ended(tmp_path, monkeypatch) -> None:
+    """The launch snapshot is not the ending: the text and the capsule verdict are.
+
+    This path used to build its attempt from the `started()` snapshot alone and
+    keep no text, although the driver's result -- the CLI's final message, and
+    whether the driver kept the capsule as unaccepted -- was already in hand.
+    """
+
+    class _Unaccepted(_SessionFakeDriver):
+        def _result(self, n: int):
+            result = super()._result(n)
+            result.content = "I have the answer, but I never called submit."
+            result.execution_attempt["retained_unaccepted"] = True
+            result.execution_attempt["usage"] = dict(result.usage)
+            return result
+
+    _no_api(monkeypatch)
+    driver = _Unaccepted(die_on_session=1)
+    client = _client(driver, tmp_path)
+    with agent_session_scope():
+        result = _complete(client, "window one")
+    stop = next(item for item in result.execution_attempts if item.get("premature_stop"))
+    assert stop["final_text_tail"] == "I have the answer, but I never called submit."
+    assert stop["retained_unaccepted"] is True
+    # The session's usage is booked on the session, never again per task.
+    assert "usage" not in stop
+
+
 def test_a_spent_repair_budget_withdraws_the_task_and_a_replacement_starts_fresh(
     tmp_path, monkeypatch
 ) -> None:
@@ -1072,3 +1100,25 @@ def test_an_entitlement_switch_does_not_spend_a_second_driver_slot(
     assert driver.starved is False
     # The first session ended before the second started: one slot, in turn.
     assert [call["native_search"] for call in driver.calls] == [False, True]
+
+
+def test_the_session_host_never_ends_its_cli_on_one_accept(tmp_path, monkeypatch) -> None:
+    """Exit-on-accept belongs to the single-task tool session: a pseudo
+    session's CLI goes back to `next_task` after an accept, so the host never
+    asks for it and its server never holds a reply -- whatever the setting."""
+
+    from finesub.llm.agent.agent_mcp_server import ACCEPTED_REPLY_HOLD_ENV
+
+    _no_api(monkeypatch)
+    driver = _SessionFakeDriver()
+    driver.config = SimpleNamespace(model="", timeout_seconds=20, exit_on_accept=True)
+    client = _client(driver, tmp_path)
+
+    with agent_session_scope():
+        _complete(client, "window one")
+        _complete(client, "window two")
+
+    assert driver.sessions == 1
+    (call,) = driver.calls
+    assert not call.get("exit_on_completion")
+    assert ACCEPTED_REPLY_HOLD_ENV not in call["mcp_server"]["env"]

@@ -59,8 +59,23 @@ worker 数与 `standard` 相同、显存要求与 `high` 相同，两个数都�
 ⚠ **`auto` 落到 `cpu` 的判据是「驱动报不报得出 CUDA 设备」（`device.cuda_device_present()`），
 不是「torch 用不用得了这张卡」。** 一张老到本 build 没有 kernel 的卡**仍然落 GPU 档**
 （`entry`）：另一个后端——有自己 arch 列表的 patched CTranslate2——可能还跑得动它，而把
-torch 的判断折进档位，等于替所有阶段一次性决定了这件事。那正是
-[stage-device-plan.md](plans/stage-device-plan.md) 要拆掉的混淆。
+torch 的判断折进档位，等于替所有阶段一次性决定了这件事。那正是上面这次拆分要拆掉的混淆。
+
+⚠ **但落 `cpu` 时会看一眼机器上到底有没有卡**（`device.installed_gpu_vendors()`，2026-09-17 owner 定）：
+驱动报不出设备而 OS 又说装着 N 卡或 A 卡时，说明不是「这台机器没有卡」，而是**环境用不上它**——
+torch 装成了不带 GPU 支持的构建（`[asr]` 盖掉 ROCm 版 torch 就是这样）、驱动缺失或过旧、
+或者 `CUDA_VISIBLE_DEVICES` 之类把卡藏了。这种 run 会慢好几倍而屏幕上没有任何线索，所以
+`warn_if_an_installed_card_is_unused()` 每进程提示一次（`gpu-unused`）。真的没有卡时照旧安静——
+那种情况 `resolve_device` 的每阶段回退告警已经说过了。探测只用标准库，且**不问 torch**——它正是在 torch 说没有设备时才被调用的。
+⚠ Windows 侧问的是 `EnumDisplayDevicesW`（当前接着的适配器），**不是驱动类注册表**：后者给每张
+装过的卡留一个子键，本机至今还列着 2026-08 拆掉的 5060 Ti，照它报会让换过卡的机器永远收到这条提示。
+Linux 读 `/sys` 里 PCI class 0x03 的 vendor，本来就只有在场设备。Intel 有意不报：目前没有阶段用得上
+I 卡。显式 `--device cpu` 时也不报——那是用户自己的决定（owner 2026-09-17）。
+
+✱ **每个 torch 阶段问 torch，别问 CTranslate2。** 2026-09-17 复审查出 silero 辅助收到的是**解析后的
+ASR 设备**，于是 A 卡上 CT2 回退 CPU 之后，这个 torch 模型也被按到 CPU——把两个后端的答案合并了一次。
+现在 `run_vad_prefix` 收到的是**请求**设备（叠上 `profile.gpu`），能力那一问由 `resolve_silero_device`
+交给 torch。裁判早就是这么做的（`lang_redecode.referee_device` 的第 3 问），分离器也是。
 
 ✱ **策略必须真的到得了权重。** 分离器不走 `resolve_device`，它自己问 `cuda_usable()`，
 所以 `run_vocal_separation` 把意图、策略与能力**折叠一次**（`--device` 的请求 ∧
@@ -165,6 +180,25 @@ Separator 的 `batch_size` 在当前依赖中无效，固定为 1；“实例数
 单个文件实际创建的 separator worker 数为
 `min(profile separator instances, 文件块数)`；每个 worker 至少取得一个块。
 短音频只有一个块时直接走当前线程，不创建多余线程池。
+
+## 厂商：AMD 与 Apple（2026-09-17）
+
+档位按显存命名，本来就与厂商无关；「这台机器是哪家的卡」只在 `speech/runtime/device.py` 回答
+（`accelerator()`、`is_rocm()`），各阶段只拿回答。用户向的说明在 `docs/manual/resources.md`「AMD 显卡」。
+
+- **AMD（ROCm 版 PyTorch）**：它沿用 `torch.cuda` 与 `cuda` 设备名，所以定档、显存读数、各阶段的
+  放置都照走 NVIDIA 那条代码。`device.py` 里不同的有三处：内核判断是 `gfx` 目标**是否在列表里**
+  （不是下限，`HSA_OVERRIDE_GFX_VERSION` 覆盖后以覆盖值为准）；多卡时**不自己换卡**，只在 0 号之外还有显存更大的卡时
+  提示用 `HIP_VISIBLE_DEVICES` 选它（`larger_amd_card_index`，NVIDIA 恒为 None）——torch 的当前设备按线程记，
+  进程级 `set_device` 管不到分离器的 worker 线程，CTranslate2 又另取编号；编译缓存的键带 `hip<ver>` 与 `gfx` 目标。分离器在 AMD 上
+  不走 AOTI（Linux 可 JIT，Windows 为 eager，`accel.py`）；Qwen 裁判 `auto` 不编译，显卡不原生支持 bf16 时用 float32
+  （`qwen_referee.py`）。**两处对编译的态度相反是有意的**：分离器的 JIT 编译失败会告警并当场退回 eager，
+  代价是一次编译的时间；裁判的定形编译解码步另占 3.5 GiB、且 `close()` 要走 decoder 自己的重置，
+  在没验收过的运行时上默认打开风险不对称——等社区验收记录回来再放。
+  **这些档位数字没有在 AMD 卡上标定过**——统一内存与 ROCm 分配器的余量都可能不同，社区验收记录会带回来。
+- **Apple（MPS）**：`accelerator()` 能认出来，但目前没有阶段用它，`auto` 在 Mac 上落 `cpu` 档。等 MPS 的
+  阶段接上时，`auto` 固定落 `standard`（统一内存报不出「显存」，owner 2026-09-11 定），届时验收要记一组
+  分离 1 实例对 2 实例的吞吐。
 
 ## `auto` 怎么定档（0.5.0 起的默认）
 

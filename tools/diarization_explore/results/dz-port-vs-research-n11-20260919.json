@@ -1,0 +1,68 @@
+[
+ {
+  "ident": "hina-13",
+  "label_change_pct": 0.7523510971786834,
+  "speakers_ours": 8,
+  "speakers_reference": 8
+ },
+ {
+  "ident": "hina-15",
+  "label_change_pct": 0.37735849056603776,
+  "speakers_ours": 8,
+  "speakers_reference": 8
+ },
+ {
+  "ident": "hina-17",
+  "label_change_pct": 0.6944444444444444,
+  "speakers_ours": 9,
+  "speakers_reference": 9
+ },
+ {
+  "ident": "hina-19",
+  "label_change_pct": 0.340522133938706,
+  "speakers_ours": 12,
+  "speakers_reference": 12
+ },
+ {
+  "ident": "hina-20",
+  "label_change_pct": 1.0135135135135136,
+  "speakers_ours": 6,
+  "speakers_reference": 6
+ },
+ {
+  "ident": "hina-23",
+  "label_change_pct": 0.37831021437578816,
+  "speakers_ours": 10,
+  "speakers_reference": 10
+ },
+ {
+  "ident": "hina-25",
+  "label_change_pct": 1.1507479861910241,
+  "speakers_ours": 6,
+  "speakers_reference": 6
+ },
+ {
+  "ident": "hina-26",
+  "label_change_pct": 1.3245033112582782,
+  "speakers_ours": 13,
+  "speakers_reference": 13
+ },
+ {
+  "ident": "hina-27",
+  "label_change_pct": 0.6150061500615006,
+  "speakers_ours": 5,
+  "speakers_reference": 5
+ },
+ {
+  "ident": "hina-31",
+  "label_change_pct": 0.8939974457215837,
+  "speakers_ours": 7,
+  "speakers_reference": 7
+ },
+ {
+  "ident": "hina-32",
+  "label_change_pct": 0.6443298969072165,
+  "speakers_ours": 7,
+  "speakers_reference": 7
+ }
+]

@@ -100,6 +100,23 @@ def test_a_row_option_reaches_run_pipeline(tmp_path, monkeypatch) -> None:
     assert Path(calls[0]["args"][0]) == source
 
 
+@pytest.mark.parametrize("stage, warned", [("raw-srt", True), ("translated-srt", False)])
+def test_a_judge_level_warns_once_when_the_item_stops_before_the_llm_stage(tmp_path, capsys, stage, warned) -> None:
+    """An item past raw-srt runs `run_pipeline` twice, the first time to raw-srt: the warning goes by the item's
+    own target, so it never fires on an ordinary judged run."""
+    source = tmp_path / "input.wav"
+    source.write_bytes(b"fake")
+    build_item({"source": str(source), "stage": stage, "diarize": "judge-text"})
+    assert ("LLM speaker judge runs in the LLM stage" in capsys.readouterr().err) is warned
+
+
+def test_a_diarize_value_from_before_the_rename_is_refused_before_any_work(tmp_path) -> None:
+    source = tmp_path / "input.wav"
+    source.write_bytes(b"fake")
+    with pytest.raises(ValueError, match="acoustics"):
+        build_item({"source": str(source), "stage": "raw-srt", "diarize": "on"})
+
+
 def test_first_pass_stage_timing_reaches_the_final_pass(tmp_path, monkeypatch) -> None:
     source = tmp_path / "input.wav"
     source.write_bytes(b"fake")
@@ -554,6 +571,8 @@ def test_a_url_claims_its_destination_once_the_download_resolves_it(tmp_path, mo
         vad_energy_npz=srt.with_name("vid-vad.npz"),
         aligned_json=srt.with_name("vid-aligned.json"),
         stable_json=srt.with_name("vid-stable.json"),
+        diar_json=srt.with_name("vid-diar.json"),
+        speaker_judge_json=srt.with_name("vid-speaker-judge.json"),
         raw_srt=srt.with_name("vid-raw.srt"),
         translated_srt=srt.with_name("vid-translated.srt"),
         final_srt=srt,

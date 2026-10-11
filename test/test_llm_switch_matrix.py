@@ -24,9 +24,7 @@ from finesub.llm.routing.model_routes import default_model_routes, load_model_ro
 from finesub.llm.routing.profiles import CONTINUITY, DIFFICULTY, MEDIA, RETRIEVAL, resolve_profile
 
 
-ALL_VECTORS = list(
-    itertools.product(MEDIA, MEDIA, RETRIEVAL, DIFFICULTY, CONTINUITY)
-)
+ALL_VECTORS = list(itertools.product(MEDIA, RETRIEVAL, DIFFICULTY, CONTINUITY))
 
 
 def _conflicts(vector) -> bool:
@@ -37,24 +35,16 @@ def _conflicts(vector) -> bool:
     raise.
     """
 
-    correction_media, planning_media, retrieval, difficulty, _continuity = vector
-    return difficulty == "efficiency" and (
-        correction_media != "text" or planning_media != "text" or retrieval != "none"
-    )
+    media, retrieval, difficulty, _continuity = vector
+    return difficulty == "efficiency" and (media != "text" or retrieval != "none")
 
 
 LEGAL_VECTORS = [v for v in ALL_VECTORS if not _conflicts(v)]
 CONFLICTING_VECTORS = [v for v in ALL_VECTORS if _conflicts(v)]
 
 
-def _profile(correction_media, planning_media, retrieval, difficulty, continuity):
-    return resolve_profile(
-        retrieval=retrieval,
-        difficulty=difficulty,
-        continuity=continuity,
-        correction_media=correction_media,
-        planning_media=planning_media,
-    )
+def _profile(media, retrieval, difficulty, continuity):
+    return resolve_profile(media, retrieval, difficulty, continuity)
 
 
 def test_the_axes_are_the_ones_this_matrix_walks() -> None:
@@ -67,34 +57,30 @@ def test_the_axes_are_the_ones_this_matrix_walks() -> None:
     assert RETRIEVAL == ("none", "local", "native")
     assert DIFFICULTY == ("quality", "intermediate", "efficiency")
     assert CONTINUITY == ("serial", "parallel")
-    assert len(ALL_VECTORS) == 3 * 3 * 3 * 3 * 2 == 162
+    assert len(ALL_VECTORS) == 3 * 3 * 3 * 2 == 54
     # efficiency pins media=text and retrieval=none, so it contributes only the
     # two continuity variants; everything else is free.
-    assert len(LEGAL_VECTORS) == 3 * 3 * 3 * 2 * 2 + 2 == 110
-    assert len(CONFLICTING_VECTORS) == 52
+    assert len(LEGAL_VECTORS) == 3 * 3 * 2 * 2 + 2 == 38
+    assert len(CONFLICTING_VECTORS) == 16
 
 
 @pytest.mark.parametrize("vector", LEGAL_VECTORS, ids=lambda v: "-".join(v))
 def test_every_switch_vector_resolves_and_routes(vector) -> None:
     """One combination, walked across every seam the restructure moved."""
 
-    correction_media, planning_media, retrieval, difficulty, continuity = vector
+    media, retrieval, difficulty, continuity = vector
     profile = _profile(*vector)
 
     # 1. The switch vector itself round-trips.
-    assert profile.correction_media == correction_media
-    assert profile.planning_media == planning_media
+    assert profile.correction_media == media
     assert profile.retrieval == retrieval
     assert profile.difficulty == difficulty
     assert profile.continuity == continuity
 
     routes = default_model_routes()
-    correction_group = (
-        "correction-mm" if correction_media != "text" else "correction-text"
-    )
-    planning_group = "planning-mm" if planning_media != "text" else "planning-text"
+    correction_group = "correction-mm" if media != "text" else "correction-text"
 
-    for task_group in (correction_group, planning_group, "research", "search_judge"):
+    for task_group in (correction_group, "research", "knowledge"):
         # 2. The cell resolves to a config with a bound group and a variant.
         config = role_config_for(task_group, difficulty, routes=routes)
         assert config.model_group_id, (task_group, difficulty)
@@ -136,15 +122,10 @@ def test_media_and_retrieval_needs_are_actually_satisfiable(vector) -> None:
     filter then emptied it, which surfaces only at dispatch.
     """
 
-    correction_media, planning_media, retrieval, difficulty, _continuity = vector
+    media, retrieval, difficulty, _continuity = vector
     routes = default_model_routes()
 
-    for task_group, media in (
-        ("correction-mm" if correction_media != "text" else "correction-text",
-         correction_media),
-        ("planning-mm" if planning_media != "text" else "planning-text",
-         planning_media),
-    ):
+    for task_group in ("correction-mm" if media != "text" else "correction-text",):
         config = role_config_for(task_group, difficulty, routes=routes)
         plan = ModelRouter(routes, policy_id="api-only").plan(config)
         survivors = [

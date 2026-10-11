@@ -2,7 +2,7 @@
 
 如何用 `tools/session_replay` 在固定测试床上迭代纠错（correction R2）各处的
 prompt。本文是**长期沉淀**：定位、原则、测试协议、失效模式与产物约定。某一轮的现场
-交接笔记可写在 `docs/report/`（在 `dev` 上被跟踪，但不随仓库发布）。prompt 组装事实见
+交接笔记放 `tmp/`、不进 `docs/`，接手后仍成立的发现提回本文。prompt 组装事实见
 [`../llm_prompts.md`](llm_prompts.md)；精修标定的合并软门槛见
 [`../merge-calibration.md`](merge-calibration.md)；决策记录见
 [`../llm_design_notes.md`](llm_design_notes.md)。
@@ -15,14 +15,14 @@ prompt-iterate 的目的是**通过针对性观察来迭代各处的 prompt**：
 （`finesub.llm.knowledge.update`）不再生成 `<harness_notes>` 或任何 prompt 改进建议。
 
 **边界**：这**不影响知识库更新**（`finesub.llm.knowledge.update` 那条链路照旧——主播设定、
-术语、mistake ledger 等仍走原有反馈采集与自动 apply）。prompt-iterate 只管 prompt
+术语等仍走原有反馈采集与自动 apply）。prompt-iterate 只管 prompt
 文本本身怎么写得更好，知识库管往 prompt 里注入什么事实。两者正交。
 
 **与 run-audit 的分工**：对**已完成**生产/reference run 做离线诊断（schema、知识提案、
 成品 vs 精修、重试/并发时间线）走
 [`agent-tasks/run-audit/SKILL.md`](../agent-tasks/run-audit/SKILL.md)；
 那里会引用本文的验收/抽样口径，但**不替代** session_replay 迭代。发现「该改 fragment」
-后，回到本文 §2 开受控重放。
+后，回到本文 [§2 测试协议](#2-测试协议) 开受控重放。
 
 ## 1. 变体（variant）与 tier
 
@@ -46,7 +46,8 @@ fragment），无分支改动；每个变体**全量指定、无稀疏继承**�
   的行必须在正上方写、单源在界内禁止写）——把 singles 唯一有用的"先想后写"以轻量形式带回、不要 1:1 全窗块；
   note 退化成纯短结论、逐行推理进 reasoning 行。门控只在 prompt 层要求；output_protocol 跳过 reasoning 行、
   仅**核对其 ids 与紧随 sub/discard 行的锚定**并记 `reasoning_rows`/`reasoning_unanchored`（告警级、不使整窗作废）。
-  v62 起为 capable 档生产默认；`--variant capableC` 可用于显式重放同一配置。
+  v62 起为 capable 档生产默认；`--variant capableC` 可用于显式重放同一配置。双向门控保留（owner 2026-10-03）：放宽成「可以写」
+  就失去在决策点逼它推理的作用，去掉「不许写」注释会往逐行 singles 回流；示例必须跟着门控写注释，弱模型照示例写。
 
 所有单窗口 prompt 把目标行重编号为 `1..N`；只读前文按时间顺序编号为 `1-M..0`，离目标最近
 的一行是 `0`。回复只能引用目标正序号，validator 通过后由 harness 映射回稳定源序号。research
@@ -86,40 +87,40 @@ python -m tools.session_replay correction `
 - **Basic 组**：`--model 3.5-flash-lite -n 3 --max-attempts 10`，最多 10 次尝试内取得
   3 次 validation-ok 回复。
 - **Capable 组**：同一 prompt/变体必须同时取得两组结果：
-  1. 默认 `--model 3.7-flash -n 2 --max-attempts 5`，最多 5 次尝试内取得 2 次
-     validation-ok 回复；额度耗尽时依次改用 `--model 3.6-flash`、`--model 3.5-flash`
-     （同样为 2/5）；
+  1. 默认 `--model local-agy-gemini-3_7-flash -n 2 --max-attempts 5`（agy 的 Gemini 3.7 Flash，owner 2026-10-06
+     定为常设，代替 API 的 `3.7-flash`），最多 5 次尝试内取得 2 次 validation-ok 回复；agy 不可用时依次改用
+     `--model 3.7-flash`、`--model 3.6-flash`、`--model 3.5-flash`（同样为 2/5）。⚠ agy 走 agent 通道，prompt
+     外面多一层外壳与胶囊，读数与 API 上的不完全可比，报告里写明用的是哪条；
   2. `--model 3.5-flash-lite -n 3 --max-attempts 10`，纠错变体须同时传同一个
      `--variant capableX`，最多 10 次尝试内取得 3 次 validation-ok 回复。
-- **其他 session replay 沿用相同分档**：`GENERAL_CAPABLE` 轮（`research-r1`、`research-r2`、
-  `fast-round1`）按 Capable 组的 `2/5 + lite 3/10`；纠错 r1（`query`，`LIGHTWEIGHT_MULTIMODAL`）
-  与 search-loop judge（`search-judge`，`LIGHTWEIGHT`）按 Basic 组的 `3.5-flash-lite 3/10`。非 correction
-  session 没有命名变体，直接用 `--model` 钉模型，不传 `--variant`/`--force-tier`。
+- **其他 session replay 沿用相同分档**：`prepare-task`（`GENERAL_CAPABLE`）按 Capable 组的 `2/5 + lite 3/10`，
+  没有命名变体，直接用 `--model` 钉模型，不传 `--variant`/`--force-tier`；`correction-request` 跑在纠错 cell 上，
+  按 correction 的分档并传同一个 `--variant`。
 - **调度约束**：同一模型的 replay 必须串行（跨变体、跨 session 也不能重叠）；不同模型可以并行。
   长任务启动后约每 10 分钟检查一次进度，不做高频轮询，也不要放任运行无人查看。
 - **replay 按 variant 检查当前契约**：capableB/C 是九列 CSV；BasicA/B 是十列 start CSV。
   `start` 只是引导字段，最终时间轴不信任它；benchmark 报偏差仅作
   能力观测。
-- **transport 保护（replay 与生产一致）**：单请求 timeout 为 15 分钟，网络层 sticky retry budget 为 3 次；但连续两次 timeout 时立即抛出当次原始 timeout failure，效果等同耗尽 retry 后的同类 failure，只是不再执行剩余 retry。transport failure 不伪装成 validation sample，也不计入 3/10 或 2/5 的模型回复数。
+- **transport 保护（replay 与生产一致）**：单请求 timeout 随允许的输出量推算（软/硬两段，见 `llm_harness_behavior.md`「API 调用的两段超时」），网络层 sticky retry budget 为 3 次；但连续两次 timeout 时立即抛出当次原始 timeout failure，效果等同耗尽 retry 后的同类 failure，只是不再执行剩余 retry。transport failure 不伪装成 validation sample，也不计入 3/10 或 2/5 的模型回复数。
 - **失败回复审计有最低抽样量**：一轮存在失败时，至少抽查 **5 个失败 sample**；若失败总数
   少于 5，则审计全部。对每个被抽中的失败 sample，至少逐条核查 **10 条 error**；若该 sample
   的 error 总数少于 10，则核查全部。这里的 error 指 validator/parser 报出的具体错误实例或
   对应的实际错误行，不能只看 `summary.md` 的聚合描述。完成这一级抽样后，才可归纳“主要失败
   原因”或真实 error pattern；不得从单个失败、单条报错或仅看错误计数直接外推。
 - 质量判定 = 元信息（tokens / merges / note 纪律）+ 逐行抽查；固定窗
-  `BV1ojjc6MEAs-0001` 另须跑本地
-  `docs/report/BV1ojjc6MEAs-0001-merge-drop-gold-v1.md`（不随仓库发布）
-  的离线 merge/drop gold。中性边界/行双向零罚；漏合并 1、错误合并边界 1；错误合并行只越
+  `BV1ojjc6MEAs-0001` 另须用 `tools/session_replay/benchmarks/BV1ojjc6MEAs-0001-merge-drop-v1.json`
+  跑离线 merge/drop gold（它的人工标注依据在维护者本地的报告里，不随仓库发布）。中性边界/行双向零罚；漏合并 1、错误合并边界 1；错误合并行只越
   软门槛另加 1，越硬门槛先累计软门槛 1、再另加 2；错 drop 5、漏 drop 2。不能再用压缩率或
   validation-ok 代替质量判断。`may_merge` 应容纳人工精修也支持、且在本 prompt 形状约束下
   两种切法都合理的局部边界；不要把“中性”误收紧成“默认禁止”，也不要机械照搬精修中的
   4–8 源超长注释块。
-- **词条管理质量**（query / research-r1 / fast-round1 / correction R2 均适用）：
+- **词条管理质量**（准备任务的请求批、纠错请求回合与交付轮均适用）：
   `keep_entries` 只应包含 carried/preinjected 中实际出现且对后续窗口仍有价值的 key——
   审计时对照 `<carried_entries>` 或 `<preinjected_entries>` 检查：有无引用未注入的词条
   （幻觉 key）、有无遗漏明显仍相关的词条、空块是否合理（确实无后续价值）。
   `requested_entries` 不应重复已透传词条，且请求的 key 必须在 index 中可查；审计时对照
-  `<streamer_index>` / `<common_index>` 验证。
+  prompt 里的 `<*_index>` 块验证（每个可匹配类别一块，2026-09-07 起由类别集合生成，
+  不再是写死的 `<streamer_index>` / `<common_index>` 两块）。
 
 产物：`out/prompt-iterate/BV1ojjc6MEAs-0001/<label>/`（`summary.md` 为入口；**强制变体时只落
 `prompt.system.<variant>.txt`/`prompt.user.<variant>.txt`**——就是实际下发的那份；不强制时才按
@@ -144,7 +145,7 @@ tier 落 `prompt.system.txt`(capable)+`.basic.txt`(basic) 两份参考；`reply-
    “默认边界，不是尽量”——数值现实 + 语气坚定，两者缺一不可。
 4. **正面说“做什么”，别负面禁止一个模型根本没有的概念**：对只输出 `<translated>` 的
    capableB 说“不要写 `<singles>`”，等于凭空引入 singles 概念、制造困惑；直接说“输出一个
-   `<translated>` 终稿”即可（见 §5 singles 残留案例）。
+   `<translated>` 终稿”即可（见 [§5 失效模式知识](#5-失效模式知识) singles 残留案例）。
 5. **罢工是规模下的能力投降**：具名禁令/行数注入救不了错配的模型×任务组合；对症的是
    给对 tier 的 prompt（及必要时结构性缩窗）。
 6. **例外必须带机器可核查的门**（数字+类别）并配正反例；纯判断词例外会被泛化。
@@ -156,9 +157,12 @@ tier 落 `prompt.system.txt`(capable)+`.basic.txt`(basic) 两份参考；`reply-
    thinking 的模型在 thinking 里同理。
 9. **结构性改动会波及多处，改前先 grep 概念全貌**：去掉一个“阶段/块”（如 singles）往往
    横跨契约、示例、merge 规则、reminder、insert 例等多个 fragment；换 param 只碰一处，
-   删块要顺藤摸瓜（见 §5）。
+   删块要顺藤摸瓜（见 [§5 失效模式知识](#5-失效模式知识)）。
 10. **重构要有逐字护栏**：抽取/参数化 prompt 时，对未变的变体做 golden byte-diff，
     确保只动了想动的。
+11. **迭代不能只做加法**：修一个失效模式，先看能不能靠删掉、合并或改写已有的句子解决，
+    实在不行才加；加了新句子，同时找出因此变得多余的旧句子删掉。只增不减的 prompt 越修越长，
+    条款互相稀释（第 2、3 条），新规则还会和旧规则打架。目标是在清晰的前提下尽量简短。
 
 ## 4. 当前合并口径（prompt 层）
 
@@ -183,6 +187,11 @@ tier 落 `prompt.system.txt`(capable)+`.basic.txt`(basic) 两份参考；`reply-
 - **flash-lite 长窗罢工**：286 行整窗下 lite 会模仿示例只输出 N 行、或直接写「(此处省略…)」
   占位——能力投降，靠对 tier 的 prompt + 反占位契约缓解，不是靠加禁令；纯「反偷懒」禁令
   曾被模型在 reasoning 里复述后照样占位，无效。
+- **弱模型会把输入的列布局迁移到输出**（v55–v58，flash-lite）：输入带 `start` 列时，lite 会在九列输出里
+  插回 `start`，v55 的失败绝大多数是这种。对策是让输出列与输入对齐（BasicA/B 的十列，`start` 只作引导，
+  时间轴按源序号回填），而不是禁止它；header 对结构稳定仍有正收益（v57 3/4 对 v58 3/6）。
+- **给 lite 换成 JSONL 对象输出不比带 header 的 CSV 可靠**（v60 / v61 各 0/10）：键名漂移与 JSON 转义是
+  两类新的自由度。该支线已随 v65 删除，别重做。
 - **v77 / v78c 的成品质量审计：查不出可归因的差别，run 间噪声压倒一切（2026-08-25）**：
   每臂 5 份成品，按「这份答案把哪些相邻源接在一起」算 Jaccard——
   **臂内一致度 0.360 / 0.363，跨臂 0.325**：两臂彼此的差别，和各自复跑的差别一样大。
@@ -218,14 +227,6 @@ tier 落 `prompt.system.txt`(capable)+`.basic.txt`(basic) 两份参考；`reply-
     重叠**（0.05 秒，或短行的一半），否则相邻两行漂移 1 毫秒就算彼此覆盖。
   - **`--json` 带上覆盖率**。顶层从裸 score 数组改成 `{"alignment": …|null, "scores": [...]}`；
     自动化比对正是最容易把下界当定论的读者。
-- **⚠️ 固定窗的 merge/drop 金标准已经过期，离线打分现在跑不了（2026-08-25 发现，同日已修，见上条）**：
-  `docs/report/BV1ojjc6MEAs-0001-merge-drop-gold-v1.md` 与
-  `tools/session_replay/benchmarks/BV1ojjc6MEAs-0001-merge-drop-v1.json` 是按 **286 源**标的，
-  而窗口 segments 在重放时从**当前** stable 重建、现在是 **303 源**，`benchmark.py` 直接
-  `ValueError: Benchmark expects 286 sources, fixture has 303` 拒绝执行。
-  也就是说本文 §2 验收标准里「另须跑离线 merge/drop gold」这一步**目前是空的**——2026-08-05
-  VAD 改版之后的每一次 prompt 迭代都没能跑它。要么按新 raw 重标（285 个边界 + 286 行的人工
-  复审，不便宜），要么给 benchmark 加一层源行对齐。**在补上之前，prompt 的质量判断只能靠抽查。**
 - **降低精度要求（v78c）：可见推理里确实不提了、列也更准，但 thinking 总量仍然升（2026-08-25）**：
   按 owner 意见换成"不必逐字符推演、差不多就行、只作分句参考"——不禁止思考，而是让它**不值得**
   精算。agy 3.7-flash api 档 n=5，与 v77 的 n=7 对照：
@@ -258,12 +259,12 @@ tier 落 `prompt.system.txt`(capable)+`.basic.txt`(basic) 两份参考；`reply-
   话题**——模型先要判断"我是不是在推演"，就得先推演一遍。
   **推论（写给下一次）**：想减少某个量上的思考，不要去禁止思考它，而是**把它变得不值得想**
   ——例如降低它的精度要求、或干脆不让模型填。owner 已定「继续由模型填」是为了逼它形成长度
-  判断（见 [`conversational-live-test-plan.md`](plans/conversational-live-test-plan.md) §3 取舍 1），
+  判断（取舍记录在维护者的本地计划里），
   所以这条路暂时封闭；真要动，得先重新审那个取舍。
   产物：`out/prompt-iterate/BV1ojjc6MEAs-0001/{v77-n5-agy37,v78b-n5-agy37,v77-baseline-agy37,v78b-no-derivation-agy37}/`。
 - **「这几列是估算，不必核算」写进契约会降低结构服从（2026-08-24，v78 试作，未采纳）**：
   conversational 首次真机实测里那个 agent 为求 `char_count` 精确而逐字数数、输出剧增
-  （[`conversational-live-test-plan.md`](plans/conversational-live-test-plan.md) §2.2），于是在三个
+  （读数记录在维护者的本地计划里），于是在三个
   output contract fragment 的 `char_count` 条目后加了一句「`char_count`/`duration`/`gap` 是
   估算不是核算，写下判断即可，不要逐字数、反复核对小数位或另写脚本验算」，同时把加权字数
   规则按实现写实（`P*`/`N*`/空格/拉丁字母 0.5，`S*` 计 1，`+ = → ♪` 不算标点）。

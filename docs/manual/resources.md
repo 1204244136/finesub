@@ -46,6 +46,11 @@ $env:FINESUB_BIG_DATA_DIR = "D:\FineSub"          # 或者用环境变量
 安装后如需更改位置，请使用下文的 `finesub relocate`。`--data-dir` 仅在首次安装时生效，不会
 迁移已存在的数据。
 
+⚠ **Windows 用户名是中文时**，默认位置整条路径都含中文。系统代码页不是 UTF-8 的中文 Windows 上，
+部分底层库会因此读错路径、报「文件不存在」。FineSub 已尽量绕开这个问题；首次安装遇到这种路径时会
+提示一次。想彻底避开，就在安装前把环境变量 `FINESUB_HOME` 设到纯英文路径（例如 `D:\FineSub`）——
+运行环境跟着它走，只搬大文件目录不够。
+
 ## 搬到别的盘
 
 ```powershell
@@ -142,7 +147,10 @@ CLI 用户无法直接获得——上文的几行已足以开始使用，其余�
 | `[segmentation]` | `length_scale`：字幕长短偏好 | [`tuning.md`](tuning.md) |
 | `[vad]` | `silero_assist`：语音检测的二次校正开关 | [`tuning.md`](tuning.md) |
 | `[separator]` | `enabled`：要不要跑人声分离（输入已是纯人声时设 `false`） | [`tuning.md`](tuning.md) |
+| `[postprocess]` | `end_extend_seconds` / `flash_gap_seconds`：字幕结尾延长多少、多短的空隙直接合上 | [`tuning.md`](tuning.md) |
+| `[share]` | `remote`：共享知识库的地址（不写就用内置的）；`signing_key`：拉你自己配的那个库时只认这把公钥签的快照（不写就记住第一次见到的；内置库始终用内置公钥） | [`knowledge.md`](knowledge.md) |
 | `[cli]` | `update_check`：新版本提醒 | 本页末节 |
+| `[runtime]` | `integrity_check`：什么时候核对运行环境；`auto_repair`：核对不上时是否自动重建 | 本页「运行环境的核对与重建」 |
 
 每一项都是可选的，没写的照旧用默认值；命令行给了同一项就以命令行为准。
 
@@ -211,8 +219,9 @@ finesub uninstall --purge-user-data  # 连设置、API Key、知识库一起删
 ### 本地 Agent 失败现场
 
 本地 Agent 每次调用会在专用目录中建立一个一次性 episode。transport 成功后立即删除；transport
-失败，或成功后的目录清理失败时才保留。保留项是有界的 prompt、事件流、stderr 与 staging 文本，
-用于定位失败，不承担 resume 正确性。
+失败、成功后的目录清理失败，或 Agent 没交出答案就退出时才保留。保留项是有界的 prompt、事件流、
+stderr 与 staging 文本，用于定位失败，不承担 resume 正确性。失败现场只留最近 20 个；没交出答案就
+退出的另算，只留最近 10 个，两边互不挤占。
 
 Agy 媒体后端还会在同一协调域的 `.agents` 下保存 FineSub 生成的 project id、hook、路径 guard
 与 custom agent 定义；它们是可再生的执行配置，随当前域的 `agent-clean` 一起删除。Agy CLI 自己
@@ -243,14 +252,90 @@ finesub agent-clean --all-domains --force  # 非交互确认
 当作有效文件，而是原地改名保留，便于排查是断线还是数据源问题，随后会重新下载。该文件对程序运行
 没有任何作用，**可随时删除**；保留它也仅占用该次下载的空间。
 
+## 运行环境的核对与重建
+
+运行环境（`runtime\python`）由 FineSub 管理：装什么、装哪个版本，由程序自带的依赖锁决定。FineSub 会
+把它和锁逐个文件对照，对不上就按锁重建——不需要重新下载时几分钟就好。
+
+**什么时候核对**（`config.toml` 的 `[runtime] integrity_check`）：
+
+| 值 | 什么时候 |
+| --- | --- |
+| `auto`（默认） | 新装或升级 FineSub 之后，直到成功跑完一次转写之前，每次转写前都核对；转写失败之后也核对一次 |
+| `on` | 每次转写前 |
+| `off` | 不自动核对 |
+
+核对只看文件在不在、包的版本对不对，约几秒钟。`finesub doctor` 随时可以手动核对；加
+`--verify-hashes` 还会逐个文件核对内容（约二十秒）。
+
+**对不上时**：FineSub 先说明哪里不对、重建会去掉什么，再按锁重建。
+
+- 文件缺失**多半是杀毒软件隔离了它们**：请把运行环境目录与下载缓存目录（`<FINESUB_HOME>\runtime`、`<FINESUB_HOME>\cache`，
+  重建后仍失败的报错里会写出完整路径）加进杀毒软件的白名单，否则重建时还会再被隔离。
+- 有别的 FineSub 任务正在运行时不会重建（它正在用这些文件），等它结束后再运行一次即可。
+- `finesub setup --repair` 可以随时手动按锁重建，并在装完后逐个文件核对内容。
+
+**直接改过运行环境的**（往里面装包、升级或卸载某个包），这些改动在重建时会被去掉，重建说明里会列出来。
+需要额外的 Python 包时，把它们装在运行环境之外的目录，再用环境变量 `FINESUB_EXTRA_PYTHONPATH` 指过去
+（多个目录用 `;` 分隔）：转写时它们排在 FineSub 自己的模块之后，重建也不影响它们。想完全自己管理运行
+环境的，在 `config.toml` 里写：
+
+```toml
+[runtime]
+auto_repair = false   # 对不上时只提示，不自动重建（包括升级 FineSub 带来的重建；第一次安装不受影响）
+```
+
 ## 显卡支持范围与档位
 
 ### 哪些显卡能用
 
 | | 型号 |
 | --- | --- |
-| 支持 | RTX 50 / 40 / 30 / 20 系（含 Ti、SUPER、笔记本版），GTX 1660、GTX 1650，以及数据中心的 V100 / A100 / H100 —— 显存需 ≥4GB |
-| 不支持 | GTX 10 系及更早（1080 / 1070 / 1060 / 1050、GTX 9 系等），以及 AMD、Intel 核显 |
+| NVIDIA | RTX 50 / 40 / 30 / 20 系（含 Ti、SUPER、笔记本版），GTX 1660、GTX 1650，以及数据中心的 V100 / A100 / H100 —— 显存需 ≥4GB |
+| AMD（实验） | 装了 ROCm 版 PyTorch 的 Radeon RX 6800 / 6900、RX 7000 / 9000 系与 Strix 系列 APU（RX 6700 XT 等要靠 `HSA_OVERRIDE_GFX_VERSION`，见下文「AMD 显卡」）。Windows 上只覆盖 RX 7000 / 9000 系与 Strix APU，且识别仍在 CPU，见下方等级表 |
+| 不支持 | GTX 10 系及更早（1080 / 1070 / 1060 / 1050、GTX 9 系等），Intel 显卡，以及 Apple 的 GPU（Mac 上目前只走 CPU） |
+
+### 平台与支持等级
+
+| 平台 + 硬件 | 等级 | 装法 |
+| --- | --- | --- |
+| Windows + NVIDIA | 官方支持 | 托管 CLI 或源码 |
+| Windows + CPU | 官方支持 | 托管 CLI 或源码 |
+| Linux（WSL2）+ NVIDIA | 官方支持 | 源码 ⚠ |
+| Linux（原生）+ NVIDIA | 实验 | 源码 ⚠ |
+| Linux + AMD | 实验 | 源码 ⚠ |
+| Windows + AMD | 实验（识别在 CPU） | 源码，用 `[asr-win-rocm]`：分离与第二模型上卡，识别留 CPU（Windows 的 ROCm 版 CTranslate2 还没发布）。AMD 的这条线是预览版：限 RX 7000 / 9000 系与 Strix APU、Windows 11、驱动 26.2.2、Python 3.12——见 [`repo-install.md`](repo-install.md)「Windows 上的 A 卡」 |
+| macOS（Apple Silicon）+ CPU | 实验 | 源码 ⚠ |
+
+⚠ **带标记的四行现在还跑不了识别**：它们要的 patched CTranslate2（manylinux / macosx）由 CI 编好但
+**尚未发布**，装到的是原版，识别阶段会在加载模型时报错（其余阶段照常）。Windows 的三行不受影响。
+等级说的是「验收到什么程度」，与 wheel 发没发布是两件事。
+
+- **官方支持**：维护者在自己的机器上验收过。
+- **社区验收**：有贡献者按[社区验收套件](../../tools/hw_acceptance/README.md)交回过记录，维护者看过。
+  文档会写明最近一次验收时的版本；版本更新后不会自动降级。
+- **实验**：能装能跑，但没人验收过。
+
+⚠ **等级只是提示，不改变任何行为**：哪个阶段用显卡、什么默认开，与等级无关。它唯一的作用是：
+某个阶段跑在未经验收的加速器上时，运行时会输出一条 `unverified-accelerator` 警告，说明是哪个阶段、
+哪张卡，并告诉你两件事——结果若有异常，加 `--device cpu` 退回 CPU；以及去哪里反馈。
+
+非 Windows 平台只支持源码装法（[`repo-install.md`](repo-install.md)），托管 CLI 仍只支持 Windows。
+
+### AMD 显卡
+
+AMD 卡通过 ROCm 版 PyTorch 使用，它沿用 `cuda` 这个设备名，所以 `--device cuda` 同样表示用 AMD 卡。
+
+- **哪些卡有内核**：AMD 的 GPU 内核按架构（`gfx` 目标）分别编译，不能跨目标运行。所以判断的是
+  「这张卡的目标在不在 PyTorch 的构建列表里」，不在就回退 CPU 并说明原因。RX 6700 XT 这类不在列表里、
+  但与列表中某个目标接近的卡，可以按惯例设置 `HSA_OVERRIDE_GFX_VERSION`（例如 `10.3.0`），
+  此时判断的就是覆盖后的目标。
+- **识别**：需要打过补丁的 CTranslate2 的 ROCm 版（见 [`ct2-wheel.md`](ct2-wheel.md)），它的构建目标是
+  RX 6800 / 6900、RX 7000 / 9000 系与 Strix 系列 APU。装的是 CUDA 版或 CPU 版时，识别回退 CPU，其余阶段照常用卡。
+- **有核显又有独显**：程序不会自己换卡，用的是 0 号设备（常常是核显）。若有显存更大的卡，运行时会提示一次
+  `amd-device-choice`，告诉你该设置 `HIP_VISIBLE_DEVICES=<编号>`；设置后程序只看得见那张卡。已经设置了
+  `CUDA_VISIBLE_DEVICES`、`HIP_VISIBLE_DEVICES`、`ROCR_VISIBLE_DEVICES` 或 `GPU_DEVICE_ORDINAL` 中任一个时不提示。
+- **第二模型校验**：显卡不原生支持 bfloat16（RDNA3 之前）时改用 float32；编译加速在 AMD 卡上默认不开。
 
 不支持的显卡**不会报错，而是自动回退到 CPU**，并在 stderr 输出一条 `Warning:`。回退后仍能生成
 正确的字幕，但速度明显变慢（人声分离尤甚），长音频不建议采用此方式；如需从一开始就避免这些警告，
@@ -333,11 +418,17 @@ worker 数量不随之增加是刻意设计：第三个 worker **实测反而更
 `<repo>/.state`)，完全不访问 `%LOCALAPPDATA%`，开发过程中的产物不会混入日常使用的知识库。
 如需仓库运行同样接入共享数据，请设置 `FINESUB_CHECKOUT_DATA=0`。
 
-git worktree 会共用**主仓**的知识库和配置。为避免在 worktree 里做的实验提交进主仓知识库，
-worktree 中的知识库自动更新默认跳过；确实要写就设 `FINESUB_KNOWLEDGE_WRITE=1`。
+git worktree 会共用**主仓**的知识库和配置。为避免在 worktree 里做的实验写进主仓知识库，
+worktree 中对主仓（或本机安装的）知识库的自动写入默认跳过——任务后的知识库更新、rendered/
+收割、以及命中/曝光统计都在内；确实要写就设 `FINESUB_KNOWLEDGE_WRITE=1`。
+用 `--knowledge-root` 指向别的目录时照常写。
+
+源码运行用的是你自己装的 Python 环境，不做[运行环境的核对与重建](#运行环境的核对与重建)里的核对，也不会重建
+它。装在中文路径下时 FineSub 绕开读错路径的那几处处理同样生效，但[第一次安装时选盘](#第一次安装时选盘仅托管-cli)里那条
+提示只有托管 CLI 才打。
 
 源码 checkout 的 Agent episode 不放进仓库：主 checkout 与其 worktree 共用
-`%TEMP%\finesub-agent-runtime\<完整域 digest>`，两个独立 clone 则彼此隔离。这里同样只有
-transport 失败或成功后的清理失败会留下现场；用 `finesub agent-clean`（源码 checkout 里是
+`%TEMP%\finesub-agent-runtime\<完整域 digest>`，两个独立 clone 则彼此隔离。留下现场的条件与
+名额同[本地 Agent 失败现场](#本地-agent-失败现场)（transport 失败、清理失败、没交出答案就退出）；用 `finesub agent-clean`（源码 checkout 里是
 `python -m finesub.llm.agent.agent_cleanup`）清理当前域。设置 `FINESUB_CHECKOUT_DATA=0` 后改用
 上面的托管 `agent-capsules` 位置。

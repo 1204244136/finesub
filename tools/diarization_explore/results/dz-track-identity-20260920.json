@@ -1,0 +1,570 @@
+[
+ {
+  "ident": "hina-20",
+  "a": 1,
+  "b": 2,
+  "same": false,
+  "centroid": 0.34153795126740194,
+  "reembedded": 0.3919563101838752
+ },
+ {
+  "ident": "hina-20",
+  "a": 1,
+  "b": 3,
+  "same": true,
+  "centroid": 0.3049655586035609,
+  "reembedded": 0.4540354797195768
+ },
+ {
+  "ident": "hina-20",
+  "a": 1,
+  "b": 4,
+  "same": false,
+  "centroid": 0.8531306581886923,
+  "reembedded": 0.9881756191712859
+ },
+ {
+  "ident": "hina-20",
+  "a": 2,
+  "b": 3,
+  "same": false,
+  "centroid": 0.6263853106345008,
+  "reembedded": 0.8093888964876554
+ },
+ {
+  "ident": "hina-20",
+  "a": 2,
+  "b": 4,
+  "same": false,
+  "centroid": 0.9603775953523278,
+  "reembedded": 1.0519929161419619
+ },
+ {
+  "ident": "hina-20",
+  "a": 3,
+  "b": 4,
+  "same": false,
+  "centroid": 0.8451215521521651,
+  "reembedded": 0.9289191120683056
+ },
+ {
+  "ident": "hina-23",
+  "a": 0,
+  "b": 1,
+  "same": true,
+  "centroid": 0.8711503665182017,
+  "reembedded": 0.8746991881466516
+ },
+ {
+  "ident": "hina-23",
+  "a": 0,
+  "b": 2,
+  "same": true,
+  "centroid": 0.8290700523852012,
+  "reembedded": 0.6208488880846508
+ },
+ {
+  "ident": "hina-23",
+  "a": 0,
+  "b": 3,
+  "same": false,
+  "centroid": 0.866301837551555,
+  "reembedded": 0.7667826170143021
+ },
+ {
+  "ident": "hina-23",
+  "a": 0,
+  "b": 4,
+  "same": true,
+  "centroid": 0.9774661819820264,
+  "reembedded": 0.9383151604170666
+ },
+ {
+  "ident": "hina-23",
+  "a": 0,
+  "b": 5,
+  "same": true,
+  "centroid": 0.8023464850188878,
+  "reembedded": 0.786080144122416
+ },
+ {
+  "ident": "hina-23",
+  "a": 0,
+  "b": 6,
+  "same": true,
+  "centroid": 0.7506136797989378,
+  "reembedded": 0.850366981513168
+ },
+ {
+  "ident": "hina-23",
+  "a": 0,
+  "b": 7,
+  "same": false,
+  "centroid": 0.8492332077067901,
+  "reembedded": 0.8281929664730997
+ },
+ {
+  "ident": "hina-23",
+  "a": 0,
+  "b": 8,
+  "same": false,
+  "centroid": 0.82176134830709,
+  "reembedded": 0.8243258209076931
+ },
+ {
+  "ident": "hina-23",
+  "a": 0,
+  "b": 9,
+  "same": false,
+  "centroid": 1.0553625291501463,
+  "reembedded": 0.823993216780301
+ },
+ {
+  "ident": "hina-23",
+  "a": 1,
+  "b": 2,
+  "same": true,
+  "centroid": 0.7618518042623956,
+  "reembedded": 0.8150127884717743
+ },
+ {
+  "ident": "hina-23",
+  "a": 1,
+  "b": 3,
+  "same": false,
+  "centroid": 0.8570133865676349,
+  "reembedded": 0.8382345803120412
+ },
+ {
+  "ident": "hina-23",
+  "a": 1,
+  "b": 4,
+  "same": true,
+  "centroid": 0.7202424741467194,
+  "reembedded": 0.8690607243447326
+ },
+ {
+  "ident": "hina-23",
+  "a": 1,
+  "b": 5,
+  "same": true,
+  "centroid": 0.8363423907418794,
+  "reembedded": 0.8663549413991285
+ },
+ {
+  "ident": "hina-23",
+  "a": 1,
+  "b": 6,
+  "same": true,
+  "centroid": 0.9466375550498812,
+  "reembedded": 0.9403749913297268
+ },
+ {
+  "ident": "hina-23",
+  "a": 1,
+  "b": 7,
+  "same": false,
+  "centroid": 0.9002292030280493,
+  "reembedded": 0.8888936427537324
+ },
+ {
+  "ident": "hina-23",
+  "a": 1,
+  "b": 8,
+  "same": false,
+  "centroid": 0.9036825787362951,
+  "reembedded": 0.9469239376226167
+ },
+ {
+  "ident": "hina-23",
+  "a": 1,
+  "b": 9,
+  "same": false,
+  "centroid": 0.9561833342597782,
+  "reembedded": 0.8602011166131605
+ },
+ {
+  "ident": "hina-23",
+  "a": 2,
+  "b": 3,
+  "same": false,
+  "centroid": 0.3282975576953918,
+  "reembedded": 0.3430931968403913
+ },
+ {
+  "ident": "hina-23",
+  "a": 2,
+  "b": 4,
+  "same": true,
+  "centroid": 0.5747801263670411,
+  "reembedded": 0.7006792219146951
+ },
+ {
+  "ident": "hina-23",
+  "a": 2,
+  "b": 5,
+  "same": true,
+  "centroid": 0.780159772389935,
+  "reembedded": 0.906982764476141
+ },
+ {
+  "ident": "hina-23",
+  "a": 2,
+  "b": 6,
+  "same": true,
+  "centroid": 0.9055196842455046,
+  "reembedded": 0.8835365467829119
+ },
+ {
+  "ident": "hina-23",
+  "a": 2,
+  "b": 7,
+  "same": false,
+  "centroid": 0.8756817122680652,
+  "reembedded": 0.8996479248019671
+ },
+ {
+  "ident": "hina-23",
+  "a": 2,
+  "b": 8,
+  "same": false,
+  "centroid": 0.7969320627540402,
+  "reembedded": 0.8384915984751473
+ },
+ {
+  "ident": "hina-23",
+  "a": 2,
+  "b": 9,
+  "same": false,
+  "centroid": 0.933758113278542,
+  "reembedded": 0.8630048683545473
+ },
+ {
+  "ident": "hina-23",
+  "a": 3,
+  "b": 4,
+  "same": false,
+  "centroid": 0.6071511058422556,
+  "reembedded": 0.713951271730193
+ },
+ {
+  "ident": "hina-23",
+  "a": 3,
+  "b": 5,
+  "same": false,
+  "centroid": 0.684407482739289,
+  "reembedded": 0.7713968384381569
+ },
+ {
+  "ident": "hina-23",
+  "a": 3,
+  "b": 6,
+  "same": false,
+  "centroid": 0.8621029487330247,
+  "reembedded": 0.84327101116334
+ },
+ {
+  "ident": "hina-23",
+  "a": 3,
+  "b": 7,
+  "same": true,
+  "centroid": 0.8987446992070723,
+  "reembedded": 0.9240891104020581
+ },
+ {
+  "ident": "hina-23",
+  "a": 3,
+  "b": 8,
+  "same": true,
+  "centroid": 0.8233070671097353,
+  "reembedded": 0.8795651311787722
+ },
+ {
+  "ident": "hina-23",
+  "a": 3,
+  "b": 9,
+  "same": true,
+  "centroid": 0.957471323984169,
+  "reembedded": 0.8206362518342134
+ },
+ {
+  "ident": "hina-23",
+  "a": 4,
+  "b": 5,
+  "same": true,
+  "centroid": 0.798311190582824,
+  "reembedded": 0.970203551303412
+ },
+ {
+  "ident": "hina-23",
+  "a": 4,
+  "b": 6,
+  "same": true,
+  "centroid": 0.8319208685722215,
+  "reembedded": 0.9190433467080777
+ },
+ {
+  "ident": "hina-23",
+  "a": 4,
+  "b": 7,
+  "same": false,
+  "centroid": 0.8653269324323825,
+  "reembedded": 0.9468976749989843
+ },
+ {
+  "ident": "hina-23",
+  "a": 4,
+  "b": 8,
+  "same": false,
+  "centroid": 0.8311529073212116,
+  "reembedded": 0.9065323666642635
+ },
+ {
+  "ident": "hina-23",
+  "a": 4,
+  "b": 9,
+  "same": false,
+  "centroid": 0.9649125869403659,
+  "reembedded": 0.8377965437197872
+ },
+ {
+  "ident": "hina-23",
+  "a": 5,
+  "b": 6,
+  "same": true,
+  "centroid": 0.7181577715948455,
+  "reembedded": 0.7775575630441688
+ },
+ {
+  "ident": "hina-23",
+  "a": 5,
+  "b": 7,
+  "same": false,
+  "centroid": 0.7925948362709376,
+  "reembedded": 0.8139775016939689
+ },
+ {
+  "ident": "hina-23",
+  "a": 5,
+  "b": 8,
+  "same": false,
+  "centroid": 0.6870350343685714,
+  "reembedded": 0.7383839918886232
+ },
+ {
+  "ident": "hina-23",
+  "a": 5,
+  "b": 9,
+  "same": false,
+  "centroid": 0.9048755268307963,
+  "reembedded": 0.7169325167607413
+ },
+ {
+  "ident": "hina-23",
+  "a": 6,
+  "b": 7,
+  "same": false,
+  "centroid": 0.3468987631899516,
+  "reembedded": 0.3497823859101068
+ },
+ {
+  "ident": "hina-23",
+  "a": 6,
+  "b": 8,
+  "same": false,
+  "centroid": 0.4367978319618021,
+  "reembedded": 0.569590063265291
+ },
+ {
+  "ident": "hina-23",
+  "a": 6,
+  "b": 9,
+  "same": false,
+  "centroid": 0.7937233913623737,
+  "reembedded": 0.2913696069897608
+ },
+ {
+  "ident": "hina-23",
+  "a": 7,
+  "b": 8,
+  "same": true,
+  "centroid": 0.2642833800621851,
+  "reembedded": 0.2587118581084701
+ },
+ {
+  "ident": "hina-23",
+  "a": 7,
+  "b": 9,
+  "same": true,
+  "centroid": 0.8096776104416679,
+  "reembedded": 0.582318763067704
+ },
+ {
+  "ident": "hina-23",
+  "a": 8,
+  "b": 9,
+  "same": true,
+  "centroid": 0.8019589823177881,
+  "reembedded": 0.7706932320475135
+ },
+ {
+  "ident": "hina-25",
+  "a": 0,
+  "b": 1,
+  "same": true,
+  "centroid": 0.235408578154916,
+  "reembedded": 0.248135924962122
+ },
+ {
+  "ident": "hina-25",
+  "a": 0,
+  "b": 3,
+  "same": false,
+  "centroid": 0.7884091443302199,
+  "reembedded": 0.6793701280368207
+ },
+ {
+  "ident": "hina-25",
+  "a": 0,
+  "b": 4,
+  "same": false,
+  "centroid": 0.9411613360790231,
+  "reembedded": 0.9928288163726777
+ },
+ {
+  "ident": "hina-25",
+  "a": 0,
+  "b": 5,
+  "same": true,
+  "centroid": 0.5822036528827723,
+  "reembedded": 0.3371367413602827
+ },
+ {
+  "ident": "hina-25",
+  "a": 1,
+  "b": 3,
+  "same": false,
+  "centroid": 0.5416613715097193,
+  "reembedded": 0.5767412358996713
+ },
+ {
+  "ident": "hina-25",
+  "a": 1,
+  "b": 4,
+  "same": false,
+  "centroid": 0.8362702576894991,
+  "reembedded": 0.9663033605468501
+ },
+ {
+  "ident": "hina-25",
+  "a": 1,
+  "b": 5,
+  "same": true,
+  "centroid": 0.7208865382929338,
+  "reembedded": 0.4644787924956463
+ },
+ {
+  "ident": "hina-25",
+  "a": 3,
+  "b": 4,
+  "same": false,
+  "centroid": 0.6470620046739706,
+  "reembedded": 0.8937024574385257
+ },
+ {
+  "ident": "hina-25",
+  "a": 3,
+  "b": 5,
+  "same": false,
+  "centroid": 0.8888027059723224,
+  "reembedded": 0.626955890778045
+ },
+ {
+  "ident": "hina-25",
+  "a": 4,
+  "b": 5,
+  "same": false,
+  "centroid": 0.9300289127819417,
+  "reembedded": 0.9044011467961778
+ },
+ {
+  "ident": "hina-27",
+  "a": 0,
+  "b": 1,
+  "same": true,
+  "centroid": 0.5110127565928384,
+  "reembedded": 0.6256446218786951
+ },
+ {
+  "ident": "hina-27",
+  "a": 0,
+  "b": 2,
+  "same": false,
+  "centroid": 0.7337109897282394,
+  "reembedded": 0.8060033116507204
+ },
+ {
+  "ident": "hina-27",
+  "a": 0,
+  "b": 3,
+  "same": false,
+  "centroid": 0.931199149969699,
+  "reembedded": 0.9398607052163663
+ },
+ {
+  "ident": "hina-27",
+  "a": 0,
+  "b": 4,
+  "same": false,
+  "centroid": 0.859215211616251,
+  "reembedded": 0.8488737080423924
+ },
+ {
+  "ident": "hina-27",
+  "a": 1,
+  "b": 2,
+  "same": false,
+  "centroid": 0.7008244929053983,
+  "reembedded": 0.902885984980204
+ },
+ {
+  "ident": "hina-27",
+  "a": 1,
+  "b": 3,
+  "same": false,
+  "centroid": 0.8309319697938335,
+  "reembedded": 0.9516779516681371
+ },
+ {
+  "ident": "hina-27",
+  "a": 1,
+  "b": 4,
+  "same": false,
+  "centroid": 0.9662785944594825,
+  "reembedded": 0.9532015482685496
+ },
+ {
+  "ident": "hina-27",
+  "a": 2,
+  "b": 3,
+  "same": false,
+  "centroid": 0.6495629086277128,
+  "reembedded": 0.7102070727598286
+ },
+ {
+  "ident": "hina-27",
+  "a": 2,
+  "b": 4,
+  "same": false,
+  "centroid": 0.8443783649392809,
+  "reembedded": 0.5956280452506761
+ },
+ {
+  "ident": "hina-27",
+  "a": 3,
+  "b": 4,
+  "same": true,
+  "centroid": 0.7411281375477397,
+  "reembedded": 0.6067629665414949
+ }
+]

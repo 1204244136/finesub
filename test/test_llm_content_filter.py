@@ -9,7 +9,6 @@ from finesub.llm.content_filter import (
     ContentFilterExhaustedError,
     DROPPED_UNITS_NOTE,
     InjectionUnit,
-    evidence_pack_block,
     load_content_filter_blacklist,
     run_content_filter_ladder,
     split_rendered_search_block,
@@ -65,11 +64,8 @@ def test_split_rendered_search_block_units_and_scaffolding() -> None:
     assert DROPPED_UNITS_NOTE in reduced
 
 
-def test_split_rendered_search_block_empty_and_pack() -> None:
+def test_split_rendered_search_block_empty() -> None:
     assert split_rendered_search_block("").units == ()
-    pack = evidence_pack_block("## 结论\nF1 confirmed：…")
-    assert len(pack.units) == 1 and pack.units[0].kind == "evidence_pack"
-    assert pack.render(()) == DROPPED_UNITS_NOTE  # everything dropped, note only
 
 
 def test_ladder_passes_through_when_not_blocked() -> None:

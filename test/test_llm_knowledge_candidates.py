@@ -45,7 +45,7 @@ def test_schema_v3_store_migrates_to_v5_with_data_intact(tmp_path) -> None:
         store.conn.execute("UPDATE meta SET value='3' WHERE key='schema_version'")
     with KnowledgeStore(path) as store:
         row = store.conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
-        assert row["value"] == "5"
+        assert row["value"] == "6"
         assert store.conn.execute("SELECT COUNT(*) c FROM candidate_decisions").fetchone()["c"] == 0
         columns = {r["name"] for r in store.conn.execute("PRAGMA table_info(candidate_decisions)")}
         assert {"candidate", "missing"} <= columns
@@ -64,7 +64,7 @@ def test_schema_v4_store_gains_the_snapshot_columns(tmp_path) -> None:
         store.conn.execute("ALTER TABLE candidate_decisions DROP COLUMN missing")
         store.conn.execute("UPDATE meta SET value='4' WHERE key='schema_version'")
     with KnowledgeStore(path) as store:
-        assert store.meta("schema_version") == "5"
+        assert store.meta("schema_version") == "6"
         columns = {r["name"] for r in store.conn.execute("PRAGMA table_info(candidate_decisions)")}
         assert {"candidate", "missing"} <= columns
 

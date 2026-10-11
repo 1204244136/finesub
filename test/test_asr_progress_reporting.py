@@ -161,3 +161,169 @@ def _render(metrics) -> str:
     stream = io.StringIO()
     TerminalReporter(stream, isatty=False).summary("aligned", metrics)
     return stream.getvalue()
+
+
+# --- per-group ASR coverage (P2) ------------------------------------------
+# `_coverage_shortfall` computed this for every group and threw it away
+# whenever the group passed, so a line missing from an otherwise healthy group
+# left nothing to look at. These pin what is now kept, and what it does NOT
+# mean.
+
+
+def _interval(start: float, end: float) -> dict[str, object]:
+    return {"start": start, "end": end}
+
+
+def _covering(start: float, end: float) -> dict[str, object]:
+    return {"start": start, "end": end, "text": "x"}
+
+
+def test_a_healthy_group_is_recorded_too_not_only_a_failing_one() -> None:
+    """Recording only the shortfalls would leave the same blind spot behind."""
+
+    intervals = [_interval(0.0, 20.0)]
+    with transcribe.collecting_coverage() as records:
+        transcribe._record_group_coverage(
+            intervals,
+            transcribe._coverage_of(intervals, [_covering(0.0, 20.0)]),
+            transcribe._coverage_of(intervals, [_covering(0.0, 20.0)]),
+        )
+
+    assert len(records) == 1
+    assert records[0]["ratio"] == pytest.approx(1.0)
+    assert records[0]["start"] == pytest.approx(0.0)
+    assert records[0]["end"] == pytest.approx(20.0)
+
+
+def test_the_record_keeps_both_sides_of_the_rescue() -> None:
+    intervals = [_interval(0.0, 20.0)]
+    with transcribe.collecting_coverage() as records:
+        transcribe._record_group_coverage(
+            intervals,
+            transcribe._coverage_of(intervals, [_covering(0.0, 4.0)]),
+            transcribe._coverage_of(intervals, [_covering(0.0, 18.0)]),
+        )
+
+    assert records[0]["covered_sec"] == pytest.approx(4.0)
+    assert records[0]["rescued_covered_sec"] == pytest.approx(18.0)
+    assert records[0]["rescued_ratio"] > records[0]["ratio"]
+
+
+def test_splitting_the_computation_did_not_move_the_verdict() -> None:
+    """The judgement is unchanged: only the numbers now survive a pass."""
+
+    intervals = [_interval(0.0, 20.0)]
+    short = [_covering(0.0, 4.0)]
+    fine = [_covering(0.0, 18.0)]
+
+    assert transcribe._coverage_shortfall(intervals, short) is not None
+    assert transcribe._coverage_shortfall(intervals, fine) is None
+    # ...while the measurement exists for both.
+    assert transcribe._coverage_of(intervals, fine)[1] == pytest.approx(18.0)
+    # A batch below tolerance/ratio is exempt, and stays exempt.
+    tiny = [_interval(0.0, 3.0)]
+    assert transcribe._coverage_shortfall(tiny, []) is None
+    assert transcribe._coverage_of(tiny, [])[2] == pytest.approx(0.0)
+
+
+def test_the_coverage_ledger_survives_a_checkpoint_resume() -> None:
+    """It is run state, like the language audit's sample ledger.
+
+    Without this a resumed run's `asr_coverage` holds only the groups decoded
+    after the resume -- and nothing says the first half is missing, which is
+    exactly how an absent record gets read as "it never happened".
+    """
+
+    first_half = [{"start": 0.0, "end": 30.0, "ratio": 1.0}]
+    with transcribe.collecting_coverage() as records:
+        transcribe._restore_coverage(first_half)
+        intervals = [_interval(30.0, 50.0)]
+        transcribe._record_group_coverage(
+            intervals,
+            transcribe._coverage_of(intervals, [_covering(30.0, 50.0)]),
+            transcribe._coverage_of(intervals, [_covering(30.0, 50.0)]),
+        )
+
+    assert [record["start"] for record in records] == [0.0, 30.0]
+
+
+def test_a_missing_recovery_counter_is_not_evidence_of_never() -> None:
+    """`recovery` counters do NOT ride the checkpoint; the ledger does.
+
+    A resumed run whose second half triggered no rescue produces an artifact
+    with no `beam_rescue_attempted` key at all -- identical to a run where the
+    ladder never fired. Reading that absence as "never triggered" is the
+    mistake this pins: the coverage ledger is what can answer the question,
+    because it is restored.
+    """
+
+    resumed_counters = {}
+    with transcribe.collecting_stats() as stats, transcribe.collecting_coverage() as records:
+        # Second half of a resumed run: no rescue, so no counter is written...
+        transcribe._restore_coverage(
+            [{"start": 0.0, "end": 30.0, "ratio": 0.4, "rescued_ratio": 0.9}]
+        )
+        resumed_counters = dict(stats)
+        intervals = [_interval(30.0, 50.0)]
+        transcribe._record_group_coverage(
+            intervals,
+            transcribe._coverage_of(intervals, [_covering(30.0, 50.0)]),
+            transcribe._coverage_of(intervals, [_covering(30.0, 50.0)]),
+        )
+
+    assert "beam_rescue_attempted" not in resumed_counters
+    # ...but the ledger still carries the pre-resume group that needed one.
+    assert records[0]["rescued_ratio"] > records[0]["ratio"]
+
+
+# --- the two recovery families are not one family (T1) --------------------
+# `abnormal_groups` counts abnormal-output isolation; `beam_rescue_*` counts
+# the low-coverage ladder. Reading a run's `recovery` as if they were the same
+# thing sent an investigation down a delete path that does not exist -- the
+# ladder keeps the original result when the rescue does not cover more.
+
+
+def test_a_rescue_that_covers_no_more_keeps_the_original_output(monkeypatch) -> None:
+    # Two intervals: a single-interval group has no split ladder to reject.
+    group = [{"start": 0.0, "end": 10.0}, {"start": 10.0, "end": 20.0}]
+    original = [{"start": 0.0, "end": 4.0, "text": "半句"}]
+
+    monkeypatch.setattr(
+        transcribe,
+        "_transcribe_group_candidate",
+        lambda *a, **k: ([], [], None, ["abnormal"], False),
+    )
+    monkeypatch.setattr(
+        transcribe, "_align_group_consume_all", lambda *a, **k: []
+    )
+
+    with transcribe.collecting_stats() as stats:
+        out = transcribe._rescue_low_coverage(
+            object(), group, original, None, 16000, 1.0, language="ja"
+        )
+
+    assert out == original, "a rescue that covers less must not replace the output"
+    assert stats["beam_rescue_attempted"] == 1
+    assert stats["coverage_rescue_rejected"] == 1
+    assert stats["beam_rescue_accepted"] == 0
+    assert "abnormal_groups" not in stats, "isolation is a different mechanism"
+
+
+def test_a_group_that_covers_enough_never_enters_the_ladder(monkeypatch) -> None:
+    """No counter at all -- which is why an absent counter proves nothing."""
+
+    group = [{"start": 0.0, "end": 20.0}]
+    covered = [{"start": 0.0, "end": 19.0, "text": "整句"}]
+
+    def _explode(*args, **kwargs):
+        raise AssertionError("the ladder must not run for a healthy group")
+
+    monkeypatch.setattr(transcribe, "_transcribe_group_candidate", _explode)
+
+    with transcribe.collecting_stats() as stats:
+        out = transcribe._rescue_low_coverage(
+            object(), group, covered, None, 16000, 1.0, language="ja"
+        )
+
+    assert out == covered
+    assert dict(stats) == {}

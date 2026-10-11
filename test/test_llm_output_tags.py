@@ -90,8 +90,8 @@ def test_session_contract_validate_nonempty_vs_present() -> None:
     assert "missing <keep_entries> block" in errors
 
 
-def test_query_contract_allows_empty_list_blocks() -> None:
-    contract = SESSION_CONTRACTS["query"]
+def test_request_contract_allows_empty_list_blocks() -> None:
+    contract = SESSION_CONTRACTS["correction_request"]
     reply = (
         "<reasoning>分析</reasoning><window_notes></window_notes>"
         "<keep_entries></keep_entries><search_queries></search_queries>"
@@ -127,12 +127,15 @@ def test_parse_line_items_strips_bullets_numbering_and_dupes() -> None:
     assert parse_line_items(body) == ["q1", "q2", "q3", "q4"]
 
 
-def test_parse_json_tag_block_prefers_tag_and_falls_back() -> None:
+def test_parse_json_tag_block_requires_the_tag() -> None:
     tagged = '<context_pack>\n{"a": 1}\n</context_pack>'
     assert parse_json_tag_block(tagged, "context_pack") == {"a": 1}
 
-    bare = '说明文字 {"a": 2} 尾巴'
-    assert parse_json_tag_block(bare, "context_pack") == {"a": 2}
+    # No whole-reply fallback: a stray object is not the product.
+    with pytest.raises(ValueError, match="exactly one <context_pack>"):
+        parse_json_tag_block('说明文字 {"a": 2} 尾巴', "context_pack")
+    with pytest.raises(ValueError, match="exactly one <context_pack>"):
+        parse_json_tag_block('thought\nDraft: {"general_context": {}}', "context_pack")
 
     fenced = '<context_pack>\n```json\n{"a": 3}\n```\n</context_pack>'
     assert parse_json_tag_block(fenced, "context_pack") == {"a": 3}
@@ -186,50 +189,8 @@ def test_extract_single_tag_block_still_rejects_duplicate_top_level_blocks() -> 
         extract_single_tag_block(text, "answer")
 
 
-def test_research_round1_contract_follows_the_axis_halves() -> None:
-    from finesub.llm.session_contract import research_round1_contract
-
-    local = research_round1_contract(
-        emits_queries=True, emits_entries=True, emits_notes=True
-    )
-    assert local.nonempty == ("reasoning", "analysis_notes")
-    assert local.present == ("requested_entries", "keep_entries", "search_queries")
-
-    # retrieval=none with a knowledge base: entries only, and no analysis_notes
-    # because round 2 -- their only reader -- is skipped.
-    entries_only = research_round1_contract(
-        emits_queries=False, emits_entries=True, emits_notes=False
-    )
-    assert entries_only.nonempty == ("reasoning",)
-    assert entries_only.present == ("requested_entries", "keep_entries")
-
-    # retrieval=local without a knowledge base: queries only.
-    queries_only = research_round1_contract(
-        emits_queries=True, emits_entries=False, emits_notes=True
-    )
-    assert queries_only.present == ("search_queries",)
-
-
-def test_research_round2_contract_never_emits_queries() -> None:
-    from finesub.llm.session_contract import research_round2_contract
-
-    with_keep = research_round2_contract(emits_keep=True)
-    assert with_keep.nonempty == ("reasoning", "context_pack")
-    assert with_keep.present == ("keep_entries",)
-    # native: no query round downstream, so pruning is not asked for.
-    assert research_round2_contract(emits_keep=False).present == ()
-
-
 def test_shipped_contracts_are_derived_from_the_same_functions() -> None:
-    from finesub.llm.session_contract import (
-        SESSION_CONTRACTS,
-        research_round1_contract,
-        research_round2_contract,
-    )
+    from finesub.llm.session_contract import SESSION_CONTRACTS, prepare_task_contract
 
-    assert SESSION_CONTRACTS["research_round1"] == research_round1_contract(
-        emits_queries=True, emits_entries=True, emits_notes=True
-    )
-    assert SESSION_CONTRACTS["research_round2"] == research_round2_contract(
-        emits_keep=True
-    )
+    assert SESSION_CONTRACTS["prepare_task_request"] == prepare_task_contract(delivered=False)
+    assert SESSION_CONTRACTS["prepare_task_delivery"] == prepare_task_contract(delivered=True)

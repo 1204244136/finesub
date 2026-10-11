@@ -223,6 +223,30 @@ def test_piece_times_clamped_to_segment_bounds() -> None:
         assert float(piece["end"]) <= 3.2 + 1e-9
 
 
+def test_degenerate_clamp_falls_back_to_the_pieces_own_words() -> None:
+    # Real shape (a 570-segment artifact's seg 188): two tiny source segments
+    # sitting entirely inside an artificial zone get right-anchored to the
+    # zone edge, so every adjusted word lands beyond the union of the sources.
+    # Clamping to that union then leaves an EMPTY interval, and an empty
+    # interval loses its text without a trace (`rendering._timed` and
+    # `llm/chunking` both drop `end <= start` silently).
+    real = _seg(0.5, 3.0, [_word(c, 0.5 + i * 0.5, 1.0 + i * 0.5) for i, c in enumerate("本文内容六")])
+    ghost_a = _seg(4.80, 4.82, [_word("…", 4.80, 4.82)])
+    ghost_b = _seg(4.82, 4.84, [_word("…", 4.82, 4.84)])
+    tail = _seg(6.2, 8.2, [_word(c, 6.2 + i * 0.5, 6.7 + i * 0.5) for i, c in enumerate("後半六字")])
+
+    out = sp.split_segments([real, ghost_a, ghost_b, tail], INTERVALS)
+
+    piece = next(p for p in out if p["text"] == "……")
+    assert piece["words"][0]["split_adjust_case"] == "case1"
+    assert piece["words"][0]["split_anchor"] == "right"
+    assert float(piece["end"]) > float(piece["start"])
+    for p in out:
+        for w in p["words"]:
+            assert float(p["start"]) <= float(w["start"]) + 1e-9
+            assert float(w["end"]) <= float(p["end"]) + 1e-9
+
+
 def _pause_boundary(left_end, right_start, params=None):
     """Score one boundary with both words inside interval 0 (no VAD gap)."""
     spans = [(0.0, 14.0)]
@@ -431,7 +455,7 @@ def test_length_scale_one_is_the_identity() -> None:
 
 @pytest.mark.parametrize("value", [0.0, 0.59, 1.61, float("nan"), float("inf")])
 def test_length_scale_outside_the_supported_range_is_rejected(value) -> None:
-    with pytest.raises(ValueError, match="length scale"):
+    with pytest.raises(ValueError, match="length_scale"):
         sp.split_params_for_length_scale(value)
 
 

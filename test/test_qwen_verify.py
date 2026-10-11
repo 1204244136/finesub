@@ -94,6 +94,39 @@ class TestGapCollection:
         segments = [seg("a", 0.0, 4.0), seg("b", 6.0, 10.0)]
         assert qwen_referee.collect_gaps(intervals, segments) == []
 
+    def test_short_pieces_are_not_summed_across_a_silence(self) -> None:
+        """The criterion is one CONTINUOUS uncovered piece, never a total.
+
+        Written down because it was misread once: a subtitle gap is not an
+        uncovered VAD block, and several 1-2 s pieces adding up past the
+        threshold still probe nothing. That is today's contract, not a defect
+        -- widening it to a running total is a cost decision (more referee
+        re-listens, on exactly the interjection-sized pieces GAP_MIN_SEC
+        exists to keep out), and it has not been made.
+        """
+
+        intervals = [{"start": 0.0, "end": 12.0}]
+        segments = [
+            seg("a", 0.0, 3.0),
+            seg("b", 4.5, 6.0),   # 1.5 s uncovered before it
+            seg("c", 8.0, 12.0),  # 2.0 s uncovered before it -- 3.5 s in total
+        ]
+
+        assert qwen_referee.collect_gaps(intervals, segments) == []
+        assert qwen_referee.collect_gaps(intervals, segments, min_sec=1.5) == [
+            (3.0, 4.5),
+            (6.0, 8.0),
+        ]
+
+    def test_a_gap_spanning_two_intervals_is_not_joined_either(self) -> None:
+        """Pieces are cut per VAD interval, so the silence between two of them
+        is not part of any gap -- it is not speech anybody expected to hear."""
+
+        intervals = [{"start": 0.0, "end": 5.0}, {"start": 30.0, "end": 33.0}]
+        segments = [seg("a", 0.0, 3.0)]
+
+        assert qwen_referee.collect_gaps(intervals, segments) == [(30.0, 33.0)]
+
 
 class FakeReferee:
     _model_name = "fake"
@@ -102,6 +135,9 @@ class FakeReferee:
         self.replies = list(replies)
         self.calls = 0
         self.requested_device = device
+        # The real referee reads this off the model; a fallback to the CPU
+        # shows up here and not in the request.
+        self.effective_device = device
 
     def transcribe_batch(self, clips, *, on_batch=None):
         self.calls += 1

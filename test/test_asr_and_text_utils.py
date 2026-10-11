@@ -230,6 +230,200 @@ def test_punct_class_covers_direction_semantics(char: str, expected: str) -> Non
     assert punct_class(char) == expected
 
 
+def test_word_containment_repairs_a_middle_word_and_records_it() -> None:
+    # The offender is the MIDDLE word: the DP lets word starts be
+    # non-monotonic inside a piece, so checking first/last would miss it.
+    segments = [
+        {
+            "start": 1.0,
+            "end": 2.0,
+            "text": "あいう",
+            "words": [
+                {"start": 1.0, "end": 1.3, "word": "あ", "space_before": False},
+                {"start": 0.8, "end": 2.4, "word": "い", "space_before": False},
+                {"start": 1.6, "end": 2.0, "word": "う", "space_before": False},
+            ],
+        },
+        {
+            "start": 3.0,
+            "end": 4.0,
+            "text": "次",
+            "words": [{"start": 3.0, "end": 4.0, "word": "次", "space_before": False}],
+        },
+    ]
+
+    out, repairs = recognition_segments.enforce_word_containment(segments)
+
+    assert out[0]["start"] == pytest.approx(0.8)
+    assert out[0]["end"] == pytest.approx(2.4)
+    assert out[1] is segments[1]  # untouched segments pass through as-is
+    assert repairs == [
+        {
+            "index": 0,
+            "kind": "contain",
+            "start": 1.0,
+            "end": 2.0,
+            "new_start": 0.8,
+            "new_end": 2.4,
+            "text": "あいう",
+        }
+    ]
+    # input not mutated
+    assert segments[0]["start"] == pytest.approx(1.0)
+
+
+def test_word_containment_leaves_a_healthy_timeline_alone() -> None:
+    segments = [
+        {
+            "start": 1.0,
+            "end": 2.0,
+            "text": "あ",
+            "words": [{"start": 1.0, "end": 2.0, "word": "あ", "space_before": False}],
+        }
+    ]
+
+    out, repairs = recognition_segments.enforce_word_containment(segments)
+
+    assert out == segments
+    assert repairs == []
+
+
+def test_normalize_resolves_the_overlap_containment_just_created() -> None:
+    # Widening segment 0 to cover its own word pushes its end past segment 1's
+    # start. Containment alone would hand a fresh overlap to consumers that do
+    # not repair one (`llm/chunking.py`, and the stable JSON itself).
+    segments = [
+        {
+            "start": 1.0,
+            "end": 2.0,
+            "text": "あ",
+            "words": [{"start": 1.0, "end": 2.4, "word": "あ", "space_before": False}],
+        },
+        {
+            "start": 2.1,
+            "end": 3.0,
+            "text": "い",
+            "words": [{"start": 2.1, "end": 3.0, "word": "い", "space_before": False}],
+        },
+    ]
+
+    out, repairs = recognition_segments.normalize_segment_timeline(segments)
+
+    assert [(s["start"], s["end"]) for s in out] == [(1.0, 2.1), (2.1, 3.0)]
+    assert out[0]["words"][0]["end"] == pytest.approx(2.1)  # word came back inside
+    assert [r["kind"] for r in repairs] == ["contain"]
+
+
+def test_normalize_does_not_let_both_neighbours_take_the_same_gap() -> None:
+    # Both segments want to grow into the gap between them: the first's word
+    # runs to 2.8, the second's starts at 2.2. Capping each against the INPUT
+    # neighbour lets them both have it; the left bound has to read the
+    # already-repaired end.
+    segments = [
+        {
+            "start": 1.0,
+            "end": 2.0,
+            "text": "あ",
+            "words": [{"start": 1.0, "end": 2.8, "word": "あ", "space_before": False}],
+        },
+        {
+            "start": 3.0,
+            "end": 4.0,
+            "text": "い",
+            "words": [{"start": 2.2, "end": 4.0, "word": "い", "space_before": False}],
+        },
+    ]
+
+    out, repairs = recognition_segments.normalize_segment_timeline(segments)
+
+    assert [(s["start"], s["end"]) for s in out] == [(1.0, 2.8), (2.8, 4.0)]
+    assert out[1]["words"][0]["start"] == pytest.approx(2.8)
+    assert [r["kind"] for r in repairs] == ["contain", "contain"]
+
+
+def test_normalize_survives_a_timeline_that_is_already_inconsistent() -> None:
+    # Inverted segments, found by randomized search: the zero-length extension
+    # cascades into the next segment, pushing its start (and its words) past
+    # its own end. The contract is about what LEAVES the stage, so it has to
+    # hold whatever the input looks like -- an artifact can be hand-edited or
+    # come from an older build.
+    segments = [
+        {
+            "start": 0.205,
+            "end": 0.197,
+            "text": "あ",
+            "words": [{"start": 0.181, "end": 0.216, "word": "あ"}],
+        },
+        {
+            "start": 0.208,
+            "end": 0.207,
+            "text": "い",
+            "words": [{"start": 0.159, "end": 0.173, "word": "い"}],
+        },
+        {
+            "start": 0.279,
+            "end": 0.299,
+            "text": "う",
+            "words": [{"start": 0.279, "end": 0.308, "word": "う"}],
+        },
+    ]
+
+    out, _repairs = recognition_segments.normalize_segment_timeline(segments)
+
+    for index, segment in enumerate(out):
+        assert segment["end"] > segment["start"]
+        for word in segment["words"]:
+            assert segment["start"] <= word["start"] <= word["end"] <= segment["end"]
+        if index:
+            assert out[index - 1]["end"] <= segment["start"]
+
+
+def test_normalize_leaves_a_pre_existing_overlap_to_its_own_owner() -> None:
+    # 7 segments across the artifact bed already overlap, up to 12.6 s -- a
+    # hallucinated run swallowing the real lines spoken inside it. Repairing
+    # that here would move text between segments and delete the emptied one;
+    # `resolve_overlaps` owns it at render time and never drops a cue.
+    segments = [
+        {
+            "start": 100.0,
+            "end": 120.0,
+            "text": "長い",
+            "words": [
+                {"start": 100.0, "end": 120.0, "word": "長い", "space_before": False}
+            ],
+        },
+        {
+            "start": 107.4,
+            "end": 109.0,
+            "text": "本物",
+            "words": [
+                {"start": 107.4, "end": 109.0, "word": "本物", "space_before": False}
+            ],
+        },
+    ]
+
+    out, repairs = recognition_segments.normalize_segment_timeline(segments)
+
+    assert out == segments
+    assert [r["kind"] for r in repairs] == ["overlap"]
+
+
+def test_normalize_reports_the_zero_span_it_extends() -> None:
+    segments = [
+        {
+            "start": 1.0,
+            "end": 1.0,
+            "text": "お",
+            "words": [{"start": 1.0, "end": 1.0, "word": "お", "space_before": False}],
+        }
+    ]
+
+    out, repairs = recognition_segments.normalize_segment_timeline(segments)
+
+    assert out[0]["end"] == pytest.approx(1.01)
+    assert [r["kind"] for r in repairs] == ["zero-span"]
+
+
 def test_zero_length_segment_gets_minimal_duration() -> None:
     segments = [
         {
@@ -456,8 +650,7 @@ def test_transcribe_kwargs_keep_decoding_on_the_one_pass_trace() -> None:
 
     kwargs = asr_align._build_transcribe_kwargs(language="en")
 
-    assert kwargs["beam_size"] is None
-    assert kwargs["best_of"] is None
+    assert "beam_size" not in kwargs and "best_of" not in kwargs
     assert kwargs["temperature"] == 0.0
     assert kwargs["language"] == "en"
 
@@ -841,7 +1034,10 @@ def _run_align_with_checkpoint(monkeypatch, tmp_path, *, fail_at=None, gap_sec=0
         calls.append(start)
         if fail_at is not None and start == fail_at:
             raise RuntimeError("boom")
-        return [{"start": start, "end": float(group[-1]["end"]), "lang": "ja"}], []
+        decoded = [{"start": start, "end": float(group[-1]["end"]), "lang": "ja"}]
+        coverage = asr_align._coverage_of(group, decoded)
+        asr_align._record_group_coverage(group, coverage, coverage)
+        return decoded, []
 
     _one_interval_per_group(monkeypatch)
     monkeypatch.setattr(asr_align, "_align_intervals_group", fake_group)
@@ -939,6 +1135,48 @@ def test_asr_checkpoint_resumes_after_crash(monkeypatch, tmp_path) -> None:
     assert calls2 == [20.0, 30.0]
     assert [seg["start"] for seg in segments] == [0.0, 10.0, 20.0, 30.0]
     assert not checkpoint.exists()
+
+
+def test_coverage_survives_real_checkpoint_io(monkeypatch, tmp_path) -> None:
+    run, _, checkpoint = _run_align_with_checkpoint(monkeypatch, tmp_path, fail_at=20.0)
+    with asr_align.collecting_coverage(), pytest.raises(RuntimeError):
+        run()
+    saved = json.loads(checkpoint.read_text(encoding="utf-8"))
+    assert [row["start"] for row in saved["asr_coverage"]] == [0.0, 10.0]
+
+    # Interrupt once more: the restored prefix must be written back out too.
+    second, _, _ = _run_align_with_checkpoint(monkeypatch, tmp_path, fail_at=30.0)
+    with asr_align.collecting_coverage(), pytest.raises(RuntimeError):
+        second()
+    final, calls, _ = _run_align_with_checkpoint(monkeypatch, tmp_path)
+    with asr_align.collecting_coverage() as records:
+        output = final()
+    assert calls == [30.0]
+    assert len(output) == 4
+    assert [row["start"] for row in records] == [0.0, 10.0, 20.0, 30.0]
+
+
+def test_a_checkpoint_without_the_coverage_ledger_is_stale(monkeypatch, tmp_path) -> None:
+    """The ledger is schema, not an optional key: a partial predating it reruns.
+
+    Restoring such a partial would leave the ledger without its first half, and
+    an absent record reads as "never happened" -- the failure mode the ledger
+    exists to prevent. Old formats are invalidated, not migrated.
+    """
+
+    run, _, checkpoint = _run_align_with_checkpoint(monkeypatch, tmp_path, fail_at=20.0)
+    with asr_align.collecting_coverage(), pytest.raises(RuntimeError):
+        run()
+    saved = json.loads(checkpoint.read_text(encoding="utf-8"))
+    del saved["asr_coverage"]
+    saved["version"] = checkpoint_store.SCHEMA_VERSION - 1
+    checkpoint.write_text(json.dumps(saved), encoding="utf-8")
+
+    final, calls, _ = _run_align_with_checkpoint(monkeypatch, tmp_path)
+    with asr_align.collecting_coverage() as records:
+        final()
+    assert calls == [0.0, 10.0, 20.0, 30.0]
+    assert [row["start"] for row in records] == [0.0, 10.0, 20.0, 30.0]
 
 
 def test_asr_checkpoint_ignored_when_parameters_change(monkeypatch, tmp_path) -> None:
@@ -2034,3 +2272,145 @@ class TestUnescapeCodepoints:
         assert text_utils.unescape_codepoints(r"half \ud83c of a pair") == (
             r"half \ud83c of a pair"
         )
+
+
+# --- the timeline contract's audio-end dimension (P1) ---------------------
+# Measured on a delivered artifact: the last cue ended 1.866 s past the source
+# audio, and the render pass then pushed every cue end another 0.3 s. Both
+# halves are pinned; the render half lives in test_llm_srt_postprocess.py.
+
+
+def test_segment_ending_after_the_audio_is_pulled_back_with_its_words() -> None:
+    segments = [
+        {
+            "start": 269.0,
+            "end": 272.68,
+            "text": "末尾",
+            "words": [
+                {"start": 269.0, "end": 270.0, "word": "末", "space_before": False},
+                {"start": 270.0, "end": 272.68, "word": "尾", "space_before": False},
+            ],
+        }
+    ]
+
+    out, repairs = recognition_segments.normalize_segment_timeline(
+        segments, audio_end=270.814
+    )
+
+    assert out[0]["end"] == pytest.approx(270.814)
+    assert out[0]["words"][-1]["end"] == pytest.approx(270.814)
+    assert out[0]["start"] == pytest.approx(269.0)
+    overrun = [r for r in repairs if r["kind"] == "overrun"]
+    assert len(overrun) == 1
+    assert overrun[0]["end"] == pytest.approx(272.68)
+    assert overrun[0]["new_end"] == pytest.approx(270.814)
+    assert "collapsed" not in overrun[0]
+
+
+def test_segments_inside_the_audio_are_untouched_and_unrecorded() -> None:
+    segments = [
+        {
+            "start": 1.0,
+            "end": 2.0,
+            "text": "正常",
+            "words": [
+                {"start": 1.0, "end": 2.0, "word": "正常", "space_before": False}
+            ],
+        }
+    ]
+
+    out, repairs = recognition_segments.normalize_segment_timeline(
+        segments, audio_end=100.0
+    )
+
+    assert out == segments
+    assert repairs == []
+
+
+def test_clamp_and_zero_length_extension_do_not_cancel_each_other() -> None:
+    """A segment lying entirely past the audio end must not be pushed back out.
+
+    Clamping it alone collapses it to zero length, and the extension pass
+    would then give it ``min_sec`` *past* ``audio_end`` -- the two passes
+    undoing each other, leaving the artifact worse than unrepaired.
+    """
+
+    segments = [
+        {
+            "start": 5.0,
+            "end": 6.0,
+            "text": "前",
+            "words": [
+                {"start": 5.0, "end": 6.0, "word": "前", "space_before": False}
+            ],
+        },
+        {
+            "start": 10.5,
+            "end": 11.0,
+            "text": "越界",
+            "words": [
+                {
+                    "start": 10.5,
+                    "end": 11.0,
+                    "word": "越界",
+                    "space_before": False,
+                }
+            ],
+        },
+    ]
+
+    out, _ = recognition_segments.normalize_segment_timeline(segments, audio_end=10.0)
+
+    assert out[1]["end"] == pytest.approx(10.0)
+    assert out[1]["start"] < out[1]["end"]
+    assert out[1]["start"] >= out[0]["end"]
+    assert all(
+        float(word["end"]) <= 10.0
+        for segment in out
+        for word in segment.get("words") or []
+    )
+
+
+def test_without_an_audio_end_the_overrun_dimension_is_not_checked() -> None:
+    """The rebuild path can face an artifact that never recorded a duration."""
+
+    segments = [
+        {
+            "start": 269.0,
+            "end": 272.68,
+            "text": "末尾",
+            "words": [
+                {
+                    "start": 269.0,
+                    "end": 272.68,
+                    "word": "末尾",
+                    "space_before": False,
+                }
+            ],
+        }
+    ]
+
+    out, repairs = recognition_segments.normalize_segment_timeline(segments)
+
+    assert out == segments
+    assert repairs == []
+
+
+def test_a_word_reaching_past_the_audio_end_is_fitted_back_in() -> None:
+    """Containment runs after the clamp, so it must not re-expand the segment."""
+
+    segments = [
+        {
+            "start": 9.0,
+            "end": 9.5,
+            "text": "尾",
+            "words": [
+                {"start": 9.0, "end": 12.0, "word": "尾", "space_before": False}
+            ],
+        }
+    ]
+
+    out, _ = recognition_segments.normalize_segment_timeline(segments, audio_end=10.0)
+
+    assert out[0]["end"] <= 10.0
+    assert float(out[0]["words"][-1]["end"]) <= 10.0

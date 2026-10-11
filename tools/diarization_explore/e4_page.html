@@ -1,0 +1,582 @@
+<title>重叠区四版盲评</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+JP:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --paper: #f4f6f8;
+    --surface: #ffffff;
+    --sunk: #eef1f5;
+    --ink: #161a20;
+    --ink-soft: #5a6472;
+    --ink-faint: #8b95a3;
+    --line: #d7dde5;
+    --line-soft: #e6eaf0;
+    --accent: #2f6f8f;
+    --accent-soft: #e4eff4;
+    --easy: #2f7d5a;
+    --easy-soft: #e2f0e9;
+    --hard: #a2503f;
+    --hard-soft: #f6e6e2;
+    --shadow: 0 1px 2px rgba(22, 26, 32, .06), 0 8px 24px rgba(22, 26, 32, .05);
+    --sans: "IBM Plex Sans JP", system-ui, -apple-system, "Segoe UI", "Yu Gothic UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #12151a;
+      --surface: #1a1e25;
+      --sunk: #22272f;
+      --ink: #e4e8ee;
+      --ink-soft: #9aa5b4;
+      --ink-faint: #6b7484;
+      --line: #2d343e;
+      --line-soft: #252b34;
+      --accent: #64abcb;
+      --accent-soft: #1e2f3a;
+      --easy: #64bd94;
+      --easy-soft: #1b2f27;
+      --hard: #d68a76;
+      --hard-soft: #33221e;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #12151a;
+    --surface: #1a1e25;
+    --sunk: #22272f;
+    --ink: #e4e8ee;
+    --ink-soft: #9aa5b4;
+    --ink-faint: #6b7484;
+    --line: #2d343e;
+    --line-soft: #252b34;
+    --accent: #64abcb;
+    --accent-soft: #1e2f3a;
+    --easy: #64bd94;
+    --easy-soft: #1b2f27;
+    --hard: #d68a76;
+    --hard-soft: #33221e;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .3);
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  * { box-sizing: border-box; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 22px 20px 64px; }
+
+  /* ---- masthead ------------------------------------------------------- */
+  .masthead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; }
+  h1 { font-size: 19px; font-weight: 600; margin: 0; letter-spacing: -.01em; }
+  .sub { color: var(--ink-soft); font-size: 13.5px; }
+  .task {
+    margin: 14px 0 0; padding: 12px 15px; background: var(--accent-soft);
+    border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0;
+    font-size: 13.5px; color: var(--ink); max-width: 72ch;
+  }
+  .task b { font-weight: 600; }
+  .task span { color: var(--ink-soft); }
+
+  /* ---- progress rail -------------------------------------------------- */
+  .rail { display: flex; gap: 3px; margin: 18px 0 6px; }
+  .tick {
+    flex: 1; height: 22px; min-width: 0; padding: 0; border: 1px solid var(--line);
+    background: var(--surface); border-radius: 3px; font-family: var(--mono);
+    font-size: 9.5px; color: var(--ink-faint); line-height: 20px; text-align: center;
+    transition: background .12s, border-color .12s;
+  }
+  .tick.done { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tick.flagged { background: var(--sunk); border-color: var(--line); color: var(--ink-soft); }
+  .tick.here { box-shadow: 0 0 0 2px var(--ink); }
+  .tick.noted { border-bottom: 3px solid var(--hard); }
+  .railfoot {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: var(--mono); font-size: 12px; color: var(--ink-soft);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---- unit ----------------------------------------------------------- */
+  .unit {
+    margin-top: 14px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: var(--shadow); overflow: hidden;
+  }
+  .unithead {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+    padding: 13px 16px; border-bottom: 1px solid var(--line-soft); background: var(--sunk);
+  }
+  .no {
+    font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--ink-soft);
+  }
+  .time { font-family: var(--mono); font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+  .spacer { flex: 1 1 auto; }
+
+  .play {
+    display: inline-flex; align-items: center; gap: 7px; padding: 7px 14px;
+    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+    border-radius: 6px; font-size: 13.5px; font-weight: 500;
+  }
+  .play:hover { filter: brightness(1.08); }
+  .play.playing { animation: pulse 1.1s ease-in-out infinite; }
+  @keyframes pulse { 50% { filter: brightness(1.2); } }
+  .refbtn {
+    display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px;
+    border: 1px solid var(--line); background: var(--surface); border-radius: 6px;
+    font-family: var(--mono); font-size: 12px; color: var(--ink-soft);
+  }
+  .refbtn:hover { border-color: var(--accent); color: var(--accent); }
+  .refbtn.playing { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .refs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .refs .lbl { font-size: 12px; color: var(--ink-faint); margin-right: 2px; }
+
+  /* ---- the four versions ---------------------------------------------- */
+  /* Four versions: four across, or a 2x2 -- never 3 + 1, which orphans the fourth. */
+  .versions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line-soft); }
+  @media (max-width: 980px) { .versions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 520px) { .versions { grid-template-columns: minmax(0, 1fr); } }
+  .ver { background: var(--surface); padding: 13px 14px 12px; display: flex; flex-direction: column; gap: 10px; }
+  .ver.pick-easy { background: var(--easy-soft); }
+  .ver.pick-hard { background: var(--hard-soft); }
+  .vhead { display: flex; align-items: center; gap: 8px; }
+  .glyph {
+    font-size: 17px; font-weight: 600; width: 28px; height: 28px; border-radius: 6px;
+    display: grid; place-items: center; background: var(--sunk); color: var(--ink);
+  }
+  .ver.pick-easy .glyph { background: var(--easy); color: #fff; }
+  .ver.pick-hard .glyph { background: var(--hard); color: #fff; }
+  .key { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
+
+  .lines { display: flex; flex-direction: column; gap: 3px; flex: 1 1 auto; min-height: 68px; }
+  .line {
+    display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left;
+    padding: 3px 6px; margin: 0 -6px; border: 0; background: none; border-radius: 5px;
+  }
+  .line:hover { background: var(--sunk); }
+  .line.playing { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+  .line .dur {
+    font-family: var(--mono); font-size: 10px; color: var(--ink-faint);
+    margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
+  .trk {
+    font-family: var(--mono); font-size: 11px; font-weight: 500; color: var(--accent);
+    background: var(--accent-soft); border-radius: 4px; padding: 1px 5px; white-space: nowrap;
+  }
+  .trk.multi { color: var(--hard); background: var(--hard-soft); }
+  .txt { font-size: 14px; line-height: 1.55; word-break: break-word; }
+  .nothing { font-size: 13px; color: var(--ink-faint); font-style: italic; }
+
+  .votes { display: flex; gap: 6px; }
+  .vote {
+    flex: 1; padding: 6px 4px; border: 1px solid var(--line); background: var(--surface);
+    border-radius: 6px; font-size: 12.5px; color: var(--ink-soft); text-align: center;
+  }
+  .vote:hover { border-color: var(--ink-faint); }
+  .vote.on.easy { background: var(--easy); border-color: var(--easy); color: #fff; }
+  .vote.on.hard { background: var(--hard); border-color: var(--hard); color: #fff; }
+
+  /* ---- note ------------------------------------------------------------ */
+  .notebox { display: flex; flex-direction: column; gap: 6px; padding: 13px 16px 0; }
+  .notebox label { font-size: 12px; color: var(--ink-faint); }
+  .notebox textarea {
+    width: 100%; min-height: 54px; resize: vertical; padding: 9px 11px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--sunk);
+    color: var(--ink); font-family: var(--sans); font-size: 13.5px; line-height: 1.55;
+  }
+  .notebox textarea:focus { background: var(--surface); border-color: var(--accent); }
+  .notebox textarea::placeholder { color: var(--ink-faint); }
+
+  /* ---- footer controls ------------------------------------------------- */
+  .unitfoot {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    padding: 12px 16px; border-top: 1px solid var(--line-soft); background: var(--sunk);
+  }
+  .flag {
+    padding: 6px 12px; border: 1px solid var(--line); background: var(--surface);
+    border-radius: 6px; font-size: 13px; color: var(--ink-soft);
+  }
+  .flag.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .nav {
+    padding: 6px 14px; border: 1px solid var(--line); background: var(--surface);
+    border-radius: 6px; font-size: 13px;
+  }
+  .nav:disabled { opacity: .4; cursor: default; }
+  .state { font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint); }
+
+  .keys {
+    margin-top: 16px; font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint);
+    display: flex; flex-wrap: wrap; gap: 4px 16px;
+  }
+  kbd {
+    font-family: var(--mono); font-size: 11px; border: 1px solid var(--line);
+    border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; color: var(--ink-soft);
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <h1>重叠区四版盲评</h1>
+    <span class="sub">nepolabo · 日语四人联动 · 40 个重叠单元</span>
+  </header>
+
+  <p class="task">
+    听一遍这一段，然后看四个版本。<b>理想形态是「一人一行、每行只有本人的字、字写对」。</b>
+    选<b>改成理想形态最省事</b>的，再选<b>最费事</b>的——<b>并列就都选上</b>，一个单元里并列的几版平分这一票。<br>
+    <span>s0–s3 是分离出来的声音轨，不是人名——每条轨的参考音可以单独听，用来认这条轨是谁。
+    文字是打分口径，没有标点。四个版本每个单元都重新打乱过。<b>点任何一行，只放那一行覆盖的那段。</b>
+    想说的话写在备注里，我会连着结果一起看。</span>
+  </p>
+
+  <nav class="rail" id="rail" aria-label="单元进度"></nav>
+  <div class="railfoot">
+    <span id="count"></span>
+    <span class="state" id="state">…</span>
+  </div>
+
+  <section class="unit" id="unit"></section>
+
+  <div class="keys">
+    <span><kbd>空格</kbd> 放这一段</span>
+    <span><kbd>1</kbd>–<kbd>4</kbd> 最省事</span>
+    <span><kbd>Shift</kbd>+<kbd>1</kbd>–<kbd>4</kbd> 最费事</span>
+    <span><kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd><kbd>R</kbd> 听参考音</span>
+    <span><kbd>N</kbd> 写备注</span>
+    <span><kbd>S</kbd> 都差不多</span>
+    <span><kbd>X</kbd> 都不能用</span>
+    <span><kbd>←</kbd><kbd>→</kbd> 上一个 / 下一个</span>
+  </div>
+</div>
+
+<script type="application/json" id="data">/*UNITS*/</script>
+<script>
+(function () {
+  "use strict";
+  var UNITS = JSON.parse(document.getElementById("data").textContent);
+  var GLYPHS = ["甲", "乙", "丙", "丁"];
+  var REFKEYS = ["q", "w", "e", "r"];
+  var answers = {};       // id -> {easiest: [glyph], hardest: [glyph], flag, note}
+  var at = 0;
+  var db = null;
+  var audio = new Audio();
+  var stopAt = 0, playingWhat = null;
+  var noteTimer = null;
+
+  /** Ties are allowed, so every field that holds picks is a list. */
+  function slot(id) {
+    var mine = answers[id] || (answers[id] = {});
+    if (!Array.isArray(mine.easiest)) { mine.easiest = mine.easiest ? [mine.easiest] : []; }
+    if (!Array.isArray(mine.hardest)) { mine.hardest = mine.hardest ? [mine.hardest] : []; }
+    return mine;
+  }
+  function has(list, glyph) { return Array.isArray(list) && list.indexOf(glyph) >= 0; }
+
+  var railEl = document.getElementById("rail");
+  var unitEl = document.getElementById("unit");
+  var countEl = document.getElementById("count");
+  var stateEl = document.getElementById("state");
+
+  function say(text) { stateEl.textContent = text; }
+
+  function answered(a) {
+    return !!(a && (a.flag || ((a.easiest || []).length && (a.hardest || []).length)));
+  }
+
+  // ---- audio ------------------------------------------------------------
+  audio.addEventListener("timeupdate", function () {
+    if (playingWhat && audio.currentTime >= stopAt) { audio.pause(); mark(null); }
+  });
+  audio.addEventListener("ended", function () { mark(null); });
+
+  function mark(what) {
+    playingWhat = what;
+    var nodes = unitEl.querySelectorAll(".play, .refbtn, .line");
+    for (var i = 0; i < nodes.length; i++) {
+      nodes[i].classList.toggle("playing", nodes[i].dataset.what === what);
+    }
+  }
+
+  function play(what, from, to) {
+    if (playingWhat === what) { audio.pause(); mark(null); return; }
+    stopAt = to;
+    audio.currentTime = from;
+    audio.play().then(function () { mark(what); }, function () { say("浏览器挡住了播放，点一下按钮"); });
+  }
+
+  // ---- rendering --------------------------------------------------------
+  function drawRail() {
+    railEl.textContent = "";
+    UNITS.forEach(function (unit, index) {
+      var b = document.createElement("button");
+      var a = answers[unit.id];
+      b.className = "tick" + (answered(a) ? (a.flag ? " flagged" : " done") : "") +
+        (a && a.note ? " noted" : "") + (index === at ? " here" : "");
+      b.textContent = index + 1;
+      b.title = "单元 " + (index + 1) + (a && a.note ? "（有备注）" : "");
+      b.onclick = function () { at = index; draw(); };
+      railEl.appendChild(b);
+    });
+    var done = UNITS.filter(function (u) { return answered(answers[u.id]); }).length;
+    countEl.textContent = "已判 " + done + " / " + UNITS.length;
+  }
+
+  function drawUnit() {
+    var unit = UNITS[at];
+    var mine = slot(unit.id);
+    unitEl.textContent = "";
+
+    var head = document.createElement("div");
+    head.className = "unithead";
+    head.innerHTML = '<span class="no">单元 ' + (at + 1) + " / " + UNITS.length + '</span>' +
+      '<span class="time">' + unit.window[0].toFixed(1) + "–" + unit.window[1].toFixed(1) + ' s</span>';
+
+    var playBtn = document.createElement("button");
+    playBtn.className = "play";
+    playBtn.dataset.what = "w";
+    playBtn.textContent = "▶ 放这一段 " + unit.window_end.toFixed(1) + " s";
+    playBtn.onclick = function () { play("w", 0, unit.window_end); };
+    head.appendChild(playBtn);
+
+    var refs = document.createElement("div");
+    refs.className = "refs";
+    if (unit.refs.length) {
+      var lbl = document.createElement("span");
+      lbl.className = "lbl";
+      lbl.textContent = "参考音";
+      refs.appendChild(lbl);
+    }
+    unit.refs.forEach(function (r, i) {
+      var rb = document.createElement("button");
+      rb.className = "refbtn";
+      rb.dataset.what = "r" + i;
+      rb.textContent = "s" + r.track + " · " + (r.end - r.start).toFixed(1) + "s";
+      rb.onclick = function () { play("r" + i, r.start, r.end); };
+      refs.appendChild(rb);
+    });
+    var spacer = document.createElement("span");
+    spacer.className = "spacer";
+    head.appendChild(spacer);
+    head.appendChild(refs);
+    unitEl.appendChild(head);
+
+    var grid = document.createElement("div");
+    grid.className = "versions";
+    GLYPHS.forEach(function (glyph, i) {
+      var lines = unit.versions[glyph] || [];
+      var card = document.createElement("div");
+      card.className = "ver" + (has(mine.easiest, glyph) ? " pick-easy" : "") + (has(mine.hardest, glyph) ? " pick-hard" : "");
+
+      var vhead = document.createElement("div");
+      vhead.className = "vhead";
+      vhead.innerHTML = '<span class="glyph">' + glyph + '</span><span class="key">' + (i + 1) + '</span>';
+      card.appendChild(vhead);
+
+      var box = document.createElement("div");
+      box.className = "lines";
+      if (!lines.length) {
+        var none = document.createElement("div");
+        none.className = "nothing";
+        none.textContent = "这一版什么都没写";
+        box.appendChild(none);
+      }
+      lines.forEach(function (line, n) {
+        var row = document.createElement("button");
+        row.className = "line";
+        row.dataset.what = "l" + glyph + n;
+        row.title = "只放这一行";
+        row.onclick = function () { play(row.dataset.what, line.t0, line.t1); };
+        var tag = document.createElement("span");
+        tag.className = "trk" + (line.tracks.length > 1 ? " multi" : "");
+        tag.textContent = line.tracks.length
+          ? line.tracks.map(function (t) { return "s" + t; }).join("+")
+          : "—";
+        var txt = document.createElement("span");
+        txt.className = "txt";
+        txt.textContent = line.text;
+        var dur = document.createElement("span");
+        dur.className = "dur";
+        dur.textContent = (line.t1 - line.t0).toFixed(1) + "s";
+        row.appendChild(tag);
+        row.appendChild(txt);
+        row.appendChild(dur);
+        box.appendChild(row);
+      });
+      card.appendChild(box);
+
+      var votes = document.createElement("div");
+      votes.className = "votes";
+      [["easiest", "easy", "最省事"], ["hardest", "hard", "最费事"]].forEach(function (spec) {
+        var vb = document.createElement("button");
+        vb.className = "vote " + spec[1] + (has(mine[spec[0]], glyph) ? " on" : "");
+        vb.textContent = spec[2];
+        vb.onclick = function () { choose(spec[0], glyph); };
+        votes.appendChild(vb);
+      });
+      card.appendChild(votes);
+      grid.appendChild(card);
+    });
+    unitEl.appendChild(grid);
+
+    var notebox = document.createElement("div");
+    notebox.className = "notebox";
+    var label = document.createElement("label");
+    label.setAttribute("for", "note");
+    label.textContent = "备注（可留空，按 N 跳到这里）";
+    var note = document.createElement("textarea");
+    note.id = "note";
+    note.value = mine.note || "";
+    note.placeholder = "这一段哪里难判、某一版错在哪、听出什么——想到什么写什么";
+    note.oninput = function () {
+      slot(unit.id).note = note.value;
+      saveLocal();
+      clearTimeout(noteTimer);
+      say("备注写着…");
+      noteTimer = setTimeout(function () { save(unit.id); drawRail(); }, 700);
+    };
+    notebox.appendChild(label);
+    notebox.appendChild(note);
+    unitEl.appendChild(notebox);
+
+    var foot = document.createElement("div");
+    foot.className = "unitfoot";
+    [["same", "都差不多"], ["none", "都不能用"]].forEach(function (spec) {
+      var fb = document.createElement("button");
+      fb.className = "flag" + (mine.flag === spec[0] ? " on" : "");
+      fb.textContent = spec[1];
+      fb.onclick = function () { flag(spec[0]); };
+      foot.appendChild(fb);
+    });
+    var sp = document.createElement("span");
+    sp.className = "spacer";
+    foot.appendChild(sp);
+    var prev = document.createElement("button");
+    prev.className = "nav";
+    prev.textContent = "← 上一个";
+    prev.disabled = at === 0;
+    prev.onclick = function () { go(-1); };
+    var next = document.createElement("button");
+    next.className = "nav";
+    next.textContent = "下一个 →";
+    next.disabled = at === UNITS.length - 1;
+    next.onclick = function () { go(1); };
+    foot.appendChild(prev);
+    foot.appendChild(next);
+    unitEl.appendChild(foot);
+
+    if (audio.getAttribute("src") !== unit.audio) {
+      audio.pause();
+      audio.src = unit.audio;
+      mark(null);
+    }
+  }
+
+  function draw() { drawRail(); drawUnit(); }
+
+  function go(step) {
+    var to = at + step;
+    if (to >= 0 && to < UNITS.length) { at = to; audio.pause(); mark(null); draw(); }
+  }
+
+  // ---- answers ----------------------------------------------------------
+  function choose(field, glyph) {
+    var unit = UNITS[at];
+    var mine = slot(unit.id);
+    var other = field === "easiest" ? "hardest" : "easiest";
+    var index = mine[field].indexOf(glyph);
+    if (index >= 0) {
+      mine[field].splice(index, 1);          // picked again = unpicked
+    } else {
+      mine[field].push(glyph);               // ties are allowed: both stay
+      var clash = mine[other].indexOf(glyph);
+      if (clash >= 0) { mine[other].splice(clash, 1); }
+      mine.flag = null;
+    }
+    save(unit.id);
+    draw();
+  }
+
+  function flag(which) {
+    var unit = UNITS[at];
+    var mine = slot(unit.id);
+    mine.flag = mine.flag === which ? null : which;
+    if (mine.flag) { mine.easiest = []; mine.hardest = []; }
+    save(unit.id);
+    draw();
+  }
+
+  // ---- storage ----------------------------------------------------------
+  function local() {
+    try { return JSON.parse(localStorage.getItem("e4") || "{}"); } catch (e) { return {}; }
+  }
+  function saveLocal() {
+    try { localStorage.setItem("e4", JSON.stringify(answers)); } catch (e) { /* private window */ }
+  }
+  function save(id) {
+    saveLocal();
+    if (!db) { say("已存在这台设备上"); return; }
+    var mine = slot(id);
+    db.doc("picks/u" + String(id).padStart(2, "0")).set({
+      unit: id,
+      easiest: mine.easiest,
+      hardest: mine.hardest,
+      flag: mine.flag || null,
+      note: mine.note || "",
+      at: new Date().toISOString()
+    }).then(function () { say("已保存"); }, function (err) { say("保存失败（" + err.code + "），本机留了一份"); });
+  }
+
+  answers = local();
+  draw();
+  say("正在连保存…");
+
+  claude.use("db").then(function (namespace) {
+    db = namespace;
+    if (!db) { say("这次只存在本机"); return; }
+    return db.collection("picks").get().then(function (snap) {
+      var docs = snap.docs || snap || [];
+      docs.forEach(function (d) {
+        var row = typeof d.data === "function" ? d.data() : d;
+        if (row && typeof row.unit === "number") {
+          answers[row.unit] = { easiest: row.easiest, hardest: row.hardest, flag: row.flag, note: row.note || "" };
+          slot(row.unit);  // a row written before ties were allowed holds one glyph, not a list
+        }
+      });
+      saveLocal();
+      draw();
+      say("已连上，答案会存下来");
+    });
+  }).catch(function () { say("这次只存在本机"); });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.metaKey || event.ctrlKey || event.altKey) { return; }
+    var unit = UNITS[at];
+    var key = event.key.toLowerCase();
+    // Typing a note must not fire shortcuts; Escape leaves the box.
+    if (event.target && event.target.tagName === "TEXTAREA") {
+      if (event.key === "Escape") { event.target.blur(); }
+      return;
+    }
+    if (key === "n") {
+      event.preventDefault();
+      var box = document.getElementById("note");
+      if (box) { box.focus(); }
+      return;
+    }
+    if (event.key === " ") { event.preventDefault(); play("w", 0, unit.window_end); return; }
+    if (event.key === "ArrowRight") { event.preventDefault(); go(1); return; }
+    if (event.key === "ArrowLeft") { event.preventDefault(); go(-1); return; }
+    if (key === "s") { flag("same"); return; }
+    if (key === "x") { flag("none"); return; }
+    var ref = REFKEYS.indexOf(key);
+    if (ref >= 0 && unit.refs[ref]) { play("r" + ref, unit.refs[ref].start, unit.refs[ref].end); return; }
+    var n = "1234".indexOf(event.key);
+    if (n >= 0) { choose(event.shiftKey ? "hardest" : "easiest", GLYPHS[n]); return; }
+    if (event.shiftKey && "!@#$".indexOf(event.key) >= 0) { choose("hardest", GLYPHS["!@#$".indexOf(event.key)]); }
+  });
+})();
+</script>

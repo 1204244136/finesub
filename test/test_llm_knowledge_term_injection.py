@@ -115,13 +115,9 @@ class TestTermOnlyHitsAreObservable:
     def test_the_report_gate_accepts_term_only(self) -> None:
         import inspect
 
-        from finesub.llm import research
-        from finesub.llm.stages import fast_session
+        from finesub.llm.stages import prepare_task
 
-        for module, function in (
-            (research, "run_research"),
-            (fast_session, "run_fast_session"),
-        ):
+        for module, function in ((prepare_task, "run_prepare_task"),):
             source = inspect.getsource(module)
             assert 'preinjection_report.get("term_matches")' in source, (
                 f"{module.__name__} still gates the record on entry hits alone"

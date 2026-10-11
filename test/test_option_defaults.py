@@ -19,6 +19,8 @@ override the config together -- which is what the desktop front end did.
 
 from __future__ import annotations
 
+from finesub import settings
+
 import inspect
 import sys
 from pathlib import Path
@@ -27,9 +29,6 @@ import pytest
 
 from finesub import config as app_config
 from finesub import pipeline
-from finesub import stages
-from finesub.speech.postprocessing import stabilization
-from finesub.speech.recognition import vad_asr_stage as vad_asr
 
 #: Options whose argparse entry still repeats the backend default instead of
 #: passing `None` and letting a resolver answer. **Empty since 2026-08-31** --
@@ -109,6 +108,24 @@ def test_the_list_of_argparse_copies_only_shrinks(monkeypatch) -> None:
     )
 
 
+def test_the_correction_cli_carries_no_copy_of_the_task_defaults(monkeypatch) -> None:
+    """The LLM module's own CLI feeds `CorrectionRequest`, whose fields hold the
+    task's defaults once. Every flag naming one of those fields must arrive as
+    None when unset, so the request answers -- otherwise changing a default
+    there silently leaves this front end on the old value."""
+
+    import dataclasses
+
+    from finesub.llm import correction_translation
+    from finesub.llm.correction_request import CorrectionRequest
+
+    monkeypatch.setattr(sys, "argv", ["prog", "clip-stable.json"])
+    args = vars(correction_translation.parse_args())
+    fields = {field.name for field in dataclasses.fields(CorrectionRequest)}
+    copies = sorted(name for name, value in args.items() if name in fields and value is not None)
+    assert copies == []
+
+
 def test_the_converted_options_really_pass_nothing(monkeypatch) -> None:
     """The shape the rest should move to, pinned so it cannot quietly regress."""
 
@@ -160,9 +177,9 @@ def test_the_row_is_never_read_with_a_literal_fallback() -> None:
     """The third copy the ratchet above could not see.
 
     `_shared` compares argparse against the signature. It never looks at the
-    ROW, and the URL branch reads the row directly -- it has to know
-    `llm_media` and friends before `run_pipeline` runs, because they decide
-    what gets downloaded. Those reads used to spell the default out
+    ROW, and the URL branch reads the row directly -- it has to check the
+    switch vector before `run_pipeline` runs, before anything is downloaded
+    (`stages.resolve_llm_switches`). Those reads used to spell the default out
     (`opts.get("llm_media") or "audio"`), which is a third copy sitting
     outside every existing check (reviewer 2026-09-01).
 
@@ -248,13 +265,13 @@ def _with_config(tmp_path, monkeypatch, body: str) -> None:
 
 def test_an_explicit_value_beats_the_config(tmp_path, monkeypatch) -> None:
     _with_config(tmp_path, monkeypatch, "[vad]\nsilero_assist = false\n")
-    assert vad_asr.resolve_vad_silero_assist(True) is True
+    assert settings.VAD_SILERO_ASSIST.resolve(True) is True
 
 
 def test_the_config_beats_the_backend_default(tmp_path, monkeypatch) -> None:
     _with_config(tmp_path, monkeypatch, "[vad]\nsilero_assist = false\n")
-    assert vad_asr.resolve_vad_silero_assist(None) is False
-    assert vad_asr.DEFAULT_VAD_SILERO_ASSIST is True
+    assert settings.VAD_SILERO_ASSIST.resolve(None) is False
+    assert settings.VAD_SILERO_ASSIST.default is True
 
 
 def test_the_config_can_turn_on_the_veto_level_floor(tmp_path, monkeypatch) -> None:
@@ -269,11 +286,11 @@ def test_the_config_can_turn_on_the_veto_level_floor(tmp_path, monkeypatch) -> N
     """
 
     _with_config(tmp_path, monkeypatch, "[stabilize]\nveto_level_floor = true\n")
-    assert stabilization.resolve_veto_level_floor(None) is True
-    assert stabilization.DEFAULT_VETO_LEVEL_FLOOR is False
+    assert settings.VETO_LEVEL_FLOOR.resolve(None) is True
+    assert settings.VETO_LEVEL_FLOOR.default is False
 
     # ... and an explicit argument still wins over it.
-    assert stabilization.resolve_veto_level_floor(False) is False
+    assert settings.VETO_LEVEL_FLOOR.resolve(False) is False
 
 
 def test_an_unrelated_config_leaves_the_veto_level_floor_alone(
@@ -281,15 +298,15 @@ def test_an_unrelated_config_leaves_the_veto_level_floor_alone(
 ) -> None:
     _with_config(tmp_path, monkeypatch, "[providers]\ntavily = false\n")
     assert (
-        stabilization.resolve_veto_level_floor(None)
-        is stabilization.DEFAULT_VETO_LEVEL_FLOOR
+        settings.VETO_LEVEL_FLOOR.resolve(None)
+        is settings.VETO_LEVEL_FLOOR.default
     )
 
 
 def test_everything_unset_lands_on_the_backend_default(tmp_path, monkeypatch) -> None:
     _with_config(tmp_path, monkeypatch, "[providers]\ntavily = false\n")
     assert (
-        vad_asr.resolve_vad_silero_assist(None) is vad_asr.DEFAULT_VAD_SILERO_ASSIST
+        settings.VAD_SILERO_ASSIST.resolve(None) is settings.VAD_SILERO_ASSIST.default
     )
 
 
@@ -326,7 +343,7 @@ def test_a_project_config_overrides_a_global_one(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FINESUB_GLOBAL_CONFIG_FILE", str(global_root / "config.toml"))
     app_config.clear_config_cache()
 
-    assert vad_asr.resolve_vad_silero_assist(None) is False
+    assert settings.VAD_SILERO_ASSIST.resolve(None) is False
 
 
 @pytest.mark.xfail(
@@ -343,45 +360,4 @@ def test_a_front_end_preference_sits_below_the_config(tmp_path, monkeypatch) -> 
     _with_config(tmp_path, monkeypatch, "[vad]\nsilero_assist = true\n")
 
     # A front end preferring "off" must still lose to a config saying "on".
-    assert vad_asr.resolve_vad_silero_assist(None, front_end_default=False) is True
-
-
-# The packaged CLI records what a run was configured with, so a later retry
-# replays that run rather than a reader's own defaults. It cannot import the
-# main package, so its recorder mirrors the resolver instead of calling it --
-# and a mirror is exactly the shape this file exists to police. Here both sides
-# are importable, so compare them directly.
-
-
-@pytest.mark.parametrize("difficulty", ["quality", "intermediate", "efficiency"])
-def test_the_cli_record_mirrors_the_knowledge_resolver(difficulty: str) -> None:
-    from finesub_bootstrap.shell import _RunPlan, Shell
-
-    arguments = ["clip.wav", "--llm-difficulty", difficulty]
-    plan = _RunPlan(
-        task_id="t",
-        source="clip.wav",
-        stage="raw-srt",
-        arguments=arguments,
-        output=Path("out") / "clip" / "clip.srt",
-    )
-
-    recorded = Shell._recorded_request(plan)
-
-    assert recorded["knowledge"] == stages.resolve_knowledge_switch(None, difficulty)
-
-
-def test_that_mirror_still_lets_an_explicit_switch_through() -> None:
-    """The resolver's first rule, which a two-branch mirror could drop."""
-
-    from finesub_bootstrap.shell import _RunPlan, Shell
-
-    plan = _RunPlan(
-        task_id="t",
-        source="clip.wav",
-        stage="raw-srt",
-        arguments=["clip.wav", "--llm-difficulty", "efficiency", "--knowledge", "update"],
-        output=Path("out") / "clip" / "clip.srt",
-    )
-
-    assert Shell._recorded_request(plan)["knowledge"] == "update"
+    assert settings.VAD_SILERO_ASSIST.resolve(None, front_end_default=False) is True

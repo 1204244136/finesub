@@ -156,8 +156,11 @@ def test_run_start_harvest_respects_worktree_gate(tmp_path, monkeypatch) -> None
         path.read_text(encoding="utf-8").replace("アリス|爱丽丝||主角", "アリス|爱丽丝||女主角"),
         encoding="utf-8",
     )
-    # simulate running inside a linked worktree without the opt-in: skip
-    monkeypatch.setattr("finesub.paths.is_linked_worktree", lambda: True)
+    # simulate a linked worktree whose shared base this is, without the opt-in: skip
+    monkeypatch.setattr("finesub.llm.knowledge.base.is_linked_worktree", lambda: True)
+    monkeypatch.setattr(
+        "finesub.llm.knowledge.base.shared_knowledge_roots", lambda: {tmp_path.resolve()}
+    )
     monkeypatch.delenv("FINESUB_KNOWLEDGE_WRITE", raising=False)
     assert harvest_rendered_edits_at_run_start(tmp_path) == []
     assert repo.store.node("T").payload["desc"] == "主角"

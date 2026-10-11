@@ -1,0 +1,200 @@
+name: Build patched CTranslate2
+
+# Builds the patched CTranslate2 wheel (tools/wt_refine_port/ct2-patches) for
+# each platform the pipeline supports, using the per-platform scripts in
+# tools/wt_refine_port/ct2-build. Process and rules: docs/ct2-distribution.md.
+#
+# Triggers, deliberately narrow because the publish job writes to a Release:
+# - workflow_dispatch: the only way to publish (inputs.publish).
+# - push to ct2-build-test/**: builds and smoke-tests without publishing, so the
+#   workflow can be exercised before it exists on main. Fork pull requests never
+#   produce push events in this repository; there is no pull_request trigger.
+#
+# Published assets are never overwritten (`gh release upload` without
+# --clobber): pylocks pin their sha256. A rebuilt variant gets a new patch-set
+# label instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "Patch-set version in the local label: finesub<label>. A new one for any rebuilt variant (the hand-built Windows wheel is 0.4.0)"
+        required: true
+      variants:
+        description: "Comma-separated: macos-cpu,linux-cuda,windows-cuda,linux-rocm,windows-rocm, or all"
+        required: true
+        default: "all"
+      publish:
+        description: "Upload to Release ct2-4.8.1+finesub<label> (never overwrites an asset)"
+        type: boolean
+        default: false
+  push:
+    branches: ["ct2-build-test/**"]
+
+permissions:
+  contents: read
+
+env:
+  CT2_VERSION: "4.8.1"
+  # A push to a test branch builds under a label nothing pins.
+  LABEL: ${{ inputs.label || '0.0.0.dev0' }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      smoke: ${{ steps.plan.outputs.smoke }}
+      has_smoke: ${{ steps.plan.outputs.has_smoke }}
+    steps:
+      - id: plan
+        shell: python
+        env:
+          VARIANTS: ${{ inputs.variants || 'all' }}
+        run: |
+          import json, os
+          all_variants = [
+              {"variant": "macos-cpu", "os": "macos-14", "script": "macos-cpu.sh", "suffix": "cpu", "smoke": True, "flash": False},
+              {"variant": "linux-cuda", "os": "ubuntu-22.04", "script": "linux-cuda.sh", "suffix": "cu128", "smoke": True, "flash": True},
+              {"variant": "windows-cuda", "os": "windows-2022", "script": "windows-cuda.sh", "suffix": "cu128", "smoke": True, "flash": True},
+              # The HIP builds link the system ROCm, which no hosted runner has: built, not smoke-tested.
+              {"variant": "linux-rocm", "os": "ubuntu-24.04", "script": "linux-rocm.sh", "suffix": "rocm7.2", "smoke": False, "flash": False},
+              {"variant": "windows-rocm", "os": "windows-2022", "script": "windows-rocm.sh", "suffix": "rocm7.2", "smoke": False, "flash": False},
+          ]
+          wanted = os.environ["VARIANTS"].strip()
+          names = {v["variant"] for v in all_variants} if wanted == "all" else {n.strip() for n in wanted.split(",") if n.strip()}
+          unknown = names - {v["variant"] for v in all_variants}
+          if unknown:
+              raise SystemExit(f"unknown variants: {sorted(unknown)}")
+          build = [v for v in all_variants if v["variant"] in names]
+          smoke = [v for v in build if v["smoke"]]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"build={json.dumps({'include': build})}\n")
+              out.write(f"smoke={json.dumps({'include': smoke})}\n")
+              out.write(f"has_smoke={'true' if smoke else 'false'}\n")
+
+  build:
+    needs: plan
+    name: build ${{ matrix.variant }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.build) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: finesub
+
+      - name: Fetch CTranslate2 and apply the patches
+        shell: bash
+        run: |
+          git clone --depth 1 --branch "v$CT2_VERSION" --recursive https://github.com/OpenNMT/CTranslate2.git ct2
+          cd ct2
+          git -c user.name=finesub-ci -c user.email=ci@invalid am ../finesub/tools/wt_refine_port/ct2-patches/*.patch
+          cp -r ../finesub/tools/wt_refine_port/ct2-build finesub-build
+          version="$CT2_VERSION+finesub$LABEL.${{ matrix.suffix }}"
+          python - "$version" <<'PY'
+          import pathlib, re, sys
+          path = pathlib.Path("python/ctranslate2/version.py")
+          text = path.read_text(encoding="utf-8")
+          path.write_text(re.sub(r'__version__ = ".*"', f'__version__ = "{sys.argv[1]}"', text), encoding="utf-8")
+          PY
+          grep __version__ python/ctranslate2/version.py
+
+      - name: Build wheel
+        uses: pypa/cibuildwheel@v3.2.1
+        with:
+          package-dir: ct2/python
+          output-dir: wheelhouse
+        env:
+          CIBW_BUILD: "cp312-*"
+          CIBW_ARCHS: auto64
+          CIBW_ARCHS_MACOS: arm64
+          CIBW_SKIP: "*-musllinux_*"
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          CIBW_BEFORE_ALL: cd ct2 && bash finesub-build/${{ matrix.script }}
+          CIBW_BEFORE_BUILD: pip install -r ct2/python/install_requirements.txt
+          CIBW_ENVIRONMENT_LINUX: ROCM_PATH=/opt/rocm LD_LIBRARY_PATH=/opt/rocm/lib/llvm/lib:$LD_LIBRARY_PATH
+          CIBW_ENVIRONMENT_MACOS: CTRANSLATE2_ROOT=/usr/local MACOSX_DEPLOYMENT_TARGET=11.00
+          CIBW_ENVIRONMENT_WINDOWS: CTRANSLATE2_ROOT='${{ github.workspace }}\install'
+          # CUDA is loaded at run time and ROCm is the system's: neither is bundled.
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: >-
+            auditwheel repair -w {dest_dir}
+            --exclude "libcublas*" --exclude "libcublasLt*"
+            --exclude "/opt/rocm/lib/lib*"
+            {wheel}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ct2-${{ matrix.variant }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  smoke:
+    needs: [plan, build]
+    # Each variant smokes on its own artifact: one failed build must not skip the rest.
+    if: always() && needs.plan.outputs.has_smoke == 'true'
+    name: smoke ${{ matrix.variant }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.smoke) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: ct2-${{ matrix.variant }}
+          path: wheel
+      - name: Install the wheel and faster-whisper
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install wheel/*.whl
+          python -m pip install faster-whisper==1.2.1 numpy
+          python -c "import ctranslate2; print(ctranslate2.__version__)"
+      - name: Decode on the CPU and delete the model
+        shell: bash
+        env:
+          CT2_EXPECT_FLASH_ATTN: ${{ matrix.flash }}
+        run: python tools/wt_refine_port/ct2-build/smoke.py
+
+  publish:
+    needs: [plan, build, smoke]
+    if: >-
+      ${{ always() && github.event_name == 'workflow_dispatch' && inputs.publish
+      && needs.build.result == 'success'
+      && (needs.smoke.result == 'success' || needs.smoke.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ct2-*
+          path: wheels
+          merge-multiple: true
+      - name: Upload to the Release (never overwrites)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="ct2-$CT2_VERSION+finesub$LABEL"
+          ls -l wheels
+          # Refuse before uploading anything: a partial upload would leave the
+          # Release half old, half new, and pylocks pin the old sha256s.
+          existing="$(gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null || true)"
+          for wheel in wheels/*.whl; do
+            if printf '%s\n' "$existing" | grep -qxF "$(basename "$wheel")"; then
+              echo "::error::$(basename "$wheel") already exists in $tag; rebuild under a new label"
+              exit 1
+            fi
+          done
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" \
+            --title "patched CTranslate2 $CT2_VERSION+finesub$LABEL" \
+            --notes "Built by build-ct2.yml from tools/wt_refine_port/ct2-patches at ${GITHUB_SHA}."
+          gh release upload "$tag" wheels/*.whl

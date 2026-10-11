@@ -6,7 +6,7 @@
 **不要在这里堆 prompt 迭代方法论。** 固定测试床上的失效模式、验收抽样、合并口径与
 「validation-ok ≠ 质量」见仓库文档：
 
-- [`docs/prompt-iterate.md`](../../../../docs/prompt-iterate.md) §2（协议/抽样）、§4（合并口径）、§5（迭代侧失效）
+- [`docs/prompt-iterate.md`](../../../docs/prompt-iterate.md) §2（协议/抽样）、§4（合并口径）、§5（迭代侧失效）
 - 归属到具体 fragment 后若要改 prompt：同一文档 §0–§3 + `tools/session_replay`
 
 本文只服务**已完成 run** 的 FLAGS 核实；D 类质量结论必须配合精修抽查或 prompt-iterate
@@ -49,7 +49,7 @@
 | 失效 | 症状 / FLAG | 核实 | 归属 |
 | --- | --- | --- | --- |
 | 高情绪连坐删除 | `空档 X–Y 精修版同区间有 N 条台词` | 听感核实做不了，就对照 raw srt：空档区间 raw 是复读/乱码 + 精修有实词 = 模型没重听音频 | `fragment_goals_correction_audio_v1.md` 第 4 条、`fragment_insert_rules_v1.md` 第 6 条 |
-| 可疑过度合并 | `压缩率偏高` / `单条字幕跨度 >10s` | **嫌疑**：对照精修同区间切了几条；一句连续长话可豁免。现行 validation 对源数/合并长度多为 warning（prompt-iterate §4）——不能用压缩率或 validation-ok 代替质量分；固定窗深挖用 merge/drop gold | `fragment_merge_rules_nosingles_v1.md`；迭代协议见 `docs/prompt-iterate.md` §2/§4 |
+| 可疑过度合并 | `压缩率偏高` / `单条字幕跨度 >10s` | **嫌疑**：对照精修同区间切了几条；一句连续长话可豁免。现行 validation 对源数/合并长度多为 warning（prompt-iterate §4）——不能用压缩率或 validation-ok 代替质量分；固定窗深挖用 merge/drop gold | `fragment_merge_rules_nosingles_v1.md`；迭代协议见 `docs/prompt-iterate.md` [§2 测试协议](../../../docs/prompt-iterate.md#2-测试协议)/[§4 当前合并口径（prompt 层）](../../../docs/prompt-iterate.md#4-当前合并口径prompt-层) |
 | 元话语泄漏 | `字幕文本列含元话语「（注」` | 看该行是否在向观众解释翻译决策（vs 正当的非语音事件括注如「（会员加入提示）」） | `fragment_goals_translation_v1.md` 规则 2 |
 | insert 零使用 | （v63 起生产变体已废弃插轴；此 FLAG 不再作为审计项） | — | — |
 | 成类翻译错误 | 脚本测不了 | 三方对照抽查（原文/机器/精修），只收成类问题；语义翻转（肯定↔否定）优先于个别用词 | 视类型：翻译目标 fragment 或 mistake 台账素材 |
@@ -60,7 +60,7 @@
 
 | 失效 | 症状 / FLAG | 核实 | 归属 |
 | --- | --- | --- | --- |
-| 同窗 validation 重试 | digest 时间线 `ok=False` + `correction_window_retry` reason=`validation_same_window` | 读该次 `validation_errors` 与 exchange；同进程 attempt 递增。**再看 `repair_context`/下一条 response 的 `repair_round`**：为 true 说明下一次带着错误重来（修复轮），为 false 说明是盲重掷——后者只在窗口被拆、装不下、agy 无会话复用、或 **`replacement=true`（两档重试的第二档：链内修复用尽，换全新会话，2026-08-19 起是常规路径**，`docs/llm_followups.md`「两档重试」**）**时才应出现 | `stages/correction/attempts.py`；具体 error 再归 A/D 模板 |
+| 同窗 validation 重试 | digest 时间线 `ok=False` + `correction_window_retry` reason=`validation_same_window` | 读该次 `validation_errors` 与 exchange；同进程 attempt 递增。**再看 `repair_context`/下一条 response 的 `repair_round`**：为 true 说明下一次带着错误重来（修复轮），为 false 说明是盲重掷——后者只在窗口被拆、装不下、agy 无会话复用、或 **`replacement=true`（两档重试的第二档：链内修复用尽，换全新会话，2026-08-19 起是常规路径**，`docs/llm_harness_behavior.md`「重试与拼接」**）**时才应出现 | `stages/correction/attempts.py`；具体 error 再归 A/D 模板 |
 | 并发双跑 / 后写覆盖 | 时间线出现**两次** `attempt=0` 且 API 时间重叠；或 `final_srt`×2；`correction-windows.jsonl` 同 chunk 多条 | 比 exchange 头里的 call 起止时间与 `final_srt` artifact 时间戳；磁盘 SRT 通常是**最后一次**成功提交 | 操作/调度（同目录并行 ingest）；非 prompt。llm 并发设计为 1（`batch.py`） |
 | 重试/降级 | task-report 关键行有 retries>0 / fallback | 读对应 exchange 的 validation_errors 与逐次 attempt | `stages/correction/attempts.py`；重试原因归相应模板 |
 | IP-risk 误判 | 日志把无关报错当 IP 风险 | 看原始错误文案是否真为地区/代理拦截 | `client.py::is_likely_ip_risk_error` |

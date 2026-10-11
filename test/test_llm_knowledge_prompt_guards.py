@@ -67,6 +67,33 @@ def test_verify_review_and_update_prompts_render() -> None:
     assert "$reasoning_clause" not in joined and "<knowledge_proposals>" in joined
 
 
+def test_judgment_and_writing_rules_go_by_session(tmp_path) -> None:
+    """Cold read Q7: every maintenance session gets the judgment standard;
+    only the ones that write entries get the writing rules."""
+
+    repo = KnowledgeRepo.open(tmp_path)
+    _seed_minimal(repo)
+    verify = render_verify_prompt(
+        [{"claim_id": "c1", "subject": "原神", "kind": "term", "line": "ラウマ|菈乌玛|角色"}]
+    )
+    review = render_review_prompt({"bundle": {}})
+    repair = render_repair_prompt(repo, "S", material="素材")
+    for prompt in (verify, review, repair):
+        assert "知识库判断标准" in prompt and "证据纪律" in prompt
+    for prompt in (verify, review):
+        assert "写条目的规则" not in prompt and "描述纪律" not in prompt
+    assert "写条目的规则" in repair and "术语行格式（固定四列）" in repair
+
+
+def test_both_op_sections_keep_the_update_contract() -> None:
+    """The share conflict repair's op section repeats `update` from the full
+    grammar; the two copies must not drift on what an update is."""
+
+    for name in ("fragment_knowledge_output_v1.md", "fragment_share_conflict_ops_v1.md"):
+        text = (PROMPT_TEMPLATE_DIR / name).read_text(encoding="utf-8")
+        assert "用新的整行替换该句柄对应的行" in text and "行的类型不能变" in text, name
+
+
 def test_ops_contract_worked_example_passes_the_real_machinery(tmp_path) -> None:
     """A5 guard: the fewshot example in ``fragment_knowledge_output_v1`` runs
     through the REAL parse→translate→apply path against a repo seeded to match
@@ -145,3 +172,24 @@ def test_output_blocks_survive_being_named_inside_reasoning() -> None:
     assert parse_model_proposals(text) == [{"op": "remove", "id": "@k2", "reason": "r"}]
     verdicts = parse_candidate_verdicts(text, {"@c1"})
     assert [v["verdict"] for v in verdicts] == ["needs_human"]
+
+
+def test_the_split_rule_only_where_split_entry_is_offered() -> None:
+    """Cold read round 2, P181: the structure rule that says "use split_entry"
+    rides with the op; the conflict repair round never has it."""
+
+    from finesub.llm.knowledge.entry_size import SPLIT_OFFER_MARK
+    from finesub.llm.prompts import build_knowledge_conflict_repair_messages
+
+    def system(messages):  # type: ignore[no-untyped-def]
+        return next(m["content"] for m in messages if m["role"] == "system")
+
+    plain = system(build_knowledge_update_messages(refined=False, task_summary="s", window_packs="w"))
+    offered = system(build_knowledge_update_messages(
+        refined=False, task_summary="s", window_packs="w", kb_entries=f"# X\n{SPLIT_OFFER_MARK}",
+    ))
+    repair = system(build_knowledge_conflict_repair_messages(
+        task_summary="s", read_rev=1, current_rev=2, dropped_rows="r", kb_entries="# X",
+    ))
+    assert "split_entry" not in plain and "split_entry" not in repair
+    assert '"op":"split_entry"' in offered and "改用 `split_entry` 把那一节拆成子条目" in offered

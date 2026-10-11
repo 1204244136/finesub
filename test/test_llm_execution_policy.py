@@ -88,7 +88,7 @@ local_agent_allow_unisolated_user_config = true
     )
 
     settings = load_execution_settings()
-    driver = settings.codex_driver_config(model="gpt-5.6-luna")
+    driver = settings.codex_driver_config(model="gpt-6-luna")
 
     assert settings.policy_id == "agent-text-preferred"
     assert driver.timeout_seconds == 120
@@ -147,7 +147,7 @@ def test_agent_media_planning_uses_high_resolution_envelope(
         ("local_agent_timeout_seconds = 1", "at least 10"),
         ('local_agent_service_tier = "default"', "service_tier"),
         ('local_agent_reasoning_effort = "max"', "reasoning_effort"),
-        ('local_agent_allow_unisolated_user_config = "yes"', "true/false"),
+        ('local_agent_allow_unisolated_user_config = "yes"', "true or false"),
     ],
 )
 def test_invalid_execution_settings_fail_closed(

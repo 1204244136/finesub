@@ -328,10 +328,10 @@ def test_render_kb_entry_excerpt_annotates_states(tmp_path) -> None:
 
 def _annotated_text() -> str:
     return (
-        "# type|position|duration|gap|corrected|translation|conf|char_count|note\n"
-        "sub|1,2|3.5|16.5|Hello there|你好啊|high|3|\n"
-        "insert|30.0,2.0|2.0|7.5|Missed line|漏掉的一句|median|5|插轴\n"
-        "sub|4|1.0|0.0|Bye|再见|high|2|\n"
+        "# type|position|duration|gap|corrected|translation|conf|char_count|spk|note\n"
+        "sub|1,2|3.5|16.5|Hello there|你好啊|high|3|s0|\n"
+        "insert|30.0,2.0|2.0|7.5|Missed line|漏掉的一句|median|5||插轴\n"
+        "sub|4|1.0|0.0|Bye|再见|high|2|s0+s1|\n"
     )
 
 
@@ -636,10 +636,10 @@ def _write_task_fixture(tmp_path, *, with_refined: bool):
     )
     annotated = tmp_path / "x-annotated.csv"
     annotated.write_text(
-        "# type|position|duration|corrected|translation|conf|note\n"
-        "sub|1,2|3.5|0.0|Hello there|你好啊|8|3|\n"
-        "insert|30.0,2.0|2.0|0.0|Missed line|漏掉的一句|5|5|插轴\n"
-        "sub|3|1.0|0.0|Bye|再见||2|\n",
+        "# type|position|duration|gap|corrected|translation|conf|char_count|spk|note\n"
+        "sub|1,2|3.5|0.0|Hello there|你好啊|8|3||\n"
+        "insert|30.0,2.0|2.0|0.0|Missed line|漏掉的一句|5|5||插轴\n"
+        "sub|3|1.0|0.0|Bye|再见||2||\n",
         encoding="utf-8",
     )
     final_srt = tmp_path / "x.srt"

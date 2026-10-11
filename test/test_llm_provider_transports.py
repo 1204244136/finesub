@@ -238,7 +238,7 @@ def test_correction_planning_limits_follow_the_group_envelope(
     # The row declares no `context_window`, which means "input and output are
     # independent pools" -- so the envelope is the declared input limit, not
     # input minus output. A single-pool endpoint has to say so with the
-    # column; see docs/plans/model-window-limits-plan.md 2.
+    # column; see docs/manual/model-routing.md, 「模型事实表(catalog)」.
     assert limits.prompt_input_limit == 128_000
 
     # Difficulty fallback (2026-08-11): the user preset binds only high, so

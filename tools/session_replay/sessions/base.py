@@ -41,8 +41,8 @@ def reject_unsupported_variant(
 
     The named-variant system (``finesub.llm.prompt_variants``) is correction-CSV
     specific: each variant bundles merge fragments and ``<singles>``
-    requirements that only the correction round emits. The query / research /
-    judge / fast rounds each have a single fixed prompt, so ``--variant`` /
+    requirements that only the correction round emits. The query / preparation
+    sessions each have a single fixed prompt, so ``--variant`` /
     ``--force-tier`` cannot select anything for them. Silently serving the
     baseline would make an A/B run look like it varied when it did not, so we
     raise instead — mirroring ``resolve_variant``'s hard error on an unknown
@@ -237,7 +237,7 @@ def replay_wants_native_search(
 
     Read from the `--profile` override when there is one, otherwise from the
     profile the fixture was captured under. Getting this wrong is silent and
-    one-directional: a `retrieval=native` prompt has no evidence pack, so a
+    one-directional: a `retrieval=native` prompt has no injected search, so a
     call dispatched without the tool answers from memory and the arm looks bad
     for a reason that has nothing to do with retrieval.
     """
@@ -387,10 +387,10 @@ def run_text_replay(
     and writes per-sample replies + a summary.
 
     ``native_search`` has to be passed through rather than inferred from the
-    rebuilt prompt: under ``retrieval=native`` the prompt *drops* the evidence
-    pack because the model is supposed to search for itself. Rebuilding that
-    prompt while dispatching an ordinary call would hand the model a research
-    round with neither injected evidence nor a search tool -- a strictly
+    rebuilt prompt: under ``retrieval=native`` the prompt *drops* the injected
+    search because the model is supposed to search for itself. Rebuilding that
+    prompt while dispatching an ordinary call would hand the model a session
+    with neither injected evidence nor a search tool -- a strictly
     handicapped arm that would read as "native is worse".
     """
 
@@ -430,7 +430,7 @@ def run_text_replay(
         )
 
     client = RoleClient(test_profile=test_profile)
-    call_role = role or LLMRole.LIGHTWEIGHT
+    call_role = role or LLMRole.GENERAL_CAPABLE
     if model:
         pin_client_role_to_free_model(client, call_role, model)
     thinking_kwargs: Dict[str, Any] = {}
@@ -448,7 +448,9 @@ def run_text_replay(
                 messages,
                 temperature=temp,
                 seed=replay_seed(attempt),
-                native_search=native_search,
+                # `complete` takes the three-way switch now; the replay only
+                # knows whether the model searches for itself.
+                retrieval="native" if native_search else "none",
                 **thinking_kwargs,
                 **({"max_tokens": 65_536}),
             )

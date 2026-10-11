@@ -9,6 +9,7 @@ from finesub.llm.agent.agent_quota import AgentQuotaLedger
 from finesub.llm.agent.local_agent import (
     LocalAgentQuotaError,
     LocalAgentTransientError,
+    LocalAgentProviderError,
     LocalAgentUnavailableError,
 )
 
@@ -193,7 +194,7 @@ def test_a_frozen_pool_disqualifies_every_target_that_shares_it(
         class _Endpoint:
             backend = "local_agent"
             provider_tier = tier
-            api_model_id = "gpt-5.6-sol"
+            api_model_id = "gpt-6.1-sol"
 
         class _Fact:
             effective_quota_pool = pool or tier
@@ -211,7 +212,7 @@ def test_a_frozen_pool_disqualifies_every_target_that_shares_it(
 
 
 def test_one_tier_can_meter_two_allowances_separately(tmp_path, monkeypatch) -> None:
-    """Antigravity fronts Gemini and Opus on separate allowances.
+    """Antigravity fronts Gemini and Claude on separate allowances.
 
     Freezing them together would take a working model out of service because
     its neighbour ran dry, which is why the pool is a catalog column rather
@@ -239,12 +240,12 @@ def test_one_tier_can_meter_two_allowances_separately(tmp_path, monkeypatch) -> 
 
         return _Candidate()
 
-    opus = _candidate("local-agy-opus-4_6")
+    sonnet = _candidate("local-agy-sonnet-5_5")
     gemini = _candidate("local-agy-media-gemini-3_8-flash")
-    assert opus.fact.effective_quota_pool != gemini.fact.effective_quota_pool
+    assert sonnet.fact.effective_quota_pool != gemini.fact.effective_quota_pool
 
-    book.freeze(opus.fact.effective_quota_pool, seconds=agent_quota.QUOTA_FREEZE_SECONDS)
-    assert provider_enabled(opus, agent_ready=lambda *_: True) is False
+    book.freeze(sonnet.fact.effective_quota_pool, seconds=agent_quota.QUOTA_FREEZE_SECONDS)
+    assert provider_enabled(sonnet, agent_ready=lambda *_: True) is False
     assert provider_enabled(gemini, agent_ready=lambda *_: True) is True
 
 
@@ -284,9 +285,12 @@ def test_agent_ping_reports_each_tier_and_its_advice(tmp_path, monkeypatch, caps
                 return type("R", (), {"content": "OK"})()
             if self.outcome == "spent":
                 raise LocalAgentQuotaError("out of quota")
+            if self.outcome == "provider":
+                raise LocalAgentProviderError("The Codex provider you configured is not answering")
             raise LocalAgentUnavailableError("not logged in")
 
-    outcomes = {"LOCAL_CODEX": "ok", "LOCAL_CLAUDE": "auth", "LOCAL_AGY": "spent"}
+    outcomes = {"LOCAL_CODEX": "ok", "LOCAL_CLAUDE": "auth", "LOCAL_AGY": "spent",
+                "LOCAL_CODEX_PROXY": "provider"}
     monkeypatch.setattr(
         agent_ping,
         "_tier_rows",
@@ -295,6 +299,7 @@ def test_agent_ping_reports_each_tier_and_its_advice(tmp_path, monkeypatch, caps
             ("LOCAL_CLAUDE", "claude-x", "LOCAL_CLAUDE"),
             # agy meters its two models apart, so the row carries the pool.
             ("LOCAL_AGY", "gemini-x", "AGY_GEMINI"),
+            ("LOCAL_CODEX_PROXY", "gpt-y", "LOCAL_CODEX_PROXY"),
         ],
     )
     monkeypatch.setattr(
@@ -310,6 +315,8 @@ def test_agent_ping_reports_each_tier_and_its_advice(tmp_path, monkeypatch, caps
     out = capsys.readouterr().out
     assert "LOCAL_CODEX" in out and "ok" in out
     assert "not_authenticated" in out and "log in again" in out
+    # The user's own provider (a proxy that is not running) is not their login.
+    assert "provider_unavailable" in out and "is the proxy running" in out
     # Exit non-zero so a script can act on it.
     assert exit_code == 1
     assert book.is_frozen("LOCAL_CODEX") is False
@@ -394,3 +401,105 @@ def test_evidence_older_than_the_ttl_stops_counting(tmp_path) -> None:
 
     assert AgentQuotaLedger(state).note_failure("LOCAL_CODEX") is False
     assert agent_quota.FAILURE_STREAK_TTL_SECONDS > agent_quota.QUOTA_FREEZE_SECONDS
+
+
+def test_a_fallback_switch_is_two_failures_on_the_line_it_replaced(ledger) -> None:
+    """The only evidence that exists when the vendor's fallback rescues a call.
+
+    The harness sees a plain success, so without this the spent free line
+    leaves no trace at all: the next task routes to the same row, the CLI
+    switches again, and credits drain while the ledger believes the line is
+    healthy.
+
+    One switch is worth exactly two failures because the interceptor retries
+    the primary once and only then hands the session over -- so it reaches the
+    ordinary threshold, and the ordinary probe still decides.
+    """
+
+    asked: list[int] = []
+
+    def ping() -> None:
+        asked.append(1)
+
+    assert (
+        agent_quota.evaluate_fallback_switch(
+            pool="LOCAL_CODEBUDDY:hy3", ping=ping, ledger=ledger
+        )
+        is None
+    )
+
+    # One switch was enough to earn the probe, and the probe answered -- so the
+    # line is alive (the switch may have been sustained rate limiting) and
+    # nothing is frozen.
+    assert asked == [1]
+    assert ledger.is_frozen("LOCAL_CODEBUDDY:hy3") is False
+
+
+def test_a_switch_freezes_the_free_line_only_when_it_stops_answering(
+    ledger,
+) -> None:
+    """Freezing on the switch alone would be the expensive direction.
+
+    The interceptor also switches on sustained rate limiting, so "the twin
+    answered" proves the line failed twice and never that it is out of quota.
+    The minimal probe is what tells those apart.
+    """
+
+    def ping() -> None:
+        raise LocalAgentTransientError("429 daily free quota exhausted")
+
+    result = agent_quota.evaluate_fallback_switch(
+        pool="LOCAL_CODEBUDDY:hy3", ping=ping, ledger=ledger
+    )
+
+    assert isinstance(result, LocalAgentQuotaError)
+    assert ledger.is_frozen("LOCAL_CODEBUDDY:hy3") is True
+    # And only that line: the credits the twin spent are a different allowance.
+    assert ledger.is_frozen("CODEBUDDY_CREDITS") is False
+
+
+def test_a_switch_with_a_broken_cli_is_not_read_as_exhaustion(ledger) -> None:
+    """Same rule as the failure path: auth and quota have different fixes."""
+
+    def ping() -> None:
+        raise LocalAgentUnavailableError("not authenticated")
+
+    assert (
+        agent_quota.evaluate_fallback_switch(
+            pool="LOCAL_CODEBUDDY:hy3", ping=ping, ledger=ledger
+        )
+        is None
+    )
+    assert ledger.is_frozen("LOCAL_CODEBUDDY:hy3") is False
+
+
+def test_a_recorded_switch_is_not_re_probed_on_every_later_call(ledger) -> None:
+    """This freeze does not stop the calls, so it has to stop the probes.
+
+    Every other freeze gates its own row out of routing, which is why nothing
+    ever re-probed a frozen pool. A row with a paid twin leaves routing only
+    when *every* allowance behind it is frozen -- so with one still standing it
+    keeps running, keeps switching, and would buy a fresh CLI launch on every
+    call for the whole two hours.
+    """
+
+    calls: list[int] = []
+
+    def ping() -> None:
+        calls.append(1)
+        raise LocalAgentTransientError("429 daily free quota exhausted")
+
+    agent_quota.evaluate_fallback_switch(
+        pool="LOCAL_CODEBUDDY:hy3", ping=ping, ledger=ledger
+    )
+    assert ledger.is_frozen("LOCAL_CODEBUDDY:hy3") is True
+    assert calls == [1]
+
+    for _ in range(5):
+        assert (
+            agent_quota.evaluate_fallback_switch(
+                pool="LOCAL_CODEBUDDY:hy3", ping=ping, ledger=ledger
+            )
+            is None
+        )
+    assert calls == [1], "one probe for the window, not one per call"

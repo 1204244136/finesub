@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from finesub import settings
+
 import json
 from pathlib import Path
 
@@ -275,7 +277,11 @@ def test_profile_minus_one_is_byte_identical_and_other_profiles_preserve_metadat
         {"type": "disfluency_candidate", "refined_start": 0.2}
     ]
     result, _ = asr_stabilize.stabilize_payload(payload, profile=2)
-    assert result["metadata"] == payload["metadata"]
+    # Every entry the input carried survives. Stabilize may add its own --
+    # this fixture has no `audio_duration`, so the overrun dimension goes
+    # unchecked and says so.
+    assert result["metadata"].items() >= payload["metadata"].items()
+    assert result["metadata"]["asr_stabilize"] == {"audio_end_unchecked": True}
     assert result["unknown"] == payload["unknown"]
     assert result["segments"][0]["alignment_events"] == [
         {"type": "disfluency_candidate", "refined_start": 0.2}
@@ -436,8 +442,8 @@ def test_the_veto_level_floor_is_off_unless_asked_for() -> None:
     """Default off is a decision, not an oversight: the veto is right 41 times
     out of 49, and the floor's measured cost includes one real line."""
 
-    assert asr_stabilize.resolve_veto_level_floor() is False
-    assert asr_stabilize.resolve_veto_level_floor(True) is True
+    assert settings.VETO_LEVEL_FLOOR.resolve() is False
+    assert settings.VETO_LEVEL_FLOOR.resolve(True) is True
 
     quiet = _noise_leg_victim(qwen_verify={"text": "嗯。"}, vad_level_tier="suspect")
     kept, _ = asr_stabilize.stabilize_payload(_payload(quiet), profile=0)
@@ -620,3 +626,285 @@ def test_very_low_energy_exemption_stops_at_the_silence_floor() -> None:
     result, report = asr_stabilize.stabilize_payload(_payload(floored), profile=0)
     assert result["segments"] == []
     assert report.suspicious_segments_dropped == 1
+
+
+def test_stable_output_normalizes_a_timeline_the_aligned_input_had_wrong() -> None:
+    # A stable JSON can be rebuilt from an aligned artifact produced before the
+    # recognition-stage fixes -- or by hand -- so the contract has to hold on
+    # this write path too. Downstream cannot tell the difference: it just drops
+    # `end <= start` without saying so.
+    collapsed = _segment([_word("お", 1.0, 1.0)], start=1.0, end=1.0)
+    stranded = _segment([_word("あ", 2.0, 3.4)], start=2.0, end=3.0)
+    following = _segment([_word("い", 3.1, 4.0)])
+
+    result, report = asr_stabilize.stabilize_payload(
+        _payload(collapsed, stranded, following), profile=0
+    )
+
+    spans = [(seg["start"], seg["end"]) for seg in result["segments"]]
+    assert spans == [(1.0, 1.01), (2.0, 3.1), (3.1, 4.0)]
+    for segment in result["segments"]:
+        for word in segment["words"]:
+            assert segment["start"] <= word["start"]
+            assert word["end"] <= segment["end"]
+    kinds = [
+        record["kind"]
+        for record in result["metadata"]["asr_stabilize"]["segment_time_repairs"]
+    ]
+    assert kinds == ["contain", "zero-span"]
+    assert report.segment_time_repairs == 2
+
+
+# --- the rebuild path's audio-end dimension (P1) ---------------------------
+
+
+def test_rebuild_clamps_a_segment_past_the_recorded_audio_duration() -> None:
+    payload = _payload(_segment([_word("末尾", 269.0, 272.68)]))
+    payload["metadata"]["asr_align"]["audio_duration"] = 270.814
+
+    result, report = asr_stabilize.stabilize_payload(payload, profile=2)
+
+    assert result["segments"][-1]["end"] == pytest.approx(270.814)
+    assert float(result["segments"][-1]["words"][-1]["end"]) <= 270.814
+    repairs = result["metadata"]["asr_stabilize"]["segment_time_repairs"]
+    assert [r["kind"] for r in repairs] == ["overrun"]
+    assert report.segment_time_repairs == 1
+    assert "audio_end_unchecked" not in result["metadata"]["asr_stabilize"]
+
+
+def test_rebuild_without_a_recorded_duration_says_it_did_not_check() -> None:
+    """"Did not overrun" and "nobody measured" must not look alike.
+
+    Measured on six delivered packs: one carries nothing but `segments`, the
+    other five carry `asr_align` but predate the duration field. Repairing
+    those would need the audio, which this path does not have -- so it says
+    so instead of staying silent.
+    """
+
+    payload = _payload(_segment([_word("末尾", 269.0, 272.68)]))
+
+    result, report = asr_stabilize.stabilize_payload(payload, profile=2)
+
+    assert result["segments"][-1]["end"] == pytest.approx(272.68)
+    assert result["metadata"]["asr_stabilize"]["audio_end_unchecked"] is True
+    assert report.segment_time_repairs == 0
+
+
+def test_the_clamped_last_cue_survives_rendering(tmp_path: Path) -> None:
+    """Clamping the stable JSON alone is not enough.
+
+    The render pass pads every cue end by 0.3 s, and the last cue has no next
+    start to stop it -- so a segment clamped exactly to the audio end comes
+    back out past it unless the pad is bounded too. This is the one assertion
+    that covers both halves; each half has its own unit tests elsewhere.
+    """
+
+    from finesub.subtitles import rendering
+    from finesub.subtitles.model import parse_srt
+    from finesub.subtitles.postprocess import (
+        TIMELINE_POSTPROCESS_PROFILES,
+        postprocess_srt_file,
+    )
+
+    audio_end = 270.814
+    payload = _payload(_segment([_word("末尾", 269.0, 272.68)]))
+    payload["metadata"]["asr_align"]["audio_duration"] = audio_end
+    stable, _ = asr_stabilize.stabilize_payload(payload, profile=2)
+
+    stable_path = tmp_path / "clip-stable.json"
+    stable_path.write_text(json.dumps(stable), encoding="utf-8")
+    srt_path = Path(
+        rendering.convert_json_to_srt(
+            stable_path, output_path=tmp_path / "clip.srt", validate=False
+        )
+    )
+    for profile in TIMELINE_POSTPROCESS_PROFILES:
+        postprocess_srt_file(
+            srt_path, profile=profile, validate=False, audio_end=audio_end
+        )
+
+    cues = parse_srt(srt_path.read_text(encoding="utf-8"))
+    assert cues[-1].end == pytest.approx(audio_end)
+
+
+# --- what the FINAL segment set leaves unclaimed (P3) ----------------------
+
+
+def test_audio_end_repair_keeps_every_tail_cue_renderable() -> None:
+    from finesub.subtitles.rendering import render_segment_srt
+    from finesub.subtitles.model import parse_srt
+
+    payload = _payload(
+        _segment([_word("first", 8.0, 10.0)]),
+        _segment([_word("second", 11.0, 12.0)]),
+        _segment([_word("third", 13.0, 14.0)]),
+    )
+    payload["metadata"] = {"asr_align": {"audio_duration": 10.0}}
+    stable, _ = asr_stabilize.stabilize_payload(payload, profile=2)
+    cues = parse_srt(render_segment_srt(stable["segments"]))
+
+    assert [cue.text for cue in cues] == ["first", "second", "third"]
+    assert all(0 <= cue.start < cue.end <= 10.0 for cue in cues)
+    assert all(left.end <= right.start for left, right in zip(cues, cues[1:]))
+    from finesub.speech.recognition.segments import normalize_segment_timeline
+
+    again, repairs = normalize_segment_timeline(stable["segments"], audio_end=10.0)
+    assert again == stable["segments"]
+    assert repairs == []
+
+
+def _timeline(*intervals: tuple[float, float]) -> dict[str, object]:
+    return {
+        "intervals": [{"start": start, "end": end} for start, end in intervals],
+        "pause_hints": {"scorer": [], "padding": []},
+    }
+
+
+def test_decode_coverage_can_be_clean_while_the_stable_still_has_a_gap() -> None:
+    """The two measurements answer different questions, and must disagree here.
+
+    The decode stage checks coverage per group, before stabilize runs. A group
+    can pass that check and still lose a line afterwards -- which is why
+    recording only the decode-side number would leave the same blind spot the
+    whole exercise is about.
+    """
+
+    from finesub.speech.recognition import transcribe
+
+    intervals = [{"start": 0.0, "end": 20.0}]
+    decoded = [
+        _segment([_word("前半", 0.0, 10.0)]),
+        _segment([_word("ご視聴ありがとうございました。", 12.0, 20.0)], energy=-30.0),
+    ]
+
+    # Decode side: the group is fully covered, nothing to report.
+    assert transcribe._coverage_shortfall(intervals, decoded) is None
+
+    payload = _payload(*decoded)
+    payload["vad_timeline"] = _timeline((0.0, 20.0))
+    result, _ = asr_stabilize.stabilize_payload(payload, profile=0)
+
+    # ...and stabilize dropped the hallucinated tail, so the viewer lost 8 s.
+    assert len(result["segments"]) == 1
+    gaps = result["metadata"]["asr_stabilize"]["speech_gaps"]
+    assert gaps["uncovered_sec"] == pytest.approx(10.0)
+    assert gaps["pieces"] == 1
+    assert gaps["spans"] == [[10.0, 20.0]]
+
+
+def test_fragmented_loss_is_visible_even_though_no_piece_is_probe_worthy() -> None:
+    """The form that fell between the two existing mechanisms.
+
+    Several 1-2 s pieces: too small for the referee's `GAP_MIN_SEC`, too small
+    to move a 30 s group's coverage ratio. Their total is what says something
+    went missing.
+    """
+
+    from finesub.speech.verification import qwen_referee
+
+    intervals = [{"start": 0.0, "end": 12.0}]
+    kept = [
+        _segment([_word("a", 0.0, 3.0)]),
+        _segment([_word("b", 4.5, 6.0)]),
+        _segment([_word("c", 8.0, 12.0)]),
+    ]
+
+    assert qwen_referee.collect_gaps(intervals, kept) == []
+
+    payload = _payload(*kept)
+    payload["vad_timeline"] = _timeline((0.0, 12.0))
+    result, _ = asr_stabilize.stabilize_payload(payload, profile=2)
+
+    gaps = result["metadata"]["asr_stabilize"]["speech_gaps"]
+    assert gaps["pieces"] == 2
+    assert gaps["uncovered_sec"] == pytest.approx(3.5)
+    assert gaps["longest_piece_sec"] == pytest.approx(2.0)
+
+
+def test_a_payload_without_a_vad_timeline_reports_nothing_rather_than_zero() -> None:
+    """"No gaps" and "no yardstick" are different answers."""
+
+    payload = _payload(_segment([_word("孤立", 0.0, 1.0)]))
+
+    result, _ = asr_stabilize.stabilize_payload(payload, profile=2)
+
+    stabilize_meta = result["metadata"].get("asr_stabilize") or {}
+    assert "speech_gaps" not in stabilize_meta
+
+
+# --- the two feedback-pack windows, as shapes (P6) -------------------------
+# The timing relations are the part worth keeping; the text is synthetic on
+# purpose. Turning private subtitles into a string does not make them ours,
+# and every assertion below is about geometry, not words.
+#
+# Measured from the delivered artifact (docs/reports/2026-09-07-...):
+# the #33 window lost two whole VAD intervals, 1.505 s and 1.925 s, with real
+# silence -- an interval boundary -- between them.
+
+CASE_33_INTERVALS = (
+    (236.625, 237.930),
+    (240.775, 242.280),
+    (243.995, 245.920),
+    (246.215, 247.560),
+)
+CASE_33_UNCLAIMED = ((240.775, 242.280), (243.995, 245.920))
+
+
+def test_the_case_33_shape_is_two_whole_intervals_nobody_claimed() -> None:
+    """Both existing mechanisms are blind to it, and the summary is not.
+
+    ⚠ The pieces sit in DIFFERENT VAD intervals, each filling its own
+    completely. That is why "add up the pieces inside one interval" -- the
+    first idea for widening the referee's criterion -- would still miss this
+    window (bench-baselines §26).
+    """
+
+    from finesub.speech.recognition.segments import speech_gap_summary
+    from finesub.speech.verification import qwen_referee
+
+    intervals = [
+        {"start": start, "end": end} for start, end in CASE_33_INTERVALS
+    ]
+    claimed = [
+        _segment([_word("あ", start + 0.05, end - 0.05)])
+        for start, end in CASE_33_INTERVALS
+        if (start, end) not in CASE_33_UNCLAIMED
+    ]
+
+    # No single uncovered run reaches GAP_MIN_SEC, so the referee probes none.
+    assert qwen_referee.collect_gaps(intervals, claimed) == []
+
+    summary = speech_gap_summary(intervals, claimed)
+    # Two whole intervals, plus a 0.05 s edge either side of each claimed one.
+    assert summary["pieces"] == 6
+    assert summary["uncovered_sec"] == pytest.approx(1.505 + 1.925 + 0.2, abs=1e-3)
+    assert summary["longest_piece_sec"] == pytest.approx(1.925, abs=1e-3)
+    assert [240.775, 242.28] in summary["spans"]
+    assert [243.995, 245.92] in summary["spans"]
+
+
+def test_the_case_22_shape_is_not_a_gap_at_all() -> None:
+    """#22 lost no time -- one cue carried the neighbour's text.
+
+    Pinned as a boundary: a coverage measurement cannot see this class of
+    defect, so nothing here should be read as covering it. The check that
+    would is a content-level correspondence one, which does not exist yet.
+    """
+
+    from finesub.speech.recognition.segments import speech_gap_summary
+
+    intervals = [{"start": 125.9, "end": 134.0}]
+    # Same spans either way; only which text sits on which cue differs.
+    correct = [
+        _segment([_word("甲", 125.9, 129.0)]),
+        _segment([_word("乙", 129.0, 134.0)]),
+    ]
+    misassigned = [
+        _segment([_word("乙", 125.9, 129.0)]),
+        _segment([_word("丙", 129.0, 134.0)]),
+    ]
+
+    assert speech_gap_summary(intervals, correct) == speech_gap_summary(
+        intervals, misassigned
+    )
+    assert speech_gap_summary(intervals, misassigned)["uncovered_sec"] == 0.0

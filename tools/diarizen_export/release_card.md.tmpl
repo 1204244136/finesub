@@ -1,0 +1,46 @@
+---
+license: cc-by-nc-4.0
+base_model:
+  - BUT-FIT/diarizen-wavlm-large-s80-md-v2
+  - pyannote/wespeaker-voxceleb-resnet34-LM
+tags:
+  - speaker-diarization
+  - torchscript
+---
+
+# DiariZen (wavlm-large-s80-md-v2) as TorchScript — {VARIANT} build
+
+**Non-commercial use only (CC BY-NC 4.0).** This is a format conversion made for
+[FineSub](https://github.com/caca2331/finesub)'s speaker diarization, so it can run without the
+`diarizen` and `pyannote.audio` packages. It is **not** a new model and was **not** retrained.
+
+| File | What it is | From | Licence |
+| --- | --- | --- | --- |
+| `diarizen_segmentation.ts` | WavLM-Large (pruned) + Conformer local segmentation, traced forward pass | [BUT-FIT/diarizen-wavlm-large-s80-md-v2](https://huggingface.co/BUT-FIT/diarizen-wavlm-large-s80-md-v2) @ `027b3e22` | CC BY-NC 4.0 |
+| `diarizen_embedding.ts` | WeSpeaker ResNet34 speaker-embedding network (the part after fbank), traced | [pyannote/wespeaker-voxceleb-resnet34-LM](https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM) @ `837717dd` | CC BY 4.0 |
+| `plda/plda.npz`, `plda/xvec_transform.npz` | PLDA and x-vector transform, copied unchanged | BUT-FIT/diarizen-wavlm-large-s80-md-v2 | CC BY-NC 4.0 |
+
+The bundle carries the most restrictive of the three: **CC BY-NC 4.0**.
+
+## {VARIANT} only
+
+TorchScript records the device it was traced on. These files were traced on **{DEVICE}** and run
+only on {DEVICE}; the {OTHER} build is [{OTHER_REPO}]({OTHER_REPO_URL}).
+
+## What changed from the originals
+
+- Traced with `torch.jit.trace` (torch {TORCH}); not frozen, not quantised, weights unchanged.
+- The traced modules were checked against the eager originals bit for bit, repeated calls at batch
+  sizes 1–3, before writing.
+- Everything else DiariZen does — windowing, powerset decoding, VBx clustering — is reimplemented
+  in FineSub; see its documentation for how that port was characterised.
+
+Export script: `tools/diarizen_export/export_diarizen.py` in the FineSub repository.
+
+## Credit
+
+DiariZen is by BUT Speech@FIT. Please cite their work (see the
+[original model card](https://huggingface.co/BUT-FIT/diarizen-wavlm-large-s80-md-v2)) and the
+WeSpeaker paper (Wang et al., ICASSP 2023) for the embedding model. Some of DiariZen's training
+data is research-only, which is why its weights — and therefore this conversion — may not be used
+commercially.

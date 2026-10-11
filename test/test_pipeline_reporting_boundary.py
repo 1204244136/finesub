@@ -62,16 +62,11 @@ EXEMPT_MODULES = {
 EXEMPT_PREFIXES: tuple[str, ...] = ()
 
 #: Functions whose body is allowed to print: the standalone CLI entry points.
-#: `_main_impl` is part of one: an entry point that has to own a resource for
-#: the whole run (`correction_translation.main` opens the agent session scope
-#: and books what it spent afterwards) splits into a wrapper plus the body
-#: that used to be `main`. The wrapper is the boundary; the body is still the
-#: CLI. `_main` is the same split done for a second reason (2026-09-03):
-#: `main` now only binds the terminal reporter around the run, because the
-#: thread-local default is silent and these entry points were dropping every
-#: warning the library handed them.
+#: `_main` is the body behind `main`, which only binds the terminal reporter
+#: around the run (2026-09-03): the thread-local default is silent and these
+#: entry points were dropping every warning the library handed them.
 #: Library functions are unaffected -- they never had these names.
-CLI_FUNCTIONS = {"main", "_main", "_main_impl", "parse_args"}
+CLI_FUNCTIONS = {"main", "_main", "parse_args"}
 
 #: A print that *is* the deliverable rather than a log line: a dry run's prompt
 #: text, a measurement table. Marking one is a deliberate, greppable act --

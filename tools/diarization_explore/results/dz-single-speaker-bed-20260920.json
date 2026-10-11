@@ -1,0 +1,86 @@
+[
+ {
+  "name": "ep01-one-\u5c0f\u65e5\u5411\u7f8e\u9999",
+  "arm": "one",
+  "seconds": 350.8800625,
+  "log_bayes": -1.3642420526593924e-11,
+  "clusters": 1
+ },
+ {
+  "name": "ep01-one-\u6a31\u5ddd\u60e0",
+  "arm": "one",
+  "seconds": 634.7999375,
+  "log_bayes": -9.094947017729282e-13,
+  "clusters": 1
+ },
+ {
+  "name": "ep01-one-\u9752\u6728\u4f51\u78e8",
+  "arm": "one",
+  "seconds": 724.880125,
+  "log_bayes": 0.0,
+  "clusters": 1
+ },
+ {
+  "name": "ep01-two-\u5c0f\u65e5\u5411\u7f8e\u9999+\u6a31\u5ddd\u60e0",
+  "arm": "two",
+  "seconds": 985.68,
+  "log_bayes": 801.406676227245,
+  "clusters": 2
+ },
+ {
+  "name": "ep01-two-\u6a31\u5ddd\u60e0+\u9752\u6728\u4f51\u78e8",
+  "arm": "two",
+  "seconds": 1359.6800625,
+  "log_bayes": 3489.545319364237,
+  "clusters": 2
+ },
+ {
+  "name": "ep01-two-\u9752\u6728\u4f51\u78e8+\u5c0f\u65e5\u5411\u7f8e\u9999",
+  "arm": "two",
+  "seconds": 1075.7601875,
+  "log_bayes": 1878.107117634274,
+  "clusters": 2
+ },
+ {
+  "name": "ep02-one-\u5c0f\u65e5\u5411\u7f8e\u9999",
+  "arm": "one",
+  "seconds": 520.1599375,
+  "log_bayes": 0.0,
+  "clusters": 1
+ },
+ {
+  "name": "ep02-one-\u6a31\u5ddd\u60e0",
+  "arm": "one",
+  "seconds": 609.9200625,
+  "log_bayes": 0.0,
+  "clusters": 1
+ },
+ {
+  "name": "ep02-one-\u9752\u6728\u4f51\u78e8",
+  "arm": "one",
+  "seconds": 673.84,
+  "log_bayes": -1.546140993013978e-11,
+  "clusters": 1
+ },
+ {
+  "name": "ep02-two-\u5c0f\u65e5\u5411\u7f8e\u9999+\u6a31\u5ddd\u60e0",
+  "arm": "two",
+  "seconds": 1130.08,
+  "log_bayes": 1064.077902126728,
+  "clusters": 2
+ },
+ {
+  "name": "ep02-two-\u6a31\u5ddd\u60e0+\u9752\u6728\u4f51\u78e8",
+  "arm": "two",
+  "seconds": 1283.7600625,
+  "log_bayes": 3466.2546806217215,
+  "clusters": 2
+ },
+ {
+  "name": "ep02-two-\u9752\u6728\u4f51\u78e8+\u5c0f\u65e5\u5411\u7f8e\u9999",
+  "arm": "two",
+  "seconds": 1193.9999375,
+  "log_bayes": 2900.666156463618,
+  "clusters": 2
+ }
+]

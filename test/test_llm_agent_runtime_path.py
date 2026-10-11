@@ -58,7 +58,7 @@ class _ScriptedAgentDriver:
         content = self.outputs.pop(0)
         return SimpleNamespace(
             content=content,
-            reported_model="gpt-5.6-luna",
+            reported_model="gpt-6-luna",
             execution_attempt={"backend": "local_agent", "capsule_id": f"cap-{len(self.calls)}"},
             episode_id=f"cap-{len(self.calls)}",
             conversation_handle=(
@@ -77,7 +77,7 @@ def _client(driver, tmp_path, *, session_mode: str = ""):
         user_config={
             "model_groups": {
                 "research-default": {
-                    "targets": ["local-codex-completion-gpt-5_6-luna"]
+                    "targets": ["local-codex-completion-gpt-6-luna"]
                 }
             }
         }

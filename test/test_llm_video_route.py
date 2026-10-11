@@ -15,7 +15,6 @@ from finesub.llm.routing.config import CapabilityTier, LLMRole
 from finesub.llm.stages.correction import execute_correction_windows
 from finesub.llm.routing.profiles import VIDEO_SAMPLE_FPS, resolve_profile
 from finesub.subtitles.model import parse_srt
-from finesub.llm.stages.fast_session import run_fast_session
 from finesub.llm.stages.plan import plan_fast_window
 
 
@@ -109,25 +108,19 @@ def test_prefetcher_respects_clip_suffix(tmp_path) -> None:
     assert ref is not None and ref.mime_type == "video/mp4"
 
 
-@pytest.mark.parametrize("planning_media", ["video", "audio"])
-def test_video_run_clip_ownership_follows_the_media_switches(
-    tmp_path, monkeypatch, planning_media
-) -> None:
-    """--media video shares one mp4; --planning-media audio opts back into
-    the pre-D20 shape (mp4 for correction, .aac cut for the query round)."""
+def test_video_run_carries_one_clip(tmp_path, monkeypatch) -> None:
+    """--media video: the window task carries one mp4; the request turn and
+    the delivery share it."""
 
-    profile = resolve_profile(
-        "video", "local", "quality", planning_media=planning_media
-    )
+    profile = resolve_profile("video", "local", "quality")
     stable_json = _stable_json(tmp_path)
     audio_path = tmp_path / "a.flac"
     video_path = tmp_path / "v.mp4"
     audio_extracts: list[Path] = []
     video_extracts: list[Path] = []
-    calls: list[tuple[LLMRole, UploadedFileRef | None, str]] = []
+    calls: list[tuple[LLMRole, UploadedFileRef | None, int]] = []
 
     def fake_audio_extract(src, start, end, out):
-        assert Path(src) == audio_path
         audio_extracts.append(Path(out))
         return Path(out)
 
@@ -141,30 +134,19 @@ def test_video_run_clip_ownership_follows_the_media_switches(
             pass
 
         def complete(self, role, messages, **kwargs):
-            if callable(messages):  # tiered factory (correction round)
+            if callable(messages):
                 messages = messages("capableC")
-            prompt_text = "\n".join(str(m.get("content", "")) for m in messages)
-            calls.append((role, kwargs.get("file_ref"), prompt_text))
-            if role is LLMRole.LIGHTWEIGHT_MULTIMODAL:
-                content = (
-                    "<window_notes>注</window_notes>\n"
-                    "<keep_entries></keep_entries>\n"
-                    "<search_queries>\n游戏A\n</search_queries>"
-                )
-            else:
-                content = (
-                    "<singles>\ntype|position|duration|gap|corrected_text|translation|conf|char_count|note\n"
-                    "sub|1|1.0|0.0|one|一|8|1|译1字；宜保持独立\n"
-                    "sub|2|1.0|0.0|two|二|8|1|译1字；宜保持独立\n"
-                    "</singles>\n"
-                    "<translated>\ntype|position|duration|gap|corrected_text|translation|conf|char_count|note\nsub|1|1.0|0.0|one|一|8|1|\nsub|2|1.0|0.0|two|二|8|1|\n</translated>"
-                    "\n<next_advice></next_advice>"
-                )
+            calls.append((role, kwargs.get("file_ref"), len(messages)))
+            content = (
+                "<singles>\ntype|position|duration|gap|corrected_text|translation|conf|char_count|note\n"
+                "sub|1|1.0|0.0|one|一|8|1|译1字；宜保持独立\n"
+                "sub|2|1.0|0.0|two|二|8|1|译1字；宜保持独立\n"
+                "</singles>\n"
+                "<translated>\ntype|position|duration|gap|corrected_text|translation|conf|char_count|note\nsub|1|1.0|0.0|one|一|8|1|\nsub|2|1.0|0.0|two|二|8|1|\n</translated>"
+                "\n<next_advice></next_advice>"
+            )
             return LLMCallResult(
-                content=content,
-                role=role,
-                model="fake",
-                fallback_used=False,
+                content=content, role=role, model="fake", fallback_used=False,
                 raw_response={"candidates": [{"finishReason": "STOP"}]},
             )
 
@@ -195,89 +177,13 @@ def test_video_run_clip_ownership_follows_the_media_switches(
         profile=profile,
     )
 
-    assert [role for role, _, _ in calls] == [
-        LLMRole.LIGHTWEIGHT_MULTIMODAL,
-        LLMRole.AUDIO_MULTIMODAL,
-    ]
-    query_ref = calls[0][1]
-    correction_ref = calls[1][1]
-    assert correction_ref is not None and correction_ref.filename == "0001.mp4"
-    if planning_media == "video":
-        # Both rounds share the one .mp4 clip: no .aac is cut at
-        # all -- one extraction, one upload.
-        assert query_ref is not None and query_ref.filename == "0001.mp4"
-        assert query_ref is correction_ref
-        assert audio_extracts == []
-    else:
-        assert query_ref is not None and query_ref.filename == "0001.aac"
-        assert audio_extracts and audio_extracts[0].name == "0001.aac"
-    # Media identity is carried by file_ref; v40 no longer duplicates the
-    # local filename inside the textual prompt.
-    assert "0001.aac（" not in calls[0][2]
-    assert "0001.mp4（" not in calls[0][2]
-    assert "0001.mp4（" not in calls[1][2]
-    assert video_extracts and video_extracts[0].name == "0001.mp4"
-    assert [segment.text for segment in parse_srt(output.read_text(encoding="utf-8"))] == [
-        "一",
-        "二",
-    ]
-
-
-def test_fast_session_uploads_the_video_clip_on_mm_high(tmp_path, monkeypatch) -> None:
-    profile = resolve_profile("video", "local", "quality")
-    window = plan_fast_window(
-        _segments(), counter=FakeTokenCounter(), profile=profile
-    )
-    video_extracts: list[Path] = []
-    seen_prompts: list[str] = []
-
-    def fake_video_extract(src, start, end, out):
-        video_extracts.append(Path(out))
-        return Path(out)
-
-    class FakeClient:
-        def complete(self, role, messages, **kwargs):
-            if callable(messages):  # tiered factory (correction round)
-                messages = messages("capableC")
-            seen_prompts.append(
-                "\n".join(str(m.get("content", "")) for m in messages)
-            )
-            return LLMCallResult(
-                content=(
-                    "<analysis_notes>\n笔记。\n</analysis_notes>\n"
-                    "<requested_entries>\n</requested_entries>\n"
-                    "<keep_entries>\n</keep_entries>\n"
-                    "<search_queries>\n</search_queries>"
-                ),
-                role=role,
-                model="fake",
-                fallback_used=False,
-                raw_response={},
-            )
-
-    monkeypatch.setattr(
-        "finesub.media.clips.extract_window_video_clip",
-        fake_video_extract,
-    )
-    monkeypatch.setattr("finesub.llm.media_upload.upload_gemini_file", _fake_upload)
-
-    result, file_ref = run_fast_session(
-        window=window,
-        segment_count=2,
-        audio_path=tmp_path / "a.flac",
-        video_path=tmp_path / "v.mp4",
-        clip_dir=tmp_path / "clips",
-        knowledge_root=tmp_path / "kb",
-        client=FakeClient(),
-        token_counter=FakeTokenCounter(),
-        profile=profile,
-        search_rounds=1,
-    )
-
-    assert file_ref is not None and file_ref.filename == "0001.mp4"
-    assert video_extracts and video_extracts[0].name == "0001.mp4"
-    assert "0001.mp4（" not in seen_prompts[0]
-    assert result.analysis_notes == "笔记。"
+    assert output.exists()
+    # The request turn delivered at once: one call, on the correction role,
+    # carrying the correction clip; no second clip was ever cut.
+    assert [role for role, _, _ in calls] == [LLMRole.AUDIO_MULTIMODAL]
+    assert calls[0][1] is not None and calls[0][1].filename == "0001.mp4"
+    assert [p.name for p in video_extracts] == ["0001.mp4"]
+    assert audio_extracts == []
 
 
 def test_cli_rejects_bad_video_flag_combinations(tmp_path, monkeypatch, capsys) -> None:
@@ -330,7 +236,7 @@ def test_cli_disables_knowledge_on_efficiency(tmp_path, monkeypatch, capsys) -> 
         ],
     )
     assert correction_translation.main() == 2
-    assert "disables --knowledge entirely" in capsys.readouterr().err
+    assert "never updates the knowledge base" in capsys.readouterr().err
 
 
 def test_clip_sampling_rate_matches_what_the_rest_call_asks_for() -> None:

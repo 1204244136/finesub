@@ -176,7 +176,7 @@ def test_summarize_llm_rounds_accepts_local_execution_attempts(tmp_path) -> None
     artifact_dir = tmp_path / "input.llm-artifacts"
     artifact_dir.mkdir()
     record = {
-        "kind": "research_round1_response",
+        "kind": "prepare_task_response",
         "created_at": "2026-01-01T00:00:03+00:00",
         "payload": {
             "validation_ok": True,

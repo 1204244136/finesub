@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 import finesub.llm.correction_translation as correction_orchestration
+from finesub.llm.correction_request import CorrectionRequest
 import finesub.llm.research as research
 from finesub.llm.stages.correction import commit as correction_commit
 from finesub.llm.stages.correction import context as correction_context
@@ -22,13 +23,13 @@ from finesub.llm.client import LLMCallResult
 from finesub.llm.media_upload import UploadedFileRef
 from finesub.llm.chunking import SubtitleSegment, plan_correction_windows
 from finesub.llm.routing.config import LLMRole
-from finesub.llm.stages.correction import execute_correction_windows, run_window_query_round
+from finesub.llm.stages.correction import execute_correction_windows
 from finesub.llm.stages.correction.attempts import (
     _extract_next_advice,
     _extract_task_update_feedback,
 )
 from finesub.llm.stages.correction.metadata import _is_output_limited, _output_limit_check
-from finesub.llm.stages.correction.query_round import _extract_window_notes
+from finesub.llm.stages.correction.request_turn import _extract_window_notes
 from finesub.llm.routing.profiles import resolve_profile
 from finesub.llm.routing.execution_policy import ExecutionSettings
 from finesub.llm.prompts import ContextPack, render_advice_ledger
@@ -86,7 +87,6 @@ def test_research_context_survives_model_and_knowledge_changes(tmp_path) -> None
         "geometry_profile_id": "correction_media=audio,...",
         "stable_json_hash": "sha256:source",
         "extra_info_hash": "sha256:notes",
-        "search_rounds": 2,
         # Everything below is exempt.
         "execution_identity": {"routing_identity_digest": "old-model-group"},
         "knowledge_inputs_hash": "sha256:kb-before-someone-elses-update",
@@ -118,7 +118,6 @@ def test_research_context_survives_model_and_knowledge_changes(tmp_path) -> None
         ("stable_json_hash", "sha256:other-source"),
         ("prompt_version", "v2"),
         ("extra_info_hash", "sha256:new-notes"),
-        ("search_rounds", 3),
         ("research_semantics_id", "native"),
     ],
 )
@@ -131,7 +130,6 @@ def test_research_context_reuse_rejects_gated_changes(tmp_path, field, value) ->
         "geometry_profile_id": "correction_media=audio,...",
         "stable_json_hash": "sha256:source",
         "extra_info_hash": "sha256:notes",
-        "search_rounds": 2,
     }
     _write_research_context(context, saved)
 
@@ -1248,346 +1246,28 @@ def test_provider_error_does_not_split_window(tmp_path, monkeypatch) -> None:
     assert payload["request"]["message_text_chars"] > 0
 
 
-def test_query_round_searches_once_and_injects_results(tmp_path, monkeypatch) -> None:
-    stable_json = tmp_path / "clip-stable.json"
-    stable_json.write_text(
-        json.dumps(
-            {
-                "segments": [
-                    {"id": "1", "start": 0.0, "end": 1.0, "text": "一。"},
-                    {"id": "2", "start": 1.5, "end": 2.5, "text": "二。"},
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    from finesub.llm.web_search import QuerySearchResult, SearchResultItem
+def test_request_turn_failure_is_best_effort(tmp_path, monkeypatch) -> None:
+    """A request turn that never yields a usable reply degrades to "no
+    retrieval": the window is still corrected (the legacy query round had the
+    same contract)."""
 
-    query_output = (
-        "<window_notes>\n本窗口疑似在打BOSS，BOSS名待定。\n</window_notes>\n"
-        "<keep_entries></keep_entries>\n"
-        "<search_queries>\n游戏B 角色名\n</search_queries>"
-    )
-    bad = "<translated>\nsub|9|1.0|0.0|nine|九|high|1|\n</translated>"
-    good = (
-        "<singles>\ntype|position|duration|gap|corrected_text|translation|conf|char_count|note\n"
-        "sub|1|1.0|0.0|一。|一|8|1|译1字；宜保持独立\n"
-        "sub|2|1.0|0.0|二。|二|8|1|译1字；宜与前一句合并\n"
-        "</singles>\n"
-        "<translated>\ntype|position|duration|gap|corrected_text|translation|conf|char_count|note\n"
-        "sub|1|1.0|0.0|一。|一|8|1|\n"
-        "sub|2|1.0|0.0|二。|二|7|1|术语note\n"
-        "</translated>"
-    )
-    correction_responses = [bad, good]
-    query_calls = []
-    correction_messages_seen = []
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs) -> None:
-            pass
-
-        def complete(self, role, messages, **kwargs):
-            if callable(messages):  # tiered factory (correction round)
-                messages = messages("capableC")
-            if role == LLMRole.LIGHTWEIGHT_MULTIMODAL:
-                query_calls.append(messages)
-                return LLMCallResult(
-                    content=query_output,
-                    role=role,
-                    model="fake-lite",
-                    fallback_used=False,
-                    raw_response={
-                        "candidates": [{"finishReason": "STOP"}],
-                        "usageMetadata": {
-                            "candidatesTokenCount": 30,
-                            "thoughtsTokenCount": 100,
-                        }
-                    },
-                )
-            correction_messages_seen.append(messages)
-            return LLMCallResult(
-                content=correction_responses.pop(0),
-                role=role,
-                model="fake",
-                fallback_used=False,
-                raw_response={"candidates": [{"finishReason": "STOP"}]},
-            )
-
-    class FakeSearchClient:
-        def __init__(self) -> None:
-            self.calls = []
-
-        def search_many(self, queries, *, max_queries=None):
-            self.calls.append(
-                (tuple(getattr(item, "query", item) for item in queries), max_queries)
-            )
-            return [
-                QuerySearchResult(
-                    query="游戏B 角色名",
-                    provider="tavily",
-                    items=(
-                        SearchResultItem(
-                            title="角色wiki",
-                            url="https://example.test/wiki",
-                            snippet="角色小明的资料",
-                        ),
-                    ),
-                )
-            ]
-
-    _setattr_both(
-        monkeypatch,
-        "RoleClient", FakeClient)
-    search_client = FakeSearchClient()
-
-    output = execute_correction_windows(
-        stable_json=stable_json,
-        output_path=tmp_path / "out.srt",
-        token_counter=FakeTokenCounter(),
-        max_retries_per_window=1,
-        search_client=search_client,
-        task_artifact_dir=tmp_path / "artifacts",
-    )
-
-    # One query round + one search despite the correction validation retry.
-    assert len(query_calls) == 1
-    assert search_client.calls == [(("游戏B 角色名",), 8)]
-    assert len(correction_messages_seen) == 2
-    for messages in correction_messages_seen:
-        assert "角色小明的资料" in messages[1]["content"]
-        assert "https://example.test/wiki" in messages[1]["content"]
-        # Query-round window notes are injected into the correction prompt.
-        assert "<pre_round_notes>" in messages[1]["content"]
-        assert "本窗口疑似在打BOSS，BOSS名待定。" in messages[1]["content"]
-    # Insert/插轴 deprecated (v63+): final SRT is source-backed rows only.
-    assert [segment.text for segment in parse_srt(output.read_text(encoding="utf-8"))] == [
-        "一",
-        "二",
-    ]
-    # Annotated CSV retains type/conf/note.
-    annotated = (tmp_path / "out-annotated.csv").read_text(encoding="utf-8")
-    assert "# type|position|duration|gap|corrected|translation|conf|char_count|note" in annotated
-    assert "|二。|二|high|1|术语note" in annotated
-    assert "insert|" not in annotated
-
-    artifacts = [
-        json.loads(line)
-        for line in (tmp_path / "artifacts" / "task-artifacts.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    kinds = [artifact["kind"] for artifact in artifacts]
-    assert kinds.count("correction_query_response") == 1
-    assert kinds.count("correction_search_results") == 1
-    query_response = next(
-        artifact for artifact in artifacts if artifact["kind"] == "correction_query_response"
-    )
-    assert query_response["payload"]["queries"] == ["游戏B 角色名"]
-    assert query_response["payload"]["window_notes"] == "本窗口疑似在打BOSS，BOSS名待定。"
-    assert query_response["payload"]["finish_reason"] == "STOP"
-    assert query_response["payload"]["output_limit_check"]["limited"] is False
-    assert query_response["payload"]["usage"]["thinking_tokens"] == 100
-
-    report = next(
-        artifact for artifact in artifacts if artifact["kind"] == "token_distribution_report"
-    )
-    rows = report["payload"]["rows"]
-    assert [row["call"] for row in rows] == [
-        "correction_query",
-        "correction_window",
-        "correction_window",
-    ]
-    assert rows[0]["tokens"]["thinking_tokens"] == 100
-    assert report["payload"]["totals"]["call_count"] == 3
-
-    exchanges = sorted((tmp_path / "artifacts" / "exchanges").glob("*.md"))
-    # Block numbering: the window claimed block 001 at scheduling time; its
-    # calls (query round, then correction attempts) sub-number in call order.
-    assert [path.name for path in exchanges] == [
-        "001-01-correction-0001-query-attempt0.md",
-        "001-02-correction-0001-attempt0.md",
-        "001-03-correction-0001-attempt1.md",
-    ]
-    query_exchange = exchanges[0].read_text(encoding="utf-8")
-    assert "## 请求（system）" in query_exchange
-    assert "## 模型响应" in query_exchange
-    assert "游戏B 角色名" in query_exchange
-    assert "- finish_reason: STOP" in query_exchange
-    assert "- output_limit: observed 130 / " in query_exchange
-    assert "角色小明的资料" in exchanges[1].read_text(encoding="utf-8")
-
-
-def test_query_round_resumes_model_output_but_reexecutes_search(tmp_path) -> None:
-    from finesub.llm.web_search import QuerySearchResult, SearchResultItem
-
-    window = plan_correction_windows(
-        [SubtitleSegment("1", 0.0, 1.0, "你好。")],
-        counter=FakeTokenCounter(),
-    )[0]
-    artifact_dir = tmp_path / "artifacts"
-    response = (
-        "<reasoning>需要核对名称。</reasoning>\n"
-        "<window_notes>疑似提到游戏B。</window_notes>\n"
-        "<keep_entries></keep_entries>\n"
-        "<search_queries>游戏B 官方名</search_queries>"
-    )
-
-    class FirstClient:
-        def complete(self, role, messages, **kwargs):
-            return LLMCallResult(
-                content=response,
-                role=role,
-                model="fake-lite",
-                fallback_used=False,
-                raw_response={},
-            )
-
-    class BlockingClient:
-        def complete(self, role, messages, **kwargs):
-            raise AssertionError("validated query round should resume")
-
-    class SearchClient:
-        def __init__(self):
-            self.calls = []
-
-        def search_many(self, queries, *, max_queries=None):
-            normalized = tuple(item.query for item in queries)
-            self.calls.append((normalized, max_queries))
-            return [
-                QuerySearchResult(
-                    query=query,
-                    provider="fake",
-                    items=(
-                        SearchResultItem(
-                            title="官方资料",
-                            url="https://example.test/game-b",
-                            snippet="游戏B 的官方名称。",
-                        ),
-                    ),
-                )
-                for query in normalized
-            ]
-
-    first_search = SearchClient()
-    kwargs = dict(
-        window=window,
-        context_pack=ContextPack(),
-        audio_label="",
-        previous_advice="",
-        file_ref=None,
-        knowledge_root=tmp_path / "knowledge",
-        streamer_index="",
-        common_index="",
-        task_artifact_dir=artifact_dir,
-        token_counter=FakeTokenCounter(),
-        profile=resolve_profile("text", "local", "quality"),
-        checkpoint_extra_identity={"task_fingerprint": "same-task"},
-    )
-    first = run_window_query_round(
-        client=FirstClient(), search_client=first_search, **kwargs
-    )
-    resumed_search = SearchClient()
-    resumed = run_window_query_round(
-        client=BlockingClient(), search_client=resumed_search, **kwargs
-    )
-
-    assert resumed == first
-    assert first_search.calls == resumed_search.calls
-    artifacts = [
-        json.loads(line)
-        for line in (artifact_dir / "task-artifacts.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    replay = [item for item in artifacts if item["kind"] == "session_checkpoint_replay"]
-    assert replay[-1]["payload"]["session"] == "query"
-    assert replay[-1]["payload"]["key"] == window.chunk_id
-
-
-def test_a_non_resumable_call_never_seeds_the_query_checkpoint(tmp_path) -> None:
-    """Gate D answer C (docs/llm_local_agent.md §7), at the commit site.
-
-    A call that leaned on implicit provider history -- an agent turn that
-    resumed a conversation -- reports ``resumable=False``, and the L1 store
-    must not learn it: its hash does not cover that history, so replaying it
-    later would treat two different inputs as one. The rerun re-calls instead.
-    """
-
-    window = plan_correction_windows(
-        [SubtitleSegment("1", 0.0, 1.0, "你好。")],
-        counter=FakeTokenCounter(),
-    )[0]
-    artifact_dir = tmp_path / "artifacts"
-    response = (
-        "<reasoning>需要核对名称。</reasoning>\n"
-        "<window_notes>疑似提到游戏B。</window_notes>\n"
-        "<keep_entries></keep_entries>\n"
-        "<search_queries></search_queries>"
-    )
-
-    class ImplicitHistoryClient:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def complete(self, role, messages, **kwargs):
-            self.calls += 1
-            return LLMCallResult(
-                content=response,
-                role=role,
-                model="fake-lite",
-                fallback_used=False,
-                raw_response={},
-                resumable=False,
-            )
-
-    kwargs = dict(
-        window=window,
-        context_pack=ContextPack(),
-        audio_label="",
-        previous_advice="",
-        file_ref=None,
-        knowledge_root=tmp_path / "knowledge",
-        streamer_index="",
-        common_index="",
-        task_artifact_dir=artifact_dir,
-        token_counter=FakeTokenCounter(),
-        profile=resolve_profile("text", "local", "quality"),
-        checkpoint_extra_identity={"task_fingerprint": "same-task"},
-    )
-    client = ImplicitHistoryClient()
-    run_window_query_round(client=client, search_client=None, **kwargs)
-    run_window_query_round(client=client, search_client=None, **kwargs)
-
-    assert client.calls == 2, "a non-resumable call must be re-sent, not replayed"
-    checkpoints = artifact_dir / "session-checkpoints.jsonl"
-    assert not checkpoints.exists() or "query" not in checkpoints.read_text(
-        encoding="utf-8"
-    )
-
-
-def test_query_round_failure_is_best_effort(tmp_path, monkeypatch) -> None:
     stable_json = tmp_path / "clip-stable.json"
     stable_json.write_text(
         json.dumps({"segments": [{"id": "1", "start": 0.0, "end": 1.0, "text": "一。"}]}),
         encoding="utf-8",
     )
+    calls: list[int] = []
 
     class FakeClient:
         def __init__(self, *args, **kwargs) -> None:
             pass
 
         def complete(self, role, messages, **kwargs):
-            if callable(messages):  # tiered factory (correction round)
+            if callable(messages):
                 messages = messages("capableC")
-            if role == LLMRole.LIGHTWEIGHT_MULTIMODAL:
-                return LLMCallResult(
-                    content="没有输出标签块",
-                    role=role,
-                    model="fake-lite",
-                    fallback_used=False,
-                    raw_response={},
-                )
+            calls.append(len(messages))
+            if len(messages) == 2:  # the request turn: garbage, every attempt
+                return LLMCallResult(content="没有输出标签块", role=role, model="fake", fallback_used=False, raw_response={})
             return LLMCallResult(
                 content=(
                     "<singles>\ntype|position|duration|gap|corrected_text|translation|conf|char_count|note\n"
@@ -1605,32 +1285,20 @@ def test_query_round_failure_is_best_effort(tmp_path, monkeypatch) -> None:
         def search_many(self, queries, *, max_queries=None):
             raise AssertionError("search should not run without queries")
 
-    _setattr_both(
-        monkeypatch,
-        "RoleClient", FakeClient)
+    _setattr_both(monkeypatch, "RoleClient", FakeClient)
 
     output = execute_correction_windows(
         stable_json=stable_json,
         output_path=tmp_path / "out.srt",
         token_counter=FakeTokenCounter(),
         search_client=FakeSearchClient(),
+        profile=resolve_profile("text", "local", "quality"),
         task_artifact_dir=tmp_path / "artifacts",
     )
+    assert output.exists()
+    # format retries on the request turn, then one delivery in the same conversation
+    assert calls[-1] == 4 and calls[:-1] and all(n == 2 for n in calls[:-1])
 
-    assert parse_srt(output.read_text(encoding="utf-8"))[0].text == "一"
-    artifacts = [
-        json.loads(line)
-        for line in (tmp_path / "artifacts" / "task-artifacts.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    query_response = next(
-        artifact for artifact in artifacts if artifact["kind"] == "correction_query_response"
-    )
-    assert query_response["payload"]["parse_error"]
-
-
-# --- Correction-window mid-loop resume -------------------------------------
 
 _RESUME_STABLE = {
     "segments": [
@@ -1723,108 +1391,18 @@ def test_existing_translated_output_still_runs_requested_knowledge_update(
         raising=True,
     )
 
-    result = correction_orchestration.run_full_correction(
-        stable_json=tmp_path / "clip-stable.json",
-        output_path=out,
-        audio_path=None,
-        postprocess_profile=None,
-        knowledge="update",
-    )
-
-    assert result == translated.resolve()
-    assert updates and Path(updates[0]["result_srt_path"]) == translated.resolve()
-
-
-def test_fast_mode_on_a_non_local_vector_still_runs_the_research_stage(
-    tmp_path, monkeypatch
-) -> None:
-    """fast + retrieval∈{none,native}: r1 is the session's only entry pick.
-
-    The fused fast round only exists under retrieval=local, so skipping the
-    research stage on these vectors silently disabled the knowledge base for
-    every fast run (and the pre-refactor keyword seeding was already removed
-    in its favour). The stage must run and seed the fused window's transfer
-    chain.
-    """
-
-    stable = tmp_path / "clip-stable.json"
-    stable.write_text(json.dumps(_RESUME_STABLE), encoding="utf-8")
-    window = plan_correction_windows(
-        [
-            SubtitleSegment("1", 0.0, 1.0, "一。"),
-            SubtitleSegment("2", 1.5, 2.5, "二。"),
-        ],
-        counter=FakeTokenCounter(),
-    )[0]
-    monkeypatch.setattr(
-        correction_orchestration,
-        "decide_fast_mode",
-        lambda **kwargs: correction_orchestration.FastDecision(
-            mode="auto", enabled=True, reason="test", window=window
-        ),
-    )
-
-    research_calls: list[dict] = []
-
-    def fake_research(**kwargs):
-        research_calls.append(kwargs)
-        Path(kwargs["context_path"]).write_text(
-            json.dumps({"keep_entries": ["主播A"]}), encoding="utf-8"
+    outcome = correction_orchestration.run_correction_task(
+        CorrectionRequest(
+            stable_json=tmp_path / "clip-stable.json",
+            output_path=out,
+            audio_path=tmp_path / "clip.wav",
+            postprocess_profile=None,
+            knowledge="update",
         )
-        return ContextPack()
-
-    monkeypatch.setattr(correction_orchestration, "run_research_stage", fake_research)
-
-    executed: dict = {}
-
-    def fake_execute(**kwargs):
-        executed.update(kwargs)
-        out = Path(kwargs["output_path"])
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text("", encoding="utf-8")
-        return out
-
-    monkeypatch.setattr(
-        correction_orchestration, "execute_correction_windows", fake_execute
     )
 
-    kb = tmp_path / "kb"
-    (kb / "streamer").mkdir(parents=True)
-    (kb / "streamer" / "index.md").write_text("- 主播A |  | 别名 | 测试主播\n", encoding="utf-8")
-    (kb / "common").mkdir()
-    (kb / "common" / "index.md").write_text("", encoding="utf-8")
-
-    correction_orchestration.run_full_correction(
-        stable_json=stable,
-        output_path=tmp_path / "out" / "clip.srt",
-        audio_path=None,
-        postprocess_profile=None,
-        knowledge="collect",
-        knowledge_root=kb,
-        profile=resolve_profile("text", "none", "quality"),
-        test_profile=True,
-    )
-
-    assert research_calls, "the research stage must run for a fast none-vector"
-    assert executed.get("windows_override") == [window]
-    assert executed.get("initial_transfer_keys") == ["主播A"]
-
-    # Without retrieval or a readable index there is nothing to research: the
-    # fast run stays a single fused call.
-    research_calls.clear()
-    executed.clear()
-    correction_orchestration.run_full_correction(
-        stable_json=stable,
-        output_path=tmp_path / "out2" / "clip.srt",
-        audio_path=None,
-        postprocess_profile=None,
-        knowledge="none",
-        knowledge_root=kb,
-        profile=resolve_profile("text", "none", "quality"),
-        test_profile=True,
-    )
-    assert not research_calls
-    assert executed.get("windows_override") == [window]
+    assert outcome.result == translated.resolve() and outcome.result_reused
+    assert updates and Path(updates[0]["result_srt_path"]) == translated.resolve()
 
 
 def test_correction_resume_replays_cached_windows_without_recalling_llm(tmp_path, monkeypatch) -> None:
@@ -1842,7 +1420,7 @@ def test_correction_resume_replays_cached_windows_without_recalling_llm(tmp_path
     out2, calls2 = _run_windows(tmp_path, monkeypatch, artifact_dir=art, forbid=True)
     assert calls2 == 0
     assert out2.read_text(encoding="utf-8") == text1
-    assert "|二。|二|high|1|术语note" in (tmp_path / "out-annotated.csv").read_text(encoding="utf-8")
+    assert "|二。|二|high|1||术语note" in (tmp_path / "out-annotated.csv").read_text(encoding="utf-8")
     cached_kinds = [
         json.loads(line)["kind"]
         for line in (art / "task-artifacts.jsonl").read_text(encoding="utf-8").splitlines()
@@ -1897,6 +1475,32 @@ def test_persisted_window_plan_pins_chunk_ids_against_replanning_drift(
     monkeypatch.setattr(correction_run, "plan_correction_windows", drifted)
     _out, calls = _run_windows(tmp_path, monkeypatch, artifact_dir=art, forbid=True)
     assert calls == 0
+
+
+def test_correction_plan_is_resolved_once_and_survives_a_media_switch(tmp_path) -> None:
+    """`resolve_correction_plan` writes the plan it computes, so a second call
+    reads it back as reused -- why the run resolves once and hands the result to
+    both the speaker judge and the correction (a fresh plan must stay fresh for
+    the ledger). The fingerprint has no modality in it: a resume under another
+    `--llm-media` keeps the boundaries the judge split inside."""
+
+    stable = tmp_path / "clip-stable.json"
+    stable.write_text(json.dumps(_RESUME_STABLE), encoding="utf-8")
+    art = tmp_path / "artifacts"
+    kwargs = dict(
+        stable_json=stable, task_artifact_dir=art, test_profile=True, audio_path=None,
+        video_path=None, token_counter=FakeTokenCounter(), max_window_subtitle_tokens=10,
+    )
+    first = correction_run.resolve_correction_plan(profile=resolve_profile("text", "none", "quality"), **kwargs)
+    assert not first.reused and (art / "correction-window-plan.json").exists()
+    again = correction_run.resolve_correction_plan(profile=resolve_profile("audio", "none", "quality"), **kwargs)
+    assert again.reused
+    assert [w.chunk_id for w in again.windows] == [w.chunk_id for w in first.windows]
+    assert again.task_fingerprint == first.task_fingerprint
+    fast = correction_run.resolve_correction_plan(
+        profile=resolve_profile("text", "none", "quality"), windows_override=first.windows[:1], **kwargs
+    )
+    assert fast.fast and not fast.reused and fast.windows == first.windows[:1]
 
 
 def test_reused_plan_refits_pending_leaf_before_dispatch(tmp_path, monkeypatch) -> None:
@@ -2146,7 +1750,6 @@ _FINGERPRINT_ARGS = dict(
     test_profile=False,
     source_fingerprint="s",
     media_identity={},
-    extra="",
 )
 
 
@@ -2162,7 +1765,6 @@ def test_window_invalidation_inputs_is_the_whole_fingerprint_payload(
         "test_profile",
         "source_fingerprint",
         "media_identity",
-        "extra",
     )
     assert correction_commit._task_fingerprint(**_FINGERPRINT_ARGS)
 
@@ -2176,7 +1778,6 @@ def test_window_invalidation_inputs_is_the_whole_fingerprint_payload(
     with pytest.raises(AssertionError) as excinfo:
         correction_commit._task_fingerprint(**_FINGERPRINT_ARGS)
     assert "media_identity" in str(excinfo.value)
-    assert "extra" in str(excinfo.value)
 
 
 def test_every_whitelisted_input_actually_moves_the_fingerprint() -> None:
@@ -2189,7 +1790,6 @@ def test_every_whitelisted_input_actually_moves_the_fingerprint() -> None:
         "test_profile": True,
         "source_fingerprint": "s2",
         "media_identity": {"audio": {"size": 1}},
-        "extra": "seed",
     }
     assert set(changed) == set(correction_commit.WINDOW_INVALIDATION_INPUTS)
     for field, value in changed.items():
@@ -2238,7 +1838,7 @@ def test_correction_resume_survives_a_style_change_mid_run(tmp_path, monkeypatch
     It is the user's own instruction, so changing it mid-run does leave the
     file half in one voice and half in another — owner 2026-09-02 judged that
     acceptable rather than pay for re-running everything already finished
-    (`docs/plans/translation-style-plan.md` §2.5, which records what this overrides).
+    (`docs/llm_harness_behavior.md`, 「纠错窗口中途 resume」, which records what this overrides).
     The named `--style` entries are out for the same reason.
     """
 
@@ -2251,7 +1851,7 @@ def test_correction_resume_survives_a_style_change_mid_run(tmp_path, monkeypatch
 
 
 def test_correction_resume_reruns_on_prompt_version_bump(tmp_path, monkeypatch) -> None:
-    """PROMPT_VERSION is the output contract; CLAUDE.md makes the bump
+    """PROMPT_VERSION is the output contract; AGENTS.md makes the bump
     invalidate resume caches on purpose."""
 
     art = tmp_path / "artifacts"
@@ -2322,113 +1922,10 @@ def test_advice_ledger_front_truncates_to_token_budget() -> None:
     assert "[window 0000]" not in capped
 
 
-def test_query_round_requests_knowledge_entries_for_correction(tmp_path, monkeypatch) -> None:
-    stable_json = tmp_path / "clip-stable.json"
-    stable_json.write_text(
-        json.dumps({"segments": [{"id": "1", "start": 0.0, "end": 1.0, "text": "一。"}]}),
-        encoding="utf-8",
-    )
-    knowledge_root = tmp_path / "knowledge"
-    (knowledge_root / "streamer").mkdir(parents=True)
-    (knowledge_root / "common").mkdir(parents=True)
-    (knowledge_root / "streamer" / "index.md").write_text(
-        "- 主播A | エーちゃん | 测试主播\n", encoding="utf-8"
-    )
-    (knowledge_root / "streamer" / "主播A.md").write_text(
-        "# 主播A\n\n## 档案\n\n关西腔。\n", encoding="utf-8"
-    )
-    (knowledge_root / "common" / "index.md").write_text("", encoding="utf-8")
-
-    query_output = (
-        "<window_notes>\n杂谈回。\n</window_notes>\n"
-        "<requested_entries>\nエーちゃん\n未知条目\n</requested_entries>\n"
-        "<keep_entries></keep_entries>\n"
-        "<search_queries>\n</search_queries>"
-    )
-    good = (
-        "<singles>\ntype|position|duration|gap|corrected_text|translation|conf|char_count|note\n"
-        "sub|1|1.0|0.0|一。|一|8|1|译1字；宜保持独立\n"
-        "</singles>\n"
-        "<translated>\ntype|position|duration|gap|corrected_text|translation|conf|char_count|note\nsub|1|1.0|0.0|一。|一|8|1|\n</translated>"
-    )
-    query_messages_seen = []
-    correction_messages_seen = []
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs) -> None:
-            pass
-
-        def complete(self, role, messages, **kwargs):
-            if callable(messages):  # tiered factory (correction round)
-                messages = messages("capableC")
-            if role == LLMRole.LIGHTWEIGHT_MULTIMODAL:
-                query_messages_seen.append(messages)
-                return LLMCallResult(
-                    content=query_output,
-                    role=role,
-                    model="fake-lite",
-                    fallback_used=False,
-                    raw_response={},
-                )
-            correction_messages_seen.append(messages)
-            return LLMCallResult(
-                content=good,
-                role=role,
-                model="fake",
-                fallback_used=False,
-                raw_response={"candidates": [{"finishReason": "STOP"}]},
-            )
-
-    class NoSearchClient:
-        def search_many(self, queries, *, max_queries=None):  # pragma: no cover
-            raise AssertionError("no queries were emitted")
-
-    _setattr_both(monkeypatch, "RoleClient", FakeClient)
-
-    execute_correction_windows(
-        stable_json=stable_json,
-        output_path=tmp_path / "out.srt",
-        token_counter=FakeTokenCounter(),
-        search_client=NoSearchClient(),
-        knowledge_root=knowledge_root,
-        task_artifact_dir=tmp_path / "artifacts",
-    )
-
-    # The query round sees both indices.
-    query_user = query_messages_seen[0][1]["content"]
-    assert "<streamer_index>" in query_user
-    assert "主播A |  | エーちゃん | 测试主播" in query_user
-    # The requested entry body reaches the correction round's entry_details.
-    correction_user = correction_messages_seen[0][1]["content"]
-    assert "<entry_details>" in correction_user
-    assert "关西腔。" in correction_user
-
-    artifacts = [
-        json.loads(line)
-        for line in (tmp_path / "artifacts" / "task-artifacts.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    query_response = next(
-        artifact for artifact in artifacts if artifact["kind"] == "correction_query_response"
-    )
-    assert query_response["payload"]["requested_entries"] == ["エーちゃん", "未知条目"]
-    assert query_response["payload"]["resolved_entry_keys"] == ["主播A"]
-    assert query_response["payload"]["missing_entries"] == ["未知条目"]
-    # The correction round records the unified injection set (v17: transfers +
-    # this window's resolved requests rendered once).
-    window_response = next(
-        artifact
-        for artifact in artifacts
-        if artifact["kind"] == "correction_window_response"
-    )
-    assert window_response["payload"]["injected_entries"] == ["主播A"]
-
-
 def test_keep_entries_transfer_chain_across_windows(tmp_path, monkeypatch) -> None:
-    """v17 pass-through: window 1's <keep_entries> reaches window 2's query
-    round as carried context and its correction round as entry_details; the
-    resume cache records the chain."""
+    """v17 pass-through, task-flow shape: window 1's <keep_entries> reaches
+    window 2's opening message as carried entries and its delivery as
+    entry_details; the resume cache records the chain."""
 
     from dataclasses import replace
 
@@ -2465,50 +1962,45 @@ def test_keep_entries_transfer_chain_across_windows(tmp_path, monkeypatch) -> No
     )
     windows = [window_one, window_two]
 
-    query_output = (
-        "<window_notes>\n杂谈回。\n</window_notes>\n"
-        "<requested_entries>\nエーちゃん\n</requested_entries>\n"
-        "<keep_entries></keep_entries>\n"
-        "<search_queries>\n</search_queries>"
-    )
+    # Window 1 requests the entry; window 2 keeps what it was handed.
+    requests = [
+        "<reasoning>x</reasoning>\n<window_notes>杂谈回。</window_notes>\n"
+        "<requested_entries>\nエーちゃん\n</requested_entries>\n<keep_entries></keep_entries>\n"
+        "<search_queries>\n</search_queries>",
+        "<reasoning>x</reasoning>\n<window_notes></window_notes>\n"
+        "<requested_entries></requested_entries>\n<keep_entries>\n主播A\n</keep_entries>\n"
+        "<search_queries>\n</search_queries>",
+    ]
     outputs = [
         (
             "<singles>\ntype|position|duration|gap|corrected_text|translation|conf|char_count|note\nsub|1|1.0|0.0|x|1|8|0.5|译1字；宜保持独立\n</singles>\n<translated>\ntype|position|duration|gap|corrected_text|translation|conf|char_count|note\nsub|1|1.0|0.0|一。|一|8|1|\n</translated>\n"
             "<next_advice></next_advice>\n"
             "<keep_entries>\n主播A\n</keep_entries>"
         ),
-            (
-                "<singles>\ntype|position|duration|gap|corrected_text|translation|conf|char_count|note\nsub|1|1.0|0.0|x|2|8|0.5|译1字；宜保持独立\n</singles>\n<translated>\ntype|position|duration|gap|corrected_text|translation|conf|char_count|note\nsub|1|1.0|0.0|二。|二|8|1|\n</translated>\n"
-                "<next_advice></next_advice>\n"
-                "<keep_entries></keep_entries>"
-            ),
+        (
+            "<singles>\ntype|position|duration|gap|corrected_text|translation|conf|char_count|note\nsub|1|1.0|0.0|x|2|8|0.5|译1字；宜保持独立\n</singles>\n<translated>\ntype|position|duration|gap|corrected_text|translation|conf|char_count|note\nsub|1|1.0|0.0|二。|二|8|1|\n</translated>\n"
+            "<next_advice></next_advice>\n"
+            "<keep_entries></keep_entries>"
+        ),
     ]
-    query_users: list[str] = []
-    correction_users: list[str] = []
+    openings: list[str] = []
+    deliveries: list[str] = []
 
     class FakeClient:
         def __init__(self, *args, **kwargs) -> None:
             pass
 
         def complete(self, role, messages, **kwargs):
-            if callable(messages):  # tiered factory (correction round)
+            if callable(messages):
                 messages = messages("capableC")
-            if role == LLMRole.LIGHTWEIGHT_MULTIMODAL:
-                query_users.append(messages[1]["content"])
-                return LLMCallResult(
-                    content=query_output,
-                    role=role,
-                    model="fake-lite",
-                    fallback_used=False,
-                    raw_response={},
-                )
-            content = outputs[len(correction_users) % len(outputs)]
-            correction_users.append(messages[1]["content"])
+            if len(messages) == 2:  # the request turn
+                openings.append(messages[1]["content"])
+                content = requests[len(openings) - 1]
+            else:  # the delivery turn, same conversation
+                deliveries.append("\n".join(str(m["content"]) for m in messages if m["role"] == "user"))
+                content = outputs[len(deliveries) - 1]
             return LLMCallResult(
-                content=content,
-                role=role,
-                model="fake",
-                fallback_used=False,
+                content=content, role=role, model="fake", fallback_used=False,
                 raw_response={"candidates": [{"finishReason": "STOP"}]},
             )
 
@@ -2528,15 +2020,14 @@ def test_keep_entries_transfer_chain_across_windows(tmp_path, monkeypatch) -> No
         windows_override=windows,
     )
 
-    # Window 1's query round has no carried entries; window 2's carries the
-    # entry kept by window 1 (full text, marked as auto-injected).
-    assert "（无）" in query_users[0].split("<carried_entries>")[1]
-    assert "关西腔。" in query_users[1].split("<carried_entries>")[1]
-    # Both correction rounds see the entry: window 1 via its own request,
-    # window 2 via the transfer.
-    assert "关西腔。" in correction_users[0]
-    assert "关西腔。" in correction_users[1]
-    # The resume cache records the chain per window.
+    # Window 1 opens with no carried entries; window 2 opens with the entry
+    # window 1 kept (full text).
+    assert "（无）" in openings[0].split("<entry_details>")[1]
+    assert "关西腔。" in openings[1].split("<entry_details>")[1]
+    # Both deliveries see the entry: window 1 via its own request (fill),
+    # window 2 via the transfer (opening + fill).
+    assert "关西腔。" in deliveries[0]
+    assert "关西腔。" in deliveries[1]
     cache_lines = [
         json.loads(line)
         for line in (tmp_path / "artifacts" / "correction-windows.jsonl")
@@ -2547,11 +2038,14 @@ def test_keep_entries_transfer_chain_across_windows(tmp_path, monkeypatch) -> No
     by_chunk = {record["chunk_id"]: record for record in cache_lines}
     assert by_chunk["0001"]["keep_entries"] == ["主播A"]
     assert by_chunk["0001"]["injected_entries"] == ["主播A"]
-    assert by_chunk["0002"]["keep_entries"] == []
+    # Window 2's request turn kept the carried entry, so the chain continues
+    # even though its delivery's own <keep_entries> is empty (union, v17).
+    assert by_chunk["0002"]["keep_entries"] == ["主播A"]
     assert by_chunk["0002"]["injected_entries"] == ["主播A"]
 
     # Knowledge text is an execution input, not a reason to throw away windows
-    # that were already parsed and committed.
+    # that were already parsed and committed: a rerun after the entry changed
+    # replays both windows without a single call.
     (knowledge_root / "streamer" / "主播A.md").write_text(
         "# 主播A\n\n## 档案\n\n东京腔。\n", encoding="utf-8"
     )
@@ -2564,7 +2058,7 @@ def test_keep_entries_transfer_chain_across_windows(tmp_path, monkeypatch) -> No
         task_artifact_dir=tmp_path / "artifacts",
         windows_override=windows,
     )
-    assert len(correction_users) == 2
+    assert len(openings) == 2 and len(deliveries) == 2
 
 
 def test_an_unclosed_translated_block_splits_instead_of_killing_the_run() -> None:
@@ -2645,10 +2139,6 @@ def test_geometry_ignores_switches_the_planner_never_reads() -> None:
     )
     assert (
         dataclass_replace(profile, difficulty="efficiency").geometry_id
-        == profile.geometry_id
-    )
-    assert (
-        dataclass_replace(profile, planning_media="text").geometry_id
         == profile.geometry_id
     )
     # ...but the ones it does read still move it.
@@ -2766,16 +2256,15 @@ def test_a_split_window_grows_the_denominator_the_stage_reports() -> None:
     assert progress.splits == 1
 
 
-def test_the_cli_rewrites_its_report_even_when_this_run_spent_nothing(tmp_path) -> None:
+def test_a_task_rewrites_its_report_even_when_this_run_spent_nothing(tmp_path, monkeypatch) -> None:
     """A stale book must not survive in the Markdown either.
 
-    The report is written *during* the run, with whatever
+    The report used to be written *during* the run, with whatever
     `agent-session-usage.json` was in the artifact directory at the time. A
-    later run that uses no agent session deletes that JSON -- and used to
-    stop there, leaving the report quoting tokens whose source was gone.
+    later run that uses no agent session deletes that JSON -- and the report
+    went on quoting tokens whose source was gone. The task now books the
+    sessions first and writes the report after.
     """
-
-    from types import SimpleNamespace
 
     from finesub.llm.exchange_metadata import AGENT_SESSION_USAGE_FILENAME
 
@@ -2798,9 +2287,35 @@ def test_the_cli_rewrites_its_report_even_when_this_run_spent_nothing(tmp_path) 
     correction_orchestration.write_task_report(artifacts, task_id="t", outputs={})
     assert "99999" in (artifacts / "task-report.md").read_text(encoding="utf-8")
 
-    correction_orchestration._book_agent_session_usage(
-        SimpleNamespace(usage_rows=list),
-        {"artifact_dir": artifacts, "task_id": "t", "outputs": {}},
+    # A run that executes but never opens an agent session (the windows are
+    # stubbed; the text-only fast shape needs no preparation).
+    stable = tmp_path / "clip-stable.json"
+    stable.write_text(
+        json.dumps({"segments": [{"id": "1", "start": 0.0, "end": 1.0, "text": "一。"}]}),
+        encoding="utf-8",
+    )
+
+    def windows(**kwargs):  # type: ignore[no-untyped-def]
+        translated = Path(kwargs["output_path"]).with_name("clip-translated.srt")
+        translated.write_text("", encoding="utf-8")
+        return translated
+
+    monkeypatch.setattr(correction_orchestration, "execute_correction_windows", windows)
+    monkeypatch.setattr(
+        correction_orchestration, "run_research_stage", lambda **k: pytest.fail("no preparation")
+    )
+    correction_orchestration.run_correction_task(
+        CorrectionRequest(
+            stable_json=stable,
+            output_path=tmp_path / "clip.srt",
+            profile=resolve_profile("text", "none", "quality"),
+            fast="on",
+            postprocess_profile=None,
+            task_id="t",
+            task_artifact_dir=artifacts,
+            knowledge="none",
+            test_profile=True,
+        )
     )
     assert not (artifacts / AGENT_SESSION_USAGE_FILENAME).exists()
     assert "99999" not in (artifacts / "task-report.md").read_text(encoding="utf-8")

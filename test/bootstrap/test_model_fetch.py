@@ -701,14 +701,31 @@ def test_the_shipped_manifest_describes_the_production_models() -> None:
     alternative. It is held to the same shape as the rest: an unverifiable
     alternative would be worse than an unlisted one, because it would claim
     routing and verification it cannot deliver.
+
+    `diarizen` and `wespeaker` (2026-09-19) have the same shape and are likewise
+    fetched by nothing a run does: they exist so `tools/diarizen_export/` can
+    fetch the checkpoints once to trace them. What `--diarize` fetches is
+    `nemotron3` and `speaker-embedding` for the default backend (2026-09-25), or a
+    `diarizen-ts-*` build when DiariZen is named.
+    ⚠ DiariZen's weights are CC-BY-NC 4.0, which is a licence statement rather than a
+    manifest property -- the manifest carries where and what,
+    `docs/manual/models.md` carries what a user may do with them.
+
+    ⚠ Every digest here came from the Hub tree API's `lfs.oid`, or from a byte
+    comparison against the pinned URL. NOT from the `resolve/...` response's
+    ETag: for a small file that is a 40-hex blob id and for an LFS object it is
+    the CDN's own tag, and reading it as a digest reported five intact files as
+    corrupt on the first attempt.
     """
 
     from finesub_bootstrap.model_manifest import load_manifest
 
     manifest = load_manifest()
-    assert set(manifest) == {"separator", "whisper", "whisper-ja", "qwen-referee"}
+    hub_models = ("whisper", "whisper-ja", "qwen-referee", "diarizen", "wespeaker",
+                  "diarizen-ts-cuda", "diarizen-ts-cpu", "nemotron3", "speaker-embedding")
+    assert set(manifest) == {"separator", *hub_models}
 
-    for model_id in ("whisper", "whisper-ja", "qwen-referee"):
+    for model_id in hub_models:
         entry = manifest[model_id]
         assert entry.repo, model_id
         # A commit hash, so it covers the whole tree -- that is what stops a

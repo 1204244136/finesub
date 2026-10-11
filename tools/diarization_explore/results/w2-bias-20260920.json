@@ -1,0 +1,891 @@
+{
+  "hina": [
+    {
+      "episode": "hina-06",
+      "people": 6,
+      "sortformer": {
+        "in_sample": 1326.0,
+        "crossfit": 1326.0,
+        "time_block_null_2": 1224.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1097.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1149.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 916.0,
+        "crossfit": 942.0,
+        "time_block_null_2": 921.0,
+        "null_tracks_2": 32,
+        "time_block_null_3": 915.0,
+        "null_tracks_3": 48,
+        "time_block_null_4": 921.0,
+        "null_tracks_4": 64,
+        "tracks": 16
+      }
+    },
+    {
+      "episode": "hina-08",
+      "people": 6,
+      "sortformer": {
+        "in_sample": 2161.0,
+        "crossfit": 2161.0,
+        "time_block_null_2": 2102.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 2049.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1988.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1836.0,
+        "crossfit": 1843.0,
+        "time_block_null_2": 1835.0,
+        "null_tracks_2": 24,
+        "time_block_null_3": 1831.0,
+        "null_tracks_3": 36,
+        "time_block_null_4": 1886.0,
+        "null_tracks_4": 48,
+        "tracks": 12
+      }
+    },
+    {
+      "episode": "hina-13",
+      "people": 6,
+      "sortformer": {
+        "in_sample": 4158.0,
+        "crossfit": 4158.0,
+        "time_block_null_2": 4161.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 4158.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 4219.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 3858.0,
+        "crossfit": 3865.0,
+        "time_block_null_2": 3862.0,
+        "null_tracks_2": 16,
+        "time_block_null_3": 3853.0,
+        "null_tracks_3": 24,
+        "time_block_null_4": 3869.0,
+        "null_tracks_4": 32,
+        "tracks": 8
+      }
+    },
+    {
+      "episode": "hina-14",
+      "people": 6,
+      "sortformer": {
+        "in_sample": 3905.0,
+        "crossfit": 3905.0,
+        "time_block_null_2": 3906.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 3907.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 3886.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 3596.0,
+        "crossfit": 3591.0,
+        "time_block_null_2": 3595.0,
+        "null_tracks_2": 18,
+        "time_block_null_3": 3588.0,
+        "null_tracks_3": 27,
+        "time_block_null_4": 3601.0,
+        "null_tracks_4": 36,
+        "tracks": 9
+      }
+    },
+    {
+      "episode": "hina-32",
+      "people": 5,
+      "sortformer": {
+        "in_sample": 2425.0,
+        "crossfit": 2425.0,
+        "time_block_null_2": 2408.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 2414.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 2410.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 2189.0,
+        "crossfit": 2189.0,
+        "time_block_null_2": 2181.0,
+        "null_tracks_2": 14,
+        "time_block_null_3": 2216.0,
+        "null_tracks_3": 21,
+        "time_block_null_4": 2212.0,
+        "null_tracks_4": 28,
+        "tracks": 7
+      }
+    },
+    {
+      "episode": "hina-40",
+      "people": 5,
+      "sortformer": {
+        "in_sample": 5139.0,
+        "crossfit": 5139.0,
+        "time_block_null_2": 5134.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 4597.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 4421.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 4147.0,
+        "crossfit": 4152.0,
+        "time_block_null_2": 4142.0,
+        "null_tracks_2": 14,
+        "time_block_null_3": 4143.0,
+        "null_tracks_3": 21,
+        "time_block_null_4": 4138.0,
+        "null_tracks_4": 28,
+        "tracks": 7
+      }
+    },
+    {
+      "episode": "hina-63",
+      "people": 5,
+      "sortformer": {
+        "in_sample": 452.0,
+        "crossfit": 498.0,
+        "time_block_null_2": 400.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 356.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 396.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 108.0,
+        "crossfit": 108.0,
+        "time_block_null_2": 108.0,
+        "null_tracks_2": 22,
+        "time_block_null_3": 108.0,
+        "null_tracks_3": 33,
+        "time_block_null_4": 110.0,
+        "null_tracks_4": 44,
+        "tracks": 11
+      }
+    },
+    {
+      "episode": "hina-64",
+      "people": 6,
+      "sortformer": {
+        "in_sample": 243.0,
+        "crossfit": 251.0,
+        "time_block_null_2": 133.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 198.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 126.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 51.0,
+        "crossfit": 63.0,
+        "time_block_null_2": 51.0,
+        "null_tracks_2": 38,
+        "time_block_null_3": 50.0,
+        "null_tracks_3": 57,
+        "time_block_null_4": 50.0,
+        "null_tracks_4": 76,
+        "tracks": 19
+      }
+    },
+    {
+      "episode": "hina-65",
+      "people": 6,
+      "sortformer": {
+        "in_sample": 399.0,
+        "crossfit": 387.0,
+        "time_block_null_2": 250.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 206.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 192.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 62.0,
+        "crossfit": 76.0,
+        "time_block_null_2": 61.0,
+        "null_tracks_2": 22,
+        "time_block_null_3": 61.0,
+        "null_tracks_3": 33,
+        "time_block_null_4": 63.0,
+        "null_tracks_4": 44,
+        "tracks": 11
+      }
+    },
+    {
+      "episode": "hina-67",
+      "people": 5,
+      "sortformer": {
+        "in_sample": 258.0,
+        "crossfit": 308.0,
+        "time_block_null_2": 249.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 236.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 235.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 236.0,
+        "crossfit": 276.0,
+        "time_block_null_2": 235.0,
+        "null_tracks_2": 16,
+        "time_block_null_3": 219.0,
+        "null_tracks_3": 24,
+        "time_block_null_4": 219.0,
+        "null_tracks_4": 32,
+        "tracks": 8
+      }
+    },
+    {
+      "episode": "hina-68",
+      "people": 8,
+      "sortformer": {
+        "in_sample": 576.0,
+        "crossfit": 576.0,
+        "time_block_null_2": 451.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 405.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 376.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 38.0,
+        "crossfit": 42.0,
+        "time_block_null_2": 39.0,
+        "null_tracks_2": 24,
+        "time_block_null_3": 39.0,
+        "null_tracks_3": 36,
+        "time_block_null_4": 40.0,
+        "null_tracks_4": 48,
+        "tracks": 12
+      }
+    },
+    {
+      "episode": "hina-73",
+      "people": 7,
+      "sortformer": {
+        "in_sample": 437.0,
+        "crossfit": 467.0,
+        "time_block_null_2": 278.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 257.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 169.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 69.0,
+        "crossfit": 69.0,
+        "time_block_null_2": 69.0,
+        "null_tracks_2": 22,
+        "time_block_null_3": 67.0,
+        "null_tracks_3": 33,
+        "time_block_null_4": 69.0,
+        "null_tracks_4": 44,
+        "tracks": 11
+      }
+    },
+    {
+      "episode": "hina-74",
+      "people": 5,
+      "sortformer": {
+        "in_sample": 641.0,
+        "crossfit": 641.0,
+        "time_block_null_2": 642.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 639.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 616.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 397.0,
+        "crossfit": 399.0,
+        "time_block_null_2": 398.0,
+        "null_tracks_2": 36,
+        "time_block_null_3": 397.0,
+        "null_tracks_3": 54,
+        "time_block_null_4": 400.0,
+        "null_tracks_4": 72,
+        "tracks": 18
+      }
+    },
+    {
+      "episode": "hina-10",
+      "people": 4,
+      "sortformer": {
+        "in_sample": 2578.0,
+        "crossfit": 2526.0,
+        "time_block_null_2": 2222.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 2348.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 2211.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1668.0,
+        "crossfit": 1685.0,
+        "time_block_null_2": 1677.0,
+        "null_tracks_2": 46,
+        "time_block_null_3": 1644.0,
+        "null_tracks_3": 69,
+        "time_block_null_4": 1667.0,
+        "null_tracks_4": 92,
+        "tracks": 23
+      }
+    },
+    {
+      "episode": "hina-30",
+      "people": 4,
+      "sortformer": {
+        "in_sample": 2840.0,
+        "crossfit": 2840.0,
+        "time_block_null_2": 2841.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 2840.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 2845.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 2616.0,
+        "crossfit": 2611.0,
+        "time_block_null_2": 2610.0,
+        "null_tracks_2": 14,
+        "time_block_null_3": 2613.0,
+        "null_tracks_3": 21,
+        "time_block_null_4": 2602.0,
+        "null_tracks_4": 28,
+        "tracks": 7
+      }
+    },
+    {
+      "episode": "hina-37",
+      "people": 4,
+      "sortformer": {
+        "in_sample": 3950.0,
+        "crossfit": 3950.0,
+        "time_block_null_2": 3950.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 3950.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 3959.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 3916.0,
+        "crossfit": 3918.0,
+        "time_block_null_2": 3916.0,
+        "null_tracks_2": 10,
+        "time_block_null_3": 3916.0,
+        "null_tracks_3": 15,
+        "time_block_null_4": 3917.0,
+        "null_tracks_4": 20,
+        "tracks": 5
+      }
+    },
+    {
+      "episode": "hina-57",
+      "people": 4,
+      "sortformer": {
+        "in_sample": 2409.0,
+        "crossfit": 2409.0,
+        "time_block_null_2": 2412.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 2409.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 2405.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 2508.0,
+        "crossfit": 2499.0,
+        "time_block_null_2": 2503.0,
+        "null_tracks_2": 28,
+        "time_block_null_3": 2505.0,
+        "null_tracks_3": 42,
+        "time_block_null_4": 2501.0,
+        "null_tracks_4": 56,
+        "tracks": 14
+      }
+    },
+    {
+      "episode": "hina-62",
+      "people": 4,
+      "sortformer": {
+        "in_sample": 54.0,
+        "crossfit": 54.0,
+        "time_block_null_2": 55.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 55.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 56.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 49.0,
+        "crossfit": 53.0,
+        "time_block_null_2": 50.0,
+        "null_tracks_2": 16,
+        "time_block_null_3": 49.0,
+        "null_tracks_3": 24,
+        "time_block_null_4": 51.0,
+        "null_tracks_4": 32,
+        "tracks": 8
+      }
+    },
+    {
+      "episode": "hina-69",
+      "people": 4,
+      "sortformer": {
+        "in_sample": 23.0,
+        "crossfit": 23.0,
+        "time_block_null_2": 23.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 23.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 24.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 17.0,
+        "crossfit": 17.0,
+        "time_block_null_2": 17.0,
+        "null_tracks_2": 20,
+        "time_block_null_3": 18.0,
+        "null_tracks_3": 30,
+        "time_block_null_4": 18.0,
+        "null_tracks_4": 40,
+        "tracks": 10
+      }
+    }
+  ],
+  "onetonton": [
+    {
+      "episode": 1,
+      "people": 3,
+      "sortformer": {
+        "in_sample": 1392.0,
+        "crossfit": 1392.0,
+        "time_block_null_2": 1392.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1392.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1393.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1356.0,
+        "crossfit": 1356.0,
+        "time_block_null_2": 1356.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1356.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1356.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      }
+    },
+    {
+      "episode": 2,
+      "people": 3,
+      "sortformer": {
+        "in_sample": 1894.0,
+        "crossfit": 1894.0,
+        "time_block_null_2": 1894.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1885.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1880.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1768.0,
+        "crossfit": 1765.0,
+        "time_block_null_2": 1768.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1768.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1768.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      }
+    },
+    {
+      "episode": 3,
+      "people": 3,
+      "sortformer": {
+        "in_sample": 1124.0,
+        "crossfit": 1124.0,
+        "time_block_null_2": 1124.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1126.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1124.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1048.0,
+        "crossfit": 1047.0,
+        "time_block_null_2": 1048.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1050.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1048.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      }
+    },
+    {
+      "episode": 4,
+      "people": 3,
+      "sortformer": {
+        "in_sample": 1796.0,
+        "crossfit": 1796.0,
+        "time_block_null_2": 1784.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1743.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1784.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1538.0,
+        "crossfit": 1538.0,
+        "time_block_null_2": 1538.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1539.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1538.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      }
+    },
+    {
+      "episode": 5,
+      "people": 3,
+      "sortformer": {
+        "in_sample": 1524.0,
+        "crossfit": 1524.0,
+        "time_block_null_2": 1524.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1525.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1525.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1432.0,
+        "crossfit": 1432.0,
+        "time_block_null_2": 1432.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1433.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1475.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      }
+    },
+    {
+      "episode": 6,
+      "people": 3,
+      "sortformer": {
+        "in_sample": 1480.0,
+        "crossfit": 1480.0,
+        "time_block_null_2": 1480.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1491.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1496.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1461.0,
+        "crossfit": 1458.0,
+        "time_block_null_2": 1459.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1459.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1460.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      }
+    },
+    {
+      "episode": 7,
+      "people": 3,
+      "sortformer": {
+        "in_sample": 1263.0,
+        "crossfit": 1263.0,
+        "time_block_null_2": 1264.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1263.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1264.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1188.0,
+        "crossfit": 1206.0,
+        "time_block_null_2": 1184.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1192.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1184.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      }
+    },
+    {
+      "episode": 8,
+      "people": 3,
+      "sortformer": {
+        "in_sample": 1678.0,
+        "crossfit": 1678.0,
+        "time_block_null_2": 1678.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1682.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1700.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1403.0,
+        "crossfit": 1403.0,
+        "time_block_null_2": 1417.0,
+        "null_tracks_2": 10,
+        "time_block_null_3": 1435.0,
+        "null_tracks_3": 15,
+        "time_block_null_4": 1415.0,
+        "null_tracks_4": 20,
+        "tracks": 5
+      }
+    },
+    {
+      "episode": 9,
+      "people": 3,
+      "sortformer": {
+        "in_sample": 1474.0,
+        "crossfit": 1474.0,
+        "time_block_null_2": 1475.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1498.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1489.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1392.0,
+        "crossfit": 1392.0,
+        "time_block_null_2": 1393.0,
+        "null_tracks_2": 10,
+        "time_block_null_3": 1392.0,
+        "null_tracks_3": 15,
+        "time_block_null_4": 1390.0,
+        "null_tracks_4": 20,
+        "tracks": 5
+      }
+    },
+    {
+      "episode": 10,
+      "people": 3,
+      "sortformer": {
+        "in_sample": 1395.0,
+        "crossfit": 1395.0,
+        "time_block_null_2": 1395.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1390.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1390.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1343.0,
+        "crossfit": 1343.0,
+        "time_block_null_2": 1341.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1341.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1341.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      }
+    },
+    {
+      "episode": 11,
+      "people": 3,
+      "sortformer": {
+        "in_sample": 1254.0,
+        "crossfit": 1254.0,
+        "time_block_null_2": 1255.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1254.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1255.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1227.0,
+        "crossfit": 1229.0,
+        "time_block_null_2": 1228.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1227.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1233.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      }
+    },
+    {
+      "episode": 12,
+      "people": 3,
+      "sortformer": {
+        "in_sample": 1490.0,
+        "crossfit": 1490.0,
+        "time_block_null_2": 1487.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1480.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1488.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1379.0,
+        "crossfit": 1379.0,
+        "time_block_null_2": 1380.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1380.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1379.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      }
+    },
+    {
+      "episode": 13,
+      "people": 3,
+      "sortformer": {
+        "in_sample": 1483.0,
+        "crossfit": 1483.0,
+        "time_block_null_2": 1470.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1468.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1471.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1393.0,
+        "crossfit": 1400.0,
+        "time_block_null_2": 1390.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1394.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1391.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      }
+    },
+    {
+      "episode": 14,
+      "people": 3,
+      "sortformer": {
+        "in_sample": 2118.0,
+        "crossfit": 2157.0,
+        "time_block_null_2": 1758.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1633.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1678.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1420.0,
+        "crossfit": 1425.0,
+        "time_block_null_2": 1419.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1421.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1423.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      }
+    },
+    {
+      "episode": 15,
+      "people": 3,
+      "sortformer": {
+        "in_sample": 1550.0,
+        "crossfit": 1550.0,
+        "time_block_null_2": 1550.0,
+        "null_tracks_2": 8,
+        "time_block_null_3": 1551.0,
+        "null_tracks_3": 12,
+        "time_block_null_4": 1551.0,
+        "null_tracks_4": 16,
+        "tracks": 4
+      },
+      "diarizen": {
+        "in_sample": 1478.0,
+        "crossfit": 1478.0,
+        "time_block_null_2": 1478.0,
+        "null_tracks_2": 10,
+        "time_block_null_3": 1479.0,
+        "null_tracks_3": 15,
+        "time_block_null_4": 1479.0,
+        "null_tracks_4": 20,
+        "tracks": 5
+      }
+    }
+  ],
+  "script": "3306bce884f1d45a17aefd96ad02e100a79b63a8828a079c265ec33baf4ee4a3"
+}

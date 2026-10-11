@@ -1,0 +1,86 @@
+[
+ {
+  "ident": "hina-10",
+  "arm": "noise",
+  "label_change_pct": 1.486,
+  "speakers_clean": 23,
+  "speakers_nudged": 24
+ },
+ {
+  "ident": "hina-13",
+  "arm": "noise",
+  "label_change_pct": 1.755485893416928,
+  "speakers_clean": 8,
+  "speakers_nudged": 9
+ },
+ {
+  "ident": "hina-15",
+  "arm": "noise",
+  "label_change_pct": 1.6981132075471699,
+  "speakers_clean": 8,
+  "speakers_nudged": 9
+ },
+ {
+  "ident": "hina-17",
+  "arm": "noise",
+  "label_change_pct": 3.4722222222222223,
+  "speakers_clean": 9,
+  "speakers_nudged": 9
+ },
+ {
+  "ident": "hina-19",
+  "arm": "noise",
+  "label_change_pct": 0.7945516458569807,
+  "speakers_clean": 12,
+  "speakers_nudged": 12
+ },
+ {
+  "ident": "hina-20",
+  "arm": "noise",
+  "label_change_pct": 1.9144144144144144,
+  "speakers_clean": 6,
+  "speakers_nudged": 6
+ },
+ {
+  "ident": "hina-23",
+  "arm": "noise",
+  "label_change_pct": 0.5044136191677175,
+  "speakers_clean": 10,
+  "speakers_nudged": 10
+ },
+ {
+  "ident": "hina-25",
+  "arm": "noise",
+  "label_change_pct": 1.6110471806674338,
+  "speakers_clean": 6,
+  "speakers_nudged": 6
+ },
+ {
+  "ident": "hina-26",
+  "arm": "noise",
+  "label_change_pct": 2.4006622516556293,
+  "speakers_clean": 13,
+  "speakers_nudged": 13
+ },
+ {
+  "ident": "hina-27",
+  "arm": "noise",
+  "label_change_pct": 0.24600246002460024,
+  "speakers_clean": 5,
+  "speakers_nudged": 5
+ },
+ {
+  "ident": "hina-31",
+  "arm": "noise",
+  "label_change_pct": 1.5964240102171137,
+  "speakers_clean": 7,
+  "speakers_nudged": 7
+ },
+ {
+  "ident": "hina-32",
+  "arm": "noise",
+  "label_change_pct": 4.381443298969073,
+  "speakers_clean": 7,
+  "speakers_nudged": 6
+ }
+]

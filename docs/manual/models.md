@@ -28,6 +28,7 @@
 > **1.4–1.6 倍**，识别结果差异处于噪声量级。默认关闭，因为在默认模型上收益仅 1.06 倍，
 > 不值得开启。代价与显卡档位相关：`standard` 档上第二模型校验会被移至 CPU（显存无法同时容纳
 > 两个模型）；`standard_large_vram` 起（12GB 显卡自动选中）显存充足，校验照常在 GPU 运行。
+> ⚠ AMD 卡上编译加速默认不开，档位不改变这一点。
 
 ### `large-v3-turbo`：默认模型，整条管线按它标定
 
@@ -114,14 +115,30 @@ bfloat16 权重，作者称在其测试集上 CER 有竞争力。
 单声道 `.ogg` 或无损 `.flac`），这属于输出格式而非模型本身。Qwen 校验可整体关闭
 （`--qwen-verify off`）；默认值 `auto` 表示依赖齐全时自动启用。
 
+## 2b. 说话人分离用的模型（`--diarize`，默认关）
+
+`--diarize` 默认是关的，所以**不开就一个也不会下载**。开了之后默认用 `nemotron3`，第一次用时自动下载
+（约 450 MB）。
+
+| 后端 | 模型 | 获取 | 许可 |
+| --- | --- | --- | --- |
+| `nemotron3`（**默认**） | NVIDIA Nemotron-3-Diarization + WeSpeaker ResNet34 声纹与 PLDA | 自动下载 | 可商用（OpenMDW-1.1；声纹与 PLDA 为 CC BY 4.0，要署名） |
+| `diarizen`（研究用） | DiariZen `wavlm-large-s80-md-v2` + 同一套声纹，转成 TorchScript | 自动下载 | ⚠ **CC BY-NC 4.0：仅限非商业使用** |
+| `sortformer`（研究用） | NVIDIA Sortformer v2.1 | 用 `tools/sortformer_export/` 自行导出 | NVIDIA Open Model License |
+
+各组件的来源、许可与署名、GPU 与 CPU 的速度差别都在[说话人分离](diarization.md)。
+
 ## 3. LLM（纠错与翻译）
 
-**该层默认处于 dry-run 模式**，仅生成计划与 prompt；只有 `--execute` 才会实际消耗配额。
+管线（`finesub`）跑到 `--stage translated-srt` / `final-srt` 时直接调模型、消耗配额。单独用
+`python -m finesub.llm.correction_translation` 跑这一层时**默认是 dry-run**，仅生成计划与 prompt，加 `--execute` 才调模型。dry-run 不调模型，
+所以要靠模型做的选择（例如默认的 `--style auto` 选哪套风格）不在它生成的 prompt 里，见
+[知识库手册的风格条目一节](knowledge.md#风格条目style记住一套翻译习惯)。
 哪个任务落到哪个模型由「预设 × 任务组 × 难度」决定，完整机制见
 [`model-routing.md`](model-routing.md)，本节只回答「各家好不好用」。
 
-出厂提供三个预设：`default`（仅 Gemini API）、`agy-hybrid`（免费 API 优先，订阅作为后备）、
-`agy`（仅使用订阅）。
+出厂提供五个预设：`default`（仅 Gemini API）、`agy-hybrid`（免费 API 优先，订阅作为后备）、
+`agy`（仅使用订阅），以及长输入快速粗纠用的 `agy-fast`、`fast`。
 
 ### 各后端的使用体验
 
@@ -130,16 +147,16 @@ bfloat16 权重，作者称在其测试集上 CER 有竞争力。
 | 后端 | 多模态 | 印象 |
 | --- | --- | --- |
 | **Gemini（API 或 agy）的 full Flash** | ✅ 音频/视频 | 新的 Flash 档（3.8 / 3.7）**质量足以胜任**，且是唯一可直接处理音频的档位，是默认预设与两个 agy 预设的主力 |
-| **3.5 Flash Lite** | ✅ | **能力偏弱，不适合纠错**；仅绑定于 `intermediate` / `efficiency` 等已声明的降档位，以及查询轮、搜索裁判等轻量任务 |
-| **Claude Code**（Opus 5 / Sonnet 5 / Haiku 4.5） | ❌ 纯文本 | 质量尚可，但 **token 效率偏低**——相同的工作需要更多 token |
-| **Codex**（GPT-5.6 Luna / Terra / Sol） | ❌ 纯文本 | **尚未实测**。catalog 中已有对应条目、可手动绑定，但其纠错质量未经验证；Terra 的 `quality_score`（82）仅为**介于 Sonnet 5 与 Opus 5 之间**的估算值，无实测依据 |
-| **DeepSeek（dsh）** v4-flash / v4-pro | ❌ 纯文本 | **尚未详细测试**，且**疑似 token 效率偏低**；此外它仅支持工具协议档位，整窗任务无法通过命令行传入 |
+| **3.5 Flash Lite** | ✅ | **能力偏弱，不适合纠错**；仅绑定于 `intermediate` / `efficiency` 等已声明的降档位 |
+| **Claude Code**（Opus / Sonnet / Haiku 的最新版）与 **agy 的 Claude**（Sonnet 5.5 / Opus 5.5） | ❌ 纯文本 | 质量尚可，但 **token 效率偏低**——相同的工作需要更多 token。这是在 Claude Code 上的观察，agy 上尚未实测 |
+| **Codex**（GPT-6 Luna / GPT-6.1 Sol） | ❌ 纯文本 | **尚未实测**。catalog 中已有对应条目、可手动绑定，但其纠错质量未经验证 |
+| **DeepSeek（dsh）** v4.1-flash / v4-pro | ❌ 纯文本 | **尚未详细测试**，且**疑似 token 效率偏低**；此外它仅支持工具协议档位，整窗任务无法通过命令行传入 |
 
 两条会直接影响选择的结构性事实：
 
 - **仅 Gemini 系列可处理音视频。** 纯文本后端遇到带剪辑的窗口时会在能力过滤阶段被跳过；如需
-  纯文本强模型参与，应使用 `--llm-correction-media text`。
-- **agy 的两个预设中，Opus 4.6 有意排在 Gemini 之前**：文字窗口优先分配给 Opus，带媒体的窗口会
+  纯文本强模型参与，应使用 `--llm-media text`。
+- **agy 的几个预设中，Sonnet 5.5 有意排在 Gemini 之前**：文字窗口优先分配给 Sonnet，带媒体的窗口会
   在能力过滤时自动跳过它、落到 agy 前置的 Gemini。一份名单同时表达两种意图。
 
 ### 免费档的两个代价

@@ -307,6 +307,24 @@ class TestAnchorClamps:
         assert out[0]["words"][0]["start"] == 1.1
         assert out[0]["start"] == 1.1
 
+    def test_clamp_keeps_the_segment_over_a_word_left_behind(self) -> None:
+        # Real shape (BV15R8i6TEnS seg 138): a disfluency `merge` leaves a
+        # zero-length remnant tied at the same start as the word that inherits
+        # the block's span. Clamping the second word used to move the segment
+        # start with it -- `_clamp_word` compares the segment start against the
+        # OLD start of the one word it moves -- stranding the remnant outside
+        # the segment. Both words must stay inside.
+        segs = [segment([word("もう", 2.0, 2.0), word("バ", 2.0, 3.0)])]
+
+        out, stats = self.clamp(segs, [(0.0, 5.0)], hints=[2.5])
+
+        assert stats == {"clamp_hint": 1}
+        assert out[0]["words"][1]["start"] == 2.5  # the clamp still happened
+        assert out[0]["words"][0]["start"] == 2.0  # the remnant stayed put
+        assert out[0]["start"] == 2.0
+        for moved in out[0]["words"]:
+            assert out[0]["start"] <= moved["start"]
+
     def test_word_already_past_lead_is_untouched(self) -> None:
         segs = [segment([word("あ", 1.2, 2.0)])]
         out, stats = self.clamp(segs, [(1.0, 3.0)])
